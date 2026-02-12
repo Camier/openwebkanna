@@ -63,6 +63,40 @@ docker compose ps
 ./check-cliproxyapi.sh
 ```
 
+## OpenWebUI baseline enhancements (as of 2026-02-12)
+
+Use this baseline workflow before enabling advanced features:
+
+1. Deploy baseline stack:
+```bash
+./deploy.sh --no-logs
+```
+
+2. Validate runtime baseline:
+```bash
+./status.sh
+```
+
+3. Run fast baseline RAG checks:
+```bash
+./test-rag.sh --baseline
+```
+
+4. Run fast baseline API checks:
+```bash
+./test-api.sh --baseline
+```
+
+`--baseline` keeps tests reproducible and quick by validating health, models, retrieval, and web-search wiring without running heavier full regression flows.
+
+If local SearXNG is temporarily unavailable, baseline checks continue by default.
+Host-side baseline probes automatically try `127.0.0.1` when `SEARXNG_QUERY_URL` uses `host.docker.internal`.
+To enforce strict web-search readiness, run:
+
+```bash
+BASELINE_REQUIRE_WEB_SEARCH=true ./test-rag.sh --baseline
+```
+
 ## OAuth setup flow (manual)
 
 If you already completed OAuth locally, keep using the existing auth state under `cliproxyapi/auth/`.
@@ -124,11 +158,13 @@ This verifies:
 - API coverage:
 ```bash
 ./test-api.sh
+./test-api.sh --baseline
 ```
 
 - RAG flow:
 ```bash
 ./test-rag.sh
+./test-rag.sh --baseline
 ```
 
 - OAuth alias regression:
@@ -151,8 +187,9 @@ This verifies:
 
 ## Key files
 
-- `docker-compose.yml`: OpenWebUI + CLIProxyAPI + SearXNG services
+- `docker-compose.yml`: OpenWebUI + CLIProxyAPI services (SearXNG is host-local)
 - `.env.example`: canonical configuration template
+- `OPENWEBUI_ADVANCED_FEATURES_PLAYBOOK.md`: phased advanced-feature rollout and hardening guide
 - `cliproxyapi/config.yaml`: CLIProxyAPI provider and alias mapping
 - `deploy.sh`: orchestrated startup logic with health gates
 - `test-openwebui-cliproxy-routing.sh`: OpenWebUI-to-CLIProxyAPI E2E validation

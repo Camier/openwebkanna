@@ -7,6 +7,54 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+load_env_defaults() {
+    local env_file=""
+    local line=""
+    local key=""
+    local value=""
+
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        env_file="$SCRIPT_DIR/.env"
+    elif [ -f ".env" ]; then
+        env_file=".env"
+    fi
+
+    if [ -z "$env_file" ]; then
+        return 0
+    fi
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        [ -z "$line" ] && continue
+        [[ "$line" = \#* ]] && continue
+        [[ "$line" != *=* ]] && continue
+
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="$(printf "%s" "$key" | tr -d '[:space:]')"
+
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        if [ -n "${!key+x}" ]; then
+            continue
+        fi
+
+        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+
+        printf -v "$key" "%s" "$value"
+        export "$key"
+    done < "$env_file"
+}
+
+load_env_defaults
+cd "$SCRIPT_DIR"
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -71,6 +119,10 @@ is_true() {
     [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
 }
 
+cliproxyapi_quiet_healthy() {
+    [ "$CLIPROXYAPI_ENABLED" != "false" ] && [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1
+}
+
 check_vllm() {
     print_section "vLLM Server"
 
@@ -79,8 +131,8 @@ check_vllm() {
         local pid=$(cat .vllm_pid)
         if kill -0 "$pid" 2>/dev/null; then
             # Check if health endpoint is responding
-            if curl -s -f "$VLLM_HEALTH_URL" &> /dev/null; then
-                local model_info=$(curl -s "$VLLM_HEALTH_URL" 2>/dev/null || echo "{}")
+            if curl -sS -f -m 5 "$VLLM_HEALTH_URL" &> /dev/null; then
+                local model_info=$(curl -sS -m 5 "$VLLM_HEALTH_URL" 2>/dev/null || echo "{}")
                 print_status "vLLM" "running" "(PID: $pid)"
                 print_info "Port: $VLLM_PORT"
                 print_info "Health: $VLLM_HEALTH_URL"
@@ -249,8 +301,8 @@ check_openwebui() {
                 # Try to access the web interface
                 local openwebui_url="http://localhost:${OPENWEBUI_PORT}"
 
-                if curl -s -f "$openwebui_url" &> /dev/null || \
-                   curl -s -f "${openwebui_url}/api/health" &> /dev/null; then
+                if curl -sS -f -m 5 "$openwebui_url" &> /dev/null || \
+                   curl -sS -f -m 5 "${openwebui_url}/api/health" &> /dev/null; then
                     print_status "OpenWebUI" "running" "(accessible)"
                     print_info "URL: http://localhost:${OPENWEBUI_PORT}"
 
@@ -326,6 +378,52 @@ check_cliproxyapi() {
     return 1
 }
 
+check_baseline_profile() {
+    print_section "OpenWebUI Baseline Profile"
+
+    print_info "RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-<unset>}"
+    print_info "RAG_TOP_K=${RAG_TOP_K:-<unset>} | TOP_K=${TOP_K:-<unset>}"
+    print_info "CHUNK_SIZE=${CHUNK_SIZE:-<unset>} | CHUNK_OVERLAP=${CHUNK_OVERLAP:-<unset>}"
+    print_info "VECTOR_DB=${VECTOR_DB:-<unset>}"
+
+    local web_search_enabled=false
+    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}" || is_true "${ENABLE_RAG_WEB_SEARCH:-false}"; then
+        web_search_enabled=true
+    fi
+
+    if [ "$web_search_enabled" = true ]; then
+        print_info "Web search: enabled"
+        print_info "SEARXNG_QUERY_URL=${SEARXNG_QUERY_URL:-<unset>}"
+
+        if [ -n "${SEARXNG_QUERY_URL:-}" ]; then
+            local probe_url="${SEARXNG_QUERY_URL//\{query\}/status%20probe}"
+            local host_probe_url="$probe_url"
+            local probe_response
+
+            if echo "$host_probe_url" | grep -q "host.docker.internal"; then
+                host_probe_url="${host_probe_url//host.docker.internal/127.0.0.1}"
+            fi
+
+            probe_response=$(curl -sS -m 12 "$host_probe_url" 2>/dev/null || true)
+
+            if [ -z "$probe_response" ] && [ "$host_probe_url" != "$probe_url" ]; then
+                probe_response=$(curl -sS -m 12 "$probe_url" 2>/dev/null || true)
+            fi
+
+            if [ -n "$probe_response" ] && echo "$probe_response" | grep -q "results"; then
+                print_status "SearXNG (host-local)" "running" "(reachable on configured URL)"
+            else
+                print_status "SearXNG (host-local)" "warning" "(configured but probe failed)"
+                print_info "Ensure local SearXNG is listening on port 8888"
+            fi
+        else
+            print_status "SearXNG (host-local)" "warning" "(web search enabled but URL is unset)"
+        fi
+    else
+        print_info "Web search: disabled"
+    fi
+}
+
 check_resources() {
     print_section "System Resources"
 
@@ -361,10 +459,13 @@ print_summary() {
     echo -e "${CYAN}${BOLD}════════════════════════════════════════════════════════════${NC}\n"
 
     local all_good=true
+    local cliproxy_ready=false
 
     # Check vLLM
-    if [ -f .vllm_pid ] && kill -0 "$(cat .vllm_pid)" 2>/dev/null && curl -s -f "$VLLM_HEALTH_URL" &> /dev/null; then
+    if [ -f .vllm_pid ] && kill -0 "$(cat .vllm_pid)" 2>/dev/null && curl -sS -f -m 5 "$VLLM_HEALTH_URL" &> /dev/null; then
         echo -e "  ${GREEN}●${NC} vLLM: ${GREEN}Operational${NC}"
+    elif cliproxyapi_quiet_healthy; then
+        echo -e "  ${CYAN}◌${NC} vLLM: ${CYAN}Not running (optional)${NC}"
     else
         echo -e "  ${RED}○${NC} vLLM: ${RED}Not operational${NC}"
         all_good=false
@@ -379,7 +480,7 @@ print_summary() {
     fi
 
     # Check OpenWebUI
-    if curl -s -f "http://localhost:${OPENWEBUI_PORT}" &> /dev/null 2>&1; then
+    if curl -sS -f -m 5 "http://localhost:${OPENWEBUI_PORT}" &> /dev/null 2>&1; then
         echo -e "  ${GREEN}●${NC} OpenWebUI: ${GREEN}Accessible${NC}"
     else
         echo -e "  ${RED}○${NC} OpenWebUI: ${RED}Not accessible${NC}"
@@ -390,8 +491,9 @@ print_summary() {
     if [ "$CLIPROXYAPI_ENABLED" = "false" ]; then
         echo -e "  ${RED}○${NC} CLIProxyAPI: ${RED}Disabled (not allowed)${NC}"
         all_good=false
-    elif [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
+    elif cliproxyapi_quiet_healthy; then
         echo -e "  ${GREEN}●${NC} CLIProxyAPI: ${GREEN}Operational${NC}"
+        cliproxy_ready=true
     else
         echo -e "  ${RED}○${NC} CLIProxyAPI: ${RED}Not operational${NC}"
         all_good=false
@@ -402,6 +504,9 @@ print_summary() {
     if [ "$all_good" = true ]; then
         echo -e "  ${GREEN}${BOLD}✓ All systems operational!${NC}"
         echo -e "  ${CYAN}Access OpenWebUI at: http://localhost:${OPENWEBUI_PORT}${NC}"
+        if [ "$cliproxy_ready" = true ]; then
+            echo -e "  ${CYAN}Primary upstream: CLIProxyAPI (vLLM optional)${NC}"
+        fi
     else
         echo -e "  ${YELLOW}${BOLD}⚠ Some services are not running properly${NC}"
         echo -e "  ${YELLOW}Run ./deploy.sh to start all services${NC}"
@@ -454,12 +559,13 @@ main() {
             print_header
 
             if [ "$QUIET_MODE" = false ]; then
-                check_vllm
-                check_docker
-                check_docker_compose
-                check_openwebui
-                check_cliproxyapi
-                check_resources
+                check_vllm || true
+                check_docker || true
+                check_docker_compose || true
+                check_openwebui || true
+                check_cliproxyapi || true
+                check_baseline_profile || true
+                check_resources || true
             fi
 
             print_summary
@@ -469,12 +575,13 @@ main() {
         done
     else
         if [ "$QUIET_MODE" = false ]; then
-            check_vllm
-            check_docker
-            check_docker_compose
-            check_openwebui
-            check_cliproxyapi
-            check_resources
+            check_vllm || true
+            check_docker || true
+            check_docker_compose || true
+            check_openwebui || true
+            check_cliproxyapi || true
+            check_baseline_profile || true
+            check_resources || true
         fi
 
         print_summary

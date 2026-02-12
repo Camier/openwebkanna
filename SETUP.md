@@ -53,6 +53,13 @@ docker compose ps
 ./test-openwebui-cliproxy-routing.sh
 ```
 
+Baseline validation (fast checks):
+
+```bash
+./test-rag.sh --baseline
+./test-api.sh --baseline
+```
+
 ## 5. Validate OAuth aliases
 
 ```bash

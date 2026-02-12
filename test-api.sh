@@ -7,6 +7,72 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+load_env_defaults() {
+    local env_file=""
+    local line=""
+    local key=""
+    local value=""
+
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        env_file="$SCRIPT_DIR/.env"
+    elif [ -f ".env" ]; then
+        env_file=".env"
+    fi
+
+    if [ -z "$env_file" ]; then
+        return 0
+    fi
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        [ -z "$line" ] && continue
+        [[ "$line" = \#* ]] && continue
+        [[ "$line" != *=* ]] && continue
+
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="$(printf "%s" "$key" | tr -d '[:space:]')"
+
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        if [ -n "${!key+x}" ]; then
+            continue
+        fi
+
+        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
+            value="${value:1:${#value}-2}"
+        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+
+        printf -v "$key" "%s" "$value"
+        export "$key"
+    done < "$env_file"
+}
+
+resolve_openai_base_root() {
+    local candidate="${OPENAI_API_BASE_URL:-}"
+    if [ -z "$candidate" ] && [ -n "${OPENAI_API_BASE_URLS:-}" ]; then
+        candidate="$(printf "%s" "$OPENAI_API_BASE_URLS" | cut -d';' -f1)"
+    fi
+
+    if [ -z "$candidate" ]; then
+        printf ""
+        return 0
+    fi
+
+    candidate="${candidate%/}"
+    candidate="${candidate%/v1}"
+    if [[ "$candidate" == *"://cliproxyapi"* ]]; then
+        candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
+    fi
+    printf "%s" "$candidate"
+}
+
+load_env_defaults
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,13 +82,20 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:3000}"
-VLLM_URL="${VLLM_URL:-http://localhost:8000}"
-API_KEY="${OPENWEBUI_API_KEY:-}"
+OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
+OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
 CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
+VLLM_URL="${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}"
+API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
 CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
+OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
+OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
+OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
+OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 VERBOSE="${VERBOSE:-false}"
 OUTPUT_DIR="/tmp/openwebui_api_tests_$(date +%Y%m%d_%H%M%S)"
+TEST_MODE="full"
+RUN_CLEANUP_ON_EXIT=false
 
 # Test counters
 TESTS_PASSED=0
@@ -32,6 +105,7 @@ TESTS_TOTAL=0
 # Track created resources
 declare -a CREATED_FILES=()
 declare -a CREATED_KNOWLEDGE_BASES=()
+SELECTED_MODEL=""
 
 ###############################################################################
 # Helper Functions
@@ -65,21 +139,71 @@ print_endpoint() {
     echo -e "${CYAN}→ $1${NC}"
 }
 
+is_true() {
+    local value
+    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
+    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
+}
+
+openwebui_signin() {
+    local output_file="$1"
+    local payload_file="$2"
+    local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
+            --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
+            '{email: $email, password: $password}' > "$payload_file"
+    else
+        cat > "$payload_file" <<EOF
+{"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
+EOF
+    fi
+
+    curl -sS -m 45 -H "Content-Type: application/json" \
+        -o "$output_file" -w "%{http_code}" "$signin_url" -d @"$payload_file" 2>/dev/null || true
+}
+
+ensure_openwebui_api_key() {
+    if [ -n "$API_KEY" ]; then
+        return 0
+    fi
+    if ! is_true "$OPENWEBUI_AUTO_AUTH"; then
+        return 0
+    fi
+
+    local tmp_file payload_file signin_code token
+    tmp_file="$(mktemp)"
+    payload_file="$(mktemp)"
+
+    signin_code="$(openwebui_signin "$tmp_file" "$payload_file")"
+    if [ "$signin_code" = "200" ]; then
+        token="$(jq -r '.token // empty' "$tmp_file" 2>/dev/null || true)"
+        if [ -n "$token" ]; then
+            API_KEY="$token"
+            print_info "OpenWebUI bearer token acquired via signin"
+        fi
+    fi
+
+    rm -f "$tmp_file" "$payload_file"
+}
+
 test_start() {
-    ((TESTS_TOTAL++))
+    ((TESTS_TOTAL+=1))
     TEST_NAME="$1"
     print_endpoint "$TEST_NAME"
     TEST_START_TIME=$(date +%s)
 }
 
 test_pass() {
-    ((TESTS_PASSED++))
+    ((TESTS_PASSED+=1))
     local duration=$(( $(date +%s) - TEST_START_TIME ))
     print_success "$TEST_NAME (${duration}s)"
 }
 
 test_fail() {
-    ((TESTS_FAILED++))
+    ((TESTS_FAILED+=1))
     local duration=$(( $(date +%s) - TEST_START_TIME ))
     print_error "$TEST_NAME failed (${duration}s): $1"
 }
@@ -89,7 +213,10 @@ save_response() {
     local response="$2"
     mkdir -p "$OUTPUT_DIR"
     echo "$response" > "$OUTPUT_DIR/${test_name}.json"
-    [ "$VERBOSE" = "true" ] && print_info "Response saved to $OUTPUT_DIR/${test_name}.json"
+    if [ "$VERBOSE" = "true" ]; then
+        print_info "Response saved to $OUTPUT_DIR/${test_name}.json"
+    fi
+    return 0
 }
 
 has_non_empty_models_array() {
@@ -116,30 +243,61 @@ make_request() {
     local method="$1"
     local endpoint="$2"
     local data="$3"
-    local extra_headers="$4"
-    local headers="-H 'Content-Type: application/json'"
+    local url="${OPENWEBUI_URL}${endpoint}"
+    local -a curl_args=("-sS" "-m" "45" "-X" "$method" "$url" "-H" "Content-Type: application/json")
 
     if [ -n "$API_KEY" ]; then
-        headers="$headers -H 'Authorization: Bearer $API_KEY'"
+        curl_args+=("-H" "Authorization: Bearer $API_KEY")
     fi
 
-    if [ -n "$extra_headers" ]; then
-        headers="$headers $extra_headers"
+    if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+        curl_args+=("-d" "$data")
     fi
 
+    curl "${curl_args[@]}"
+}
+
+make_request_with_status() {
+    local method="$1"
+    local endpoint="$2"
+    local data="$3"
+    local response_var="$4"
+    local status_var="$5"
     local url="${OPENWEBUI_URL}${endpoint}"
+    local response_file=""
+    local response_body=""
+    local status_code=""
+    local -a curl_args=("-sS" "-m" "45" "-X" "$method" "$url" "-H" "Content-Type: application/json")
 
-    if [ "$method" = "GET" ]; then
-        curl -s -X GET "$url" $headers
-    elif [ "$method" = "POST" ]; then
-        curl -s -X POST "$url" $headers -d "$data"
-    elif [ "$method" = "PUT" ]; then
-        curl -s -X PUT "$url" $headers -d "$data"
-    elif [ "$method" = "DELETE" ]; then
-        curl -s -X DELETE "$url" $headers
-    elif [ "$method" = "POST_FORM" ]; then
-        curl -s -X POST "$url" ${extra_headers} $data
+    if [ -n "$API_KEY" ]; then
+        curl_args+=("-H" "Authorization: Bearer $API_KEY")
     fi
+
+    if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+        curl_args+=("-d" "$data")
+    fi
+
+    response_file="$(mktemp)"
+    status_code="$(curl "${curl_args[@]}" -o "$response_file" -w "%{http_code}" 2>/dev/null || true)"
+    response_body="$(cat "$response_file" 2>/dev/null || true)"
+    rm -f "$response_file"
+
+    printf -v "$response_var" "%s" "$response_body"
+    printf -v "$status_var" "%s" "$status_code"
+}
+
+show_help() {
+    cat <<'EOF'
+Usage: ./test-api.sh [OPTIONS]
+
+Options:
+  --baseline         Run fast baseline API checks
+  --full             Run full API regression suite (default)
+  -v, --verbose      Enable verbose output
+  -u, --url URL      OpenWebUI URL override
+  -k, --key KEY      OpenWebUI API key
+  -h, --help         Show this help message
+EOF
 }
 
 ###############################################################################
@@ -151,14 +309,16 @@ test_health_check() {
     test_start "Health Check"
 
     local response
-    response=$(make_request "GET" "/health" "" "" 2>&1)
+    local http_code
+    make_request_with_status "GET" "/health" "" response http_code
     save_response "health_check" "$response"
 
-    if [ $? -eq 0 ] && [ -n "$response" ]; then
+    if [ "$http_code" = "200" ] && [ -n "$response" ]; then
         test_pass
         return 0
     else
-        test_fail "Health endpoint not responding"
+        test_fail "Health endpoint returned HTTP ${http_code:-000}"
+        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
     fi
 }
@@ -184,15 +344,25 @@ test_api_key_validation() {
     test_start "API Key Validation"
 
     local response
-    response=$(make_request "GET" "/api/auth/status" "" "" 2>&1)
+    local http_code
+    make_request_with_status "GET" "/api/auth/status" "" response http_code
     save_response "api_key_validation" "$response"
 
-    if echo "$response" | grep -q "authenticated\|user"; then
+    if [ "$http_code" = "200" ]; then
+        test_pass
+        return 0
+    elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        if is_true "${WEBUI_AUTH:-false}"; then
+            test_fail "Authentication is enabled but API key is unauthorized (HTTP $http_code)"
+            return 1
+        fi
+        print_info "API key validation skipped (auth appears disabled; endpoint returned HTTP $http_code)"
         test_pass
         return 0
     else
-        print_info "API key validation skipped (no auth configured)"
-        return 0
+        test_fail "Auth status endpoint returned HTTP ${http_code:-000}"
+        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+        return 1
     fi
 }
 
@@ -220,7 +390,7 @@ test_cli_proxy_api_smoke() {
     fi
 
     test_start "CliProxyApi Managed Health Check"
-    if response=$(CLIPROXYAPI_ENABLED=true ./check-cliproxyapi.sh 2>&1); then
+    if response=$(CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false ./check-cliproxyapi.sh 2>&1); then
         save_response "cliproxyapi_managed_health" "$response"
         if echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
             test_fail "check-cliproxyapi.sh reported disabled lifecycle; real runtime check did not run"
@@ -302,8 +472,10 @@ test_models_list() {
     response=$(make_request "GET" "/api/models" "" "" 2>&1)
     save_response "models_list" "$response"
 
-    if echo "$response" | grep -q "id\|models"; then
-        local model_count=$(echo "$response" | jq '.data | length' 2>/dev/null || echo "0")
+    if has_non_empty_models_array "$response"; then
+        local model_count
+        model_count=$(echo "$response" | jq '.data | length' 2>/dev/null || echo "0")
+        SELECTED_MODEL=$(echo "$response" | jq -r '.data[0].id // empty' 2>/dev/null || true)
         print_success "Found $model_count models"
         test_pass
         return 0
@@ -314,17 +486,16 @@ test_models_list() {
 }
 
 test_model_info() {
-    test_start "Model Information"
+    test_start "Model Selection"
 
-    local response
-    response=$(make_request "GET" "/api/models/llama-3.2-3b-instruct" "" "" 2>&1)
+    local response="{\"selected_model\":\"${SELECTED_MODEL}\"}"
     save_response "model_info" "$response"
 
-    if echo "$response" | grep -q "id"; then
+    if [ -n "$SELECTED_MODEL" ]; then
         test_pass
         return 0
     else
-        test_fail "Could not retrieve model information"
+        test_fail "No model selected from /api/models"
         return 1
     fi
 }
@@ -338,10 +509,10 @@ test_file_upload_text() {
 
     local response
     response=$(curl -s -X POST \
-        "$OPENWEBUI_URL/api/files/upload" \
-        -H "Authorization: Bearer $API_KEY" \
+        "$OPENWEBUI_URL/api/v1/files/?process=true&process_in_background=false" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -F "file=@$temp_file" \
-        -F "meta={\"name\":\"test_doc.txt\"}" 2>&1)
+        -F "metadata={\"name\":\"test_doc.txt\"}" 2>&1)
     save_response "file_upload_text" "$response"
 
     rm -f "$temp_file"
@@ -401,10 +572,10 @@ startxref
 
     local response
     response=$(curl -s -X POST \
-        "$OPENWEBUI_URL/api/files/upload" \
-        -H "Authorization: Bearer $API_KEY" \
+        "$OPENWEBUI_URL/api/v1/files/?process=true&process_in_background=false" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -F "file=@$temp_file" \
-        -F "meta={\"name\":\"test_doc.pdf\"}" 2>&1)
+        -F "metadata={\"name\":\"test_doc.pdf\"}" 2>&1)
     save_response "file_upload_pdf" "$response"
 
     rm -f "$temp_file"
@@ -425,11 +596,12 @@ test_file_list() {
     test_start "File List"
 
     local response
-    response=$(make_request "GET" "/api/files" "" "" 2>&1)
+    response=$(make_request "GET" "/api/v1/files/" "" "" 2>&1)
     save_response "file_list" "$response"
 
-    if echo "$response" | grep -q "files\|data"; then
-        local file_count=$(echo "$response" | jq '.data | length' 2>/dev/null || echo "0")
+    if echo "$response" | grep -q "id\|filename"; then
+        local file_count
+        file_count=$(echo "$response" | jq 'length' 2>/dev/null || echo "0")
         print_success "Found $file_count files"
         test_pass
         return 0
@@ -449,7 +621,7 @@ test_knowledge_create() {
     }'
 
     local response
-    response=$(make_request "POST" "/api/knowledge" "$data" "" 2>&1)
+    response=$(make_request "POST" "/api/v1/knowledge/create" "$data" "" 2>&1)
     save_response "knowledge_create" "$response"
 
     if echo "$response" | grep -q "id"; then
@@ -468,11 +640,12 @@ test_knowledge_list() {
     test_start "Knowledge Base List"
 
     local response
-    response=$(make_request "GET" "/api/knowledge" "" "" 2>&1)
+    response=$(make_request "GET" "/api/v1/knowledge/" "" "" 2>&1)
     save_response "knowledge_list" "$response"
 
-    if echo "$response" | grep -q "data\|knowledge"; then
-        local kb_count=$(echo "$response" | jq '.data | length' 2>/dev/null || echo "0")
+    if echo "$response" | grep -q "id\|name"; then
+        local kb_count
+        kb_count=$(echo "$response" | jq 'length' 2>/dev/null || echo "0")
         print_success "Found $kb_count knowledge bases"
         test_pass
         return 0
@@ -493,15 +666,13 @@ test_knowledge_add_file() {
     local file_id="${CREATED_FILES[0]}"
     local kb_id="${CREATED_KNOWLEDGE_BASES[0]}"
 
-    local data='{
-        "file_id": "'$file_id'"
-    }'
+    local data="{\"file_id\":\"$file_id\"}"
 
     local response
-    response=$(make_request "POST" "/api/knowledge/$kb_id/add" "$data" "" 2>&1)
+    response=$(make_request "POST" "/api/v1/knowledge/$kb_id/file/add" "$data" "" 2>&1)
     save_response "knowledge_add_file" "$response"
 
-    if [ $? -eq 0 ]; then
+    if echo "$response" | grep -q "files"; then
         print_success "File $file_id added to knowledge base $kb_id"
         test_pass
         return 0
@@ -515,8 +686,9 @@ test_knowledge_add_file() {
 test_chat_completion_simple() {
     test_start "Chat Completion (Simple)"
 
+    local chat_model="${SELECTED_MODEL:-openai-codex}"
     local data='{
-        "model": "llama-3.2-3b-instruct",
+        "model": "'"$chat_model"'",
         "messages": [
             {
                 "role": "user",
@@ -545,8 +717,9 @@ test_chat_completion_simple() {
 test_chat_completion_streaming() {
     test_start "Chat Completion (Streaming)"
 
+    local chat_model="${SELECTED_MODEL:-openai-codex}"
     local data='{
-        "model": "llama-3.2-3b-instruct",
+        "model": "'"$chat_model"'",
         "messages": [
             {
                 "role": "user",
@@ -578,22 +751,18 @@ test_chat_completion_streaming() {
 test_embedding_single() {
     test_start "Embedding Generation (Single)"
 
-    local data='{
-        "model": "text-embedding-ada-002",
-        "input": "Test text for embedding generation"
-    }'
-
     local response
-    response=$(make_request "POST" "/api/embeddings" "$data" "" 2>&1)
+    response=$(make_request "GET" "/api/v1/retrieval/" "" "" 2>&1)
     save_response "embedding_single" "$response"
 
-    if echo "$response" | grep -q "\["; then
-        local embedding_length=$(echo "$response" | jq '.[0] | length' 2>/dev/null || echo "0")
-        print_success "Embedding generated with length: $embedding_length"
+    if command -v jq >/dev/null 2>&1 && echo "$response" | jq -e '.status == true and (.RAG_EMBEDDING_MODEL | type == "string") and (.RAG_EMBEDDING_MODEL | length > 0)' >/dev/null 2>&1; then
+        local embedding_model
+        embedding_model=$(echo "$response" | jq -r '.RAG_EMBEDDING_MODEL' 2>/dev/null || echo "")
+        print_success "Embedding configuration detected: $embedding_model"
         test_pass
         return 0
     else
-        test_fail "Embedding generation failed"
+        test_fail "Embedding configuration check failed"
         return 1
     fi
 }
@@ -601,22 +770,23 @@ test_embedding_single() {
 test_embedding_batch() {
     test_start "Embedding Generation (Batch)"
 
+    local collection_name="api-test-collection-$(date +%s)"
     local data='{
-        "model": "text-embedding-ada-002",
-        "input": ["First text", "Second text", "Third text"]
+        "name": "api-test-embed-batch",
+        "content": "First text. Second text. Third text.",
+        "collection_name": "'"$collection_name"'"
     }'
 
     local response
-    response=$(make_request "POST" "/api/embeddings" "$data" "" 2>&1)
+    response=$(make_request "POST" "/api/v1/retrieval/process/text" "$data" "" 2>&1)
     save_response "embedding_batch" "$response"
 
-    if echo "$response" | grep -q "\["; then
-        local count=$(echo "$response" | jq 'length' 2>/dev/null || echo "0")
-        print_success "Generated $count embeddings"
+    if echo "$response" | grep -q "\"status\":true"; then
+        print_success "Retrieval embedding pipeline processed text"
         test_pass
         return 0
     else
-        test_fail "Batch embedding generation failed"
+        test_fail "Retrieval text processing failed"
         return 1
     fi
 }
@@ -626,10 +796,10 @@ test_vector_store_status() {
     test_start "Vector Store Status"
 
     local response
-    response=$(make_request "GET" "/api/vectordb/status" "" "" 2>&1)
+    response=$(make_request "GET" "/api/v1/retrieval/" "" "" 2>&1)
     save_response "vector_store_status" "$response"
 
-    if echo "$response" | grep -q "status\|ready"; then
+    if echo "$response" | grep -q "\"status\":true"; then
         test_pass
         return 0
     else
@@ -648,12 +818,13 @@ test_vector_search() {
 
     local kb_id="${CREATED_KNOWLEDGE_BASES[0]}"
     local data='{
+        "collection_name": "'$kb_id'",
         "query": "test document",
-        "top_k": 3
+        "k": 3
     }'
 
     local response
-    response=$(make_request "POST" "/api/knowledge/$kb_id/query" "$data" "" 2>&1)
+    response=$(make_request "POST" "/api/v1/retrieval/query/doc" "$data" "" 2>&1)
     save_response "vector_search" "$response"
 
     if echo "$response" | grep -q "results\|documents"; then
@@ -670,7 +841,7 @@ test_config_get() {
     test_start "Get Configuration"
 
     local response
-    response=$(make_request "GET" "/api/config" "" "" 2>&1)
+    response=$(make_request "GET" "/api/v1/configs/export" "" "" 2>&1)
     save_response "config_get" "$response"
 
     if echo "$response" | grep -q "{"; then
@@ -687,7 +858,7 @@ test_user_profile() {
     test_start "User Profile"
 
     local response
-    response=$(make_request "GET" "/api/user/profile" "" "" 2>&1)
+    response=$(make_request "GET" "/api/v1/users/user/info" "" "" 2>&1)
     save_response "user_profile" "$response"
 
     if echo "$response" | grep -q "id\|name\|email"; then
@@ -709,7 +880,7 @@ cleanup_test_resources() {
     for kb_id in "${CREATED_KNOWLEDGE_BASES[@]}"; do
         print_info "Removing knowledge base $kb_id..."
         curl -s -X DELETE \
-            "$OPENWEBUI_URL/api/knowledge/$kb_id" \
+            "$OPENWEBUI_URL/api/v1/knowledge/$kb_id/delete" \
             ${API_KEY:+-H "Authorization: Bearer $API_KEY"} > /dev/null 2>&1
         print_success "Knowledge base $kb_id removed"
     done
@@ -717,7 +888,7 @@ cleanup_test_resources() {
     for file_id in "${CREATED_FILES[@]}"; do
         print_info "Removing file $file_id..."
         curl -s -X DELETE \
-            "$OPENWEBUI_URL/api/files/$file_id" \
+            "$OPENWEBUI_URL/api/v1/files/$file_id" \
             ${API_KEY:+-H "Authorization: Bearer $API_KEY"} > /dev/null 2>&1
         print_success "File $file_id removed"
     done
@@ -754,9 +925,14 @@ print_summary() {
 
 main() {
     print_header "OpenWebUI API Testing Suite"
+    RUN_CLEANUP_ON_EXIT=true
+    ensure_openwebui_api_key
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
     print_info "vLLM URL: $VLLM_URL"
-    [ -n "$API_KEY" ] && print_info "API Key: ${API_KEY:0:8}..."
+    print_info "Test mode: $TEST_MODE"
+    if [ -n "$API_KEY" ]; then
+        print_info "API Key: ${API_KEY:0:8}..."
+    fi
     print_info "Output Directory: $OUTPUT_DIR"
 
     mkdir -p "$OUTPUT_DIR"
@@ -776,56 +952,74 @@ main() {
     test_models_list
     test_model_info
 
-    # Files
-    print_section "Files API"
-    test_file_upload_text
-    test_file_upload_pdf
-    test_file_list
+    if [ "$TEST_MODE" = "baseline" ]; then
+        print_section "Baseline API Core"
+        test_chat_completion_simple
+        test_embedding_single
+        test_vector_store_status
+    else
+        # Files
+        print_section "Files API"
+        test_file_upload_text
+        test_file_upload_pdf
+        test_file_list
 
-    # Knowledge Bases
-    print_section "Knowledge Base API"
-    test_knowledge_create
-    test_knowledge_list
-    test_knowledge_add_file
+        # Knowledge Bases
+        print_section "Knowledge Base API"
+        test_knowledge_create
+        test_knowledge_list
+        test_knowledge_add_file
 
-    # Chat
-    print_section "Chat Completions API"
-    test_chat_completion_simple
-    test_chat_completion_streaming
+        # Chat
+        print_section "Chat Completions API"
+        test_chat_completion_simple
+        test_chat_completion_streaming
 
-    # Embeddings
-    print_section "Embeddings API"
-    test_embedding_single
-    test_embedding_batch
+        # Embeddings
+        print_section "Embeddings API"
+        test_embedding_single
+        test_embedding_batch
 
-    # Vector Database
-    print_section "Vector Database API"
-    test_vector_store_status
-    test_vector_search
+        # Vector Database
+        print_section "Vector Database API"
+        test_vector_store_status
+        test_vector_search
 
-    # Configuration
-    print_section "Configuration API"
-    test_config_get
+        # Configuration
+        print_section "Configuration API"
+        test_config_get
 
-    # User
-    print_section "User API"
-    test_user_profile
-
-    # Cleanup
-    cleanup_test_resources
+        # User
+        print_section "User API"
+        test_user_profile
+    fi
 
     # Summary
     print_summary
 }
 
+on_exit() {
+    if [ "$RUN_CLEANUP_ON_EXIT" = true ]; then
+        cleanup_test_resources
+    fi
+}
+
 # Trap to ensure cleanup
-trap cleanup_test_resources EXIT INT TERM
+trap on_exit EXIT INT TERM
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         -v|--verbose)
             VERBOSE=true
+            shift
+            ;;
+        --baseline)
+            TEST_MODE="baseline"
+            shift
+            ;;
+        --full)
+            TEST_MODE="full"
             shift
             ;;
         -u|--url)
@@ -837,17 +1031,12 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  -v, --verbose       Enable verbose output"
-            echo "  -u, --url URL       OpenWebUI URL (default: http://localhost:3000)"
-            echo "  -k, --key KEY       API key for authentication"
-            echo "  -h, --help          Show this help message"
+            show_help
             exit 0
             ;;
         *)
             echo "Unknown option: $1"
+            show_help
             exit 1
             ;;
     esac

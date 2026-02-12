@@ -168,6 +168,9 @@ start_vllm() {
     # Create logs directory if it doesn't exist
     mkdir -p logs
 
+    # Ensure interpreter exists before trying vLLM imports.
+    check_command "python3"
+
     # Check if vLLM is installed
     if ! python3 -c "import vllm" 2>/dev/null; then
         print_error "vLLM is not installed. Please install it first:"
