@@ -55,12 +55,15 @@ services:
       - OPENAI_API_BASE_URLS=${OPENAI_API_BASE_URLS:-http://cliproxyapi:8317/v1}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-change-me-cliproxyapi-key}
       - OPENAI_API_MODEL_NAME=${OPENAI_API_MODEL_NAME:-}
-      - ENABLE_RAG_WEB_SEARCH=${ENABLE_RAG_WEB_SEARCH:-false}
-      - RAG_WEB_SEARCH_ENGINE=${RAG_WEB_SEARCH_ENGINE:-}
-      - RAG_WEB_SEARCH_RESULT_COUNT=${RAG_WEB_SEARCH_RESULT_COUNT:-3}
-      - RAG_WEB_SEARCH_CONCURRENT_REQUESTS=${RAG_WEB_SEARCH_CONCURRENT_REQUESTS:-10}
-      - ENABLE_RAG_HYBRID_SEARCH=${ENABLE_RAG_HYBRID_SEARCH:-false}
-      - TOP_K=${TOP_K:-5}
+
+      # Web Search (OpenWebUI env vars; SearXNG is host-local on port 8888)
+      - ENABLE_WEB_SEARCH=${ENABLE_WEB_SEARCH:-false}
+      - ENABLE_WEBSEARCH=${ENABLE_WEBSEARCH:-false}
+      - WEB_SEARCH_ENGINE=${WEB_SEARCH_ENGINE:-searxng}
+      - WEBSEARCH_ENGINE=${WEBSEARCH_ENGINE:-searxng}
+      - WEB_SEARCH_RESULT_COUNT=${WEB_SEARCH_RESULT_COUNT:-3}
+      - WEB_SEARCH_CONCURRENT_REQUESTS=${WEB_SEARCH_CONCURRENT_REQUESTS:-10}
+      - SEARXNG_QUERY_URL=${SEARXNG_QUERY_URL:-http://host.docker.internal:8888/search?q={query}&format=json}
 
     ports:
       - "${WEBUI_PORT:-3000}:8080"
@@ -70,7 +73,7 @@ services:
       - openwebui_data:/app/backend/data
 
     extra_hosts:
-      # Enable access to host machine for Ollama server
+      # Enable access to host machine for Ollama and local SearXNG
       - "host.docker.internal:host-gateway"
 
     healthcheck:
@@ -83,30 +86,10 @@ services:
     networks:
       - openwebui_network
 
-  searxng:
-    image: ${SEARXNG_IMAGE:-searxng/searxng:latest}
-    container_name: searxng
-    restart: unless-stopped
-
-    # Optional host access for debugging: http://localhost:8088
-    ports:
-      - "8088:8080"
-
-    volumes:
-      - ./searxng:/etc/searxng:rw
-      - searxng_cache:/var/cache/searxng:rw
-
-    networks:
-      - openwebui_network
-
 volumes:
   openwebui_data:
     driver: local
     name: openwebui_data
-
-  searxng_cache:
-    driver: local
-    name: searxng_cache
 
 networks:
   openwebui_network:

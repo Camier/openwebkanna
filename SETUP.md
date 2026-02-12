@@ -51,6 +51,7 @@ What this does:
 docker compose ps
 ./check-cliproxyapi.sh
 ./test-openwebui-cliproxy-routing.sh
+./audit-no-mock.sh
 ```
 
 Baseline validation (fast checks):
@@ -59,6 +60,9 @@ Baseline validation (fast checks):
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
 ```
+
+If you enable web search, `test-rag.sh --baseline` probes SearXNG from both the host and the OpenWebUI container.
+If the host probe works but the container probe fails, the host firewall is likely blocking docker-to-host connections on port 8888.
 
 ## 5. Validate OAuth aliases
 

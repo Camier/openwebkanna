@@ -77,12 +77,17 @@ Use this baseline workflow before enabling advanced features:
 ./status.sh
 ```
 
-3. Run fast baseline RAG checks:
+3. Enforce real-integration guard (no mock-like markers):
+```bash
+./audit-no-mock.sh
+```
+
+4. Run fast baseline RAG checks:
 ```bash
 ./test-rag.sh --baseline
 ```
 
-4. Run fast baseline API checks:
+5. Run fast baseline API checks:
 ```bash
 ./test-api.sh --baseline
 ```
@@ -96,6 +101,9 @@ To enforce strict web-search readiness, run:
 ```bash
 BASELINE_REQUIRE_WEB_SEARCH=true ./test-rag.sh --baseline
 ```
+
+Note: OpenWebUI runs in Docker, so web-search must work from the container path too.
+`./test-rag.sh --baseline` now probes both host-local and `docker exec openwebui` connectivity; strict mode enforces both.
 
 ## OAuth setup flow (manual)
 

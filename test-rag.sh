@@ -219,6 +219,20 @@ make_request() {
     curl "${curl_args[@]}"
 }
 
+test_repo_real_integration_guard() {
+    test_start "Repository Real Integration Guard"
+
+    local response
+    if response=$(./audit-no-mock.sh 2>&1); then
+        test_pass
+        return 0
+    fi
+
+    test_fail "audit-no-mock.sh failed"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
 has_non_empty_models_array() {
     local response="$1"
     local model_count
@@ -250,7 +264,7 @@ Options:
   -h, --help      Show this help message
 
 Environment:
-  BASELINE_REQUIRE_WEB_SEARCH=true|false  Fail if local SearXNG probe fails (default: false)
+  BASELINE_REQUIRE_WEB_SEARCH=true|false  Fail if host and container SearXNG probes fail (default: false)
   BASELINE_EXPECT_SEARX_PORT=<port|empty> Expected SearXNG port hint (default: 8888; empty disables port hint)
 EOF
 }
@@ -447,7 +461,7 @@ test_web_search_baseline() {
     test_start "Web Search Baseline (SearXNG)"
 
     local web_search_enabled=false
-    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}" || is_true "${ENABLE_RAG_WEB_SEARCH:-false}"; then
+    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
         web_search_enabled=true
     fi
 
@@ -515,6 +529,74 @@ test_web_search_baseline() {
     fi
 
     print_info "SearXNG endpoint reachable but returned non-standard payload (HTTP 200)"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    test_pass
+    return 0
+}
+
+test_web_search_container_baseline() {
+    test_start "Web Search Baseline (SearXNG from OpenWebUI container)"
+
+    local web_search_enabled=false
+    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
+        web_search_enabled=true
+    fi
+
+    if [ "$web_search_enabled" = false ]; then
+        print_info "Web search is disabled by configuration; baseline check skipped"
+        test_pass
+        return 0
+    fi
+
+    local searx_url="${SEARXNG_QUERY_URL:-}"
+    if [ -z "$searx_url" ]; then
+        test_fail "Web search enabled but SEARXNG_QUERY_URL is empty"
+        return 1
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        handle_web_search_probe_failure "Docker is not available; cannot probe web search from container path"
+        return $?
+    fi
+
+    if ! docker ps -q -f "name=^openwebui$" | grep -q .; then
+        handle_web_search_probe_failure "OpenWebUI container is not running; cannot probe container web search path"
+        return $?
+    fi
+
+    local probe_url
+    probe_url="${searx_url//\{query\}/openwebui%20baseline}"
+
+    local raw
+    raw="$(docker exec openwebui sh -lc "curl -sS -m 20 -w '\nHTTP_CODE:%{http_code}\n' \"$probe_url\" 2>/dev/null || true" 2>/dev/null || true)"
+
+    if [ -z "$raw" ]; then
+        handle_web_search_probe_failure "Empty response from OpenWebUI container web search probe"
+        return $?
+    fi
+
+    local http_code
+    http_code="$(echo "$raw" | tail -n 1 | sed 's/HTTP_CODE://g' | tr -d '\r' | tr -d '[:space:]')"
+    local response
+    response="$(echo "$raw" | sed '$d')"
+
+    if [ "$http_code" != "200" ]; then
+        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+        handle_web_search_probe_failure "Container web search probe returned HTTP ${http_code:-000}"
+        return $?
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        if echo "$response" | jq -e '.results and (.results | type == "array")' >/dev/null 2>&1; then
+            test_pass
+            return 0
+        fi
+    elif echo "$response" | grep -q "results"; then
+        test_pass
+        return 0
+    fi
+
+    print_info "Container can reach SearXNG endpoint but returned non-standard payload (HTTP 200)"
     [ "$VERBOSE" = "true" ] && print_info "Response: $response"
     test_pass
     return 0
@@ -955,6 +1037,7 @@ main() {
 
     # CLIProxyAPI smoke checks
     print_section "CliProxyApi Integration"
+    test_repo_real_integration_guard
     test_cli_proxy_api_managed_runtime
     test_cli_proxy_api_health_all
     test_cli_proxy_api_models_openwebui
@@ -976,6 +1059,7 @@ main() {
     test_vector_store
     test_openwebui_baseline_settings
     test_web_search_baseline
+    test_web_search_container_baseline
 
     if [ "$TEST_MODE" = "full" ]; then
         test_create_test_document

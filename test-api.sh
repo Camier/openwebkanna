@@ -257,6 +257,20 @@ make_request() {
     curl "${curl_args[@]}"
 }
 
+test_repo_real_integration_guard() {
+    test_start "Repository Real Integration Guard"
+
+    local response
+    if response=$(./audit-no-mock.sh 2>&1); then
+        test_pass
+        return 0
+    fi
+
+    test_fail "audit-no-mock.sh failed"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
 make_request_with_status() {
     local method="$1"
     local endpoint="$2"
@@ -939,6 +953,7 @@ main() {
 
     # Health and Auth
     print_section "Health & Authentication"
+    test_repo_real_integration_guard
     test_health_check
     test_root_endpoint
     test_api_key_validation

@@ -25,6 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPENWEBUI_URL="${OPENWEBUI_URL:-}"
 VLLM_URL="${VLLM_URL:-}"
 OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
+VLLM_API_KEY="${VLLM_API_KEY:-}"
 URL_OVERRIDE=""
 VERBOSE="false"
 RAW="false"
@@ -69,6 +70,7 @@ Usage:
 Global Options:
   --url <base-url>           Override service base URL for the invoked command
   --api-key <token>          OpenWebUI API key (Bearer token)
+  --vllm-api-key <token>     vLLM/OpenAI-compatible API key (Bearer token)
   --verbose                  Print request details to stderr
   --raw                      Print raw JSON response without pretty formatting
   --help, -h                 Show this help message
@@ -86,6 +88,7 @@ Environment:
   - OPENWEBUI_URL defaults to http://localhost:3000
   - VLLM_URL defaults to http://localhost:8000
   - OPENWEBUI_API_KEY can be provided via environment variable.
+  - VLLM_API_KEY falls back to OPENAI_API_KEY, then CLIPROXYAPI_API_KEY.
 
 Examples:
   ./cli-proxy-api.sh health all
@@ -105,8 +108,12 @@ load_env_file() {
     local file_vllm_url=""
     local file_openai_api_base_url=""
     local file_openai_api_base_urls=""
+    local file_cliproxyapi_base_url=""
     local file_webui_port=""
     local file_openwebui_api_key=""
+    local file_vllm_api_key=""
+    local file_openai_api_key=""
+    local file_cliproxyapi_api_key=""
 
     if [ -f ".env" ]; then
         env_file=".env"
@@ -119,8 +126,12 @@ load_env_file() {
         file_vllm_url="$(read_env_value "$env_file" "VLLM_URL")"
         file_openai_api_base_url="$(read_env_value "$env_file" "OPENAI_API_BASE_URL")"
         file_openai_api_base_urls="$(read_env_value "$env_file" "OPENAI_API_BASE_URLS")"
+        file_cliproxyapi_base_url="$(read_env_value "$env_file" "CLIPROXYAPI_BASE_URL")"
         file_webui_port="$(read_env_value "$env_file" "WEBUI_PORT")"
         file_openwebui_api_key="$(read_env_value "$env_file" "OPENWEBUI_API_KEY")"
+        file_vllm_api_key="$(read_env_value "$env_file" "VLLM_API_KEY")"
+        file_openai_api_key="$(read_env_value "$env_file" "OPENAI_API_KEY")"
+        file_cliproxyapi_api_key="$(read_env_value "$env_file" "CLIPROXYAPI_API_KEY")"
     fi
 
     if [ -z "$file_vllm_url" ] && [ -n "$file_openai_api_base_url" ]; then
@@ -130,6 +141,12 @@ load_env_file() {
     if [ -z "$file_vllm_url" ] && [ -n "$file_openai_api_base_urls" ]; then
         # OPENAI_API_BASE_URLS can contain semicolon-separated URLs.
         file_vllm_url="$(printf '%s' "$file_openai_api_base_urls" | cut -d';' -f1)"
+    fi
+    if [ -z "$file_vllm_url" ] && [ -n "$file_cliproxyapi_base_url" ]; then
+        file_vllm_url="$file_cliproxyapi_base_url"
+    fi
+    if [ -n "$file_vllm_url" ] && [[ "$file_vllm_url" == *"://cliproxyapi"* ]] && [ -n "$file_cliproxyapi_base_url" ]; then
+        file_vllm_url="$file_cliproxyapi_base_url"
     fi
 
     # Convert OpenAI-compatible /v1 base URL to server root base.
@@ -151,12 +168,22 @@ load_env_file() {
     if [ -n "$file_openwebui_api_key" ] && [ -z "$OPENWEBUI_API_KEY" ]; then
         OPENWEBUI_API_KEY="$file_openwebui_api_key"
     fi
+    if [ -n "$file_vllm_api_key" ] && [ -z "$VLLM_API_KEY" ]; then
+        VLLM_API_KEY="$file_vllm_api_key"
+    fi
+    if [ -n "$file_openai_api_key" ] && [ -z "$VLLM_API_KEY" ]; then
+        VLLM_API_KEY="$file_openai_api_key"
+    fi
+    if [ -n "$file_cliproxyapi_api_key" ] && [ -z "$VLLM_API_KEY" ]; then
+        VLLM_API_KEY="$file_cliproxyapi_api_key"
+    fi
 
     OPENWEBUI_URL="${OPENWEBUI_URL:-$DEFAULT_OPENWEBUI_URL}"
     VLLM_URL="${VLLM_URL:-$DEFAULT_VLLM_URL}"
     OPENWEBUI_URL="$(normalize_base_url "$OPENWEBUI_URL")"
     VLLM_URL="$(normalize_base_url "$VLLM_URL")"
     OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
+    VLLM_API_KEY="${VLLM_API_KEY:-}"
 }
 
 read_env_value() {
@@ -247,6 +274,13 @@ normalize_base_url() {
             url="$(printf '%s' "$url" | sed 's#://host\.docker\.internal#://localhost#g')"
         elif ! host_is_resolvable "host.docker.internal"; then
             print_warning "host.docker.internal is not resolvable in container context: $url"
+        fi
+    fi
+    if [[ "$url" == *"://cliproxyapi"* ]]; then
+        if ! running_in_container; then
+            url="$(printf '%s' "$url" | sed 's#://cliproxyapi#://127.0.0.1#g')"
+        elif ! host_is_resolvable "cliproxyapi"; then
+            print_warning "cliproxyapi is not resolvable in container context: $url"
         fi
     fi
 
@@ -425,12 +459,39 @@ request_vllm_json() {
     local -a headers
 
     headers=("-H" "Content-Type: application/json")
+    if [ -n "$VLLM_API_KEY" ]; then
+        headers+=("-H" "Authorization: Bearer $VLLM_API_KEY")
+    fi
 
     if [ -n "$payload" ]; then
         run_curl "$method" "$url" "${headers[@]}" "-d" "$payload"
     else
         run_curl "$method" "$url" "${headers[@]}"
     fi
+}
+
+request_vllm_health_json() {
+    local base_url="$1"
+    local response=""
+    local endpoint=""
+    local url=""
+    local -a headers
+
+    headers=("-H" "Content-Type: application/json")
+    if [ -n "$VLLM_API_KEY" ]; then
+        headers+=("-H" "Authorization: Bearer $VLLM_API_KEY")
+    fi
+
+    for endpoint in "/health" "/"; do
+        url="${base_url%/}${endpoint}"
+        if response="$(curl --silent --show-error --fail "${headers[@]}" "$url" 2>/dev/null)"; then
+            printf '%s' "$response"
+            return 0
+        fi
+    done
+
+    print_error "vLLM/CLIProxyAPI health endpoint unavailable at ${base_url%/} (/health and /)"
+    return 1
 }
 
 require_arg() {
@@ -471,13 +532,13 @@ handle_health() {
     fi
 
     if [ "$target" = "vllm" ]; then
-        vllm_resp="$(request_vllm_json "GET" "/health" "" "$vllm_base")" || return 1
+        vllm_resp="$(request_vllm_health_json "$vllm_base")" || return 1
         emit_json "$vllm_resp"
         return 0
     fi
 
     openwebui_resp="$(request_openwebui_json "GET" "/health" "" "$openwebui_base")" || return 1
-    vllm_resp="$(request_vllm_json "GET" "/health" "" "$vllm_base")" || return 1
+    vllm_resp="$(request_vllm_health_json "$vllm_base")" || return 1
     emit_json "{\"openwebui\":${openwebui_resp},\"vllm\":${vllm_resp}}"
 }
 
@@ -704,6 +765,11 @@ while [ $# -gt 0 ]; do
             shift
             require_arg "${1:-}" "Missing value for --api-key"
             OPENWEBUI_API_KEY="$1"
+            ;;
+        --vllm-api-key)
+            shift
+            require_arg "${1:-}" "Missing value for --vllm-api-key"
+            VLLM_API_KEY="$1"
             ;;
         --verbose)
             VERBOSE="true"

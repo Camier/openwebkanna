@@ -387,7 +387,7 @@ check_baseline_profile() {
     print_info "VECTOR_DB=${VECTOR_DB:-<unset>}"
 
     local web_search_enabled=false
-    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}" || is_true "${ENABLE_RAG_WEB_SEARCH:-false}"; then
+    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
         web_search_enabled=true
     fi
 
@@ -399,6 +399,7 @@ check_baseline_profile() {
             local probe_url="${SEARXNG_QUERY_URL//\{query\}/status%20probe}"
             local host_probe_url="$probe_url"
             local probe_response
+            local container_probe_ok=false
 
             if echo "$host_probe_url" | grep -q "host.docker.internal"; then
                 host_probe_url="${host_probe_url//host.docker.internal/127.0.0.1}"
@@ -415,6 +416,25 @@ check_baseline_profile() {
             else
                 print_status "SearXNG (host-local)" "warning" "(configured but probe failed)"
                 print_info "Ensure local SearXNG is listening on port 8888"
+            fi
+
+            # OpenWebUI runs in Docker; the important path is container -> host SearXNG.
+            # Some hosts firewall docker-to-host connections, so check from inside container.
+            if docker info >/dev/null 2>&1 && docker ps -q -f "name=^openwebui$" | grep -q .; then
+                local container_probe_url="$probe_url"
+                local container_probe
+                container_probe="$(docker exec openwebui sh -lc "curl -sS -m 8 \"$container_probe_url\" 2>/dev/null || true" 2>/dev/null || true)"
+
+                if [ -n "$container_probe" ] && echo "$container_probe" | grep -q "results"; then
+                    container_probe_ok=true
+                fi
+
+                if [ "$container_probe_ok" = true ]; then
+                    print_status "SearXNG (container path)" "running" "(OpenWebUI can reach host-local SearXNG)"
+                else
+                    print_status "SearXNG (container path)" "warning" "(OpenWebUI cannot reach host-local SearXNG)"
+                    print_info "If host probe works but container probe fails, allow Docker networks to reach port 8888 on the host"
+                fi
             fi
         else
             print_status "SearXNG (host-local)" "warning" "(web search enabled but URL is unset)"
