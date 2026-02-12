@@ -1,0 +1,52 @@
+host: "0.0.0.0"
+port: 8317
+
+tls:
+  enable: false
+  cert: ""
+  key: ""
+
+remote-management:
+  allow-remote: false
+  secret-key: ""
+  disable-control-panel: true
+
+auth-dir: "./cliproxyapi/auth"
+
+api-keys:
+  - "layra-cliproxyapi-key"
+
+debug: false
+request-log: false
+usage-statistics-enabled: false
+logging-to-file: false
+logs-max-total-size-mb: 0
+error-logs-max-files: 10
+proxy-url: ""
+force-model-prefix: false
+request-retry: 3
+max-retry-interval: 30
+
+quota-exceeded:
+  switch-project: true
+  switch-preview-model: true
+
+routing:
+  strategy: "round-robin"
+
+oauth-model-alias:
+  antigravity:
+    - name: "gemini-3-pro-high"
+      alias: "antigravity-oauth"
+  codex:
+    - name: "gpt-5-codex"
+      alias: "openai-codex"
+  qwen:
+    - name: "qwen3-coder-plus"
+      alias: "qwen-cli"
+  kimi:
+    - name: "kimi-k2.5"
+      alias: "kimi-cli"
+
+ws-auth: false
+nonstream-keepalive-interval: 0

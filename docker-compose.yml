@@ -1,0 +1,114 @@
+services:
+  cliproxyapi:
+    image: ${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:latest}
+    container_name: cliproxyapi
+    restart: unless-stopped
+    environment:
+      - DEPLOY=${CLIPROXYAPI_DEPLOY:-}
+    ports:
+      - "${CLIPROXYAPI_PORT:-8317}:8317"
+    volumes:
+      - ./cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./cliproxyapi/auth:/CLIProxyAPI/cliproxyapi/auth:rw
+      - ./cliproxyapi/logs:/CLIProxyAPI/logs:rw
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8317/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - openwebui_network
+
+  openwebui:
+    image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.7.2}
+    container_name: openwebui
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      cliproxyapi:
+        condition: service_healthy
+
+    environment:
+      # Authentication
+      - WEBUI_AUTH=${WEBUI_AUTH:-false}
+      - WEBUI_NAME=${WEBUI_NAME:-OpenWebUI}
+
+      # Ollama Connection (using host.docker.internal for native server access)
+      - ENABLE_OLLAMA_API=${ENABLE_OLLAMA_API:-false}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+
+      # RAG Configuration
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+      - RAG_SYSTEM_CONTEXT=${RAG_SYSTEM_CONTEXT:-true}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1500}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
+
+      # Vector Store
+      - VECTOR_DB=${VECTOR_DB:-chroma}
+
+      # Additional Settings
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-your-secret-key-change-me}
+      - ENABLE_OPENAI_API=${ENABLE_OPENAI_API:-true}
+      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-http://cliproxyapi:8317/v1}
+      - OPENAI_API_BASE_URLS=${OPENAI_API_BASE_URLS:-http://cliproxyapi:8317/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-change-me-cliproxyapi-key}
+      - OPENAI_API_MODEL_NAME=${OPENAI_API_MODEL_NAME:-}
+      - ENABLE_RAG_WEB_SEARCH=${ENABLE_RAG_WEB_SEARCH:-false}
+      - RAG_WEB_SEARCH_ENGINE=${RAG_WEB_SEARCH_ENGINE:-}
+      - RAG_WEB_SEARCH_RESULT_COUNT=${RAG_WEB_SEARCH_RESULT_COUNT:-3}
+      - RAG_WEB_SEARCH_CONCURRENT_REQUESTS=${RAG_WEB_SEARCH_CONCURRENT_REQUESTS:-10}
+      - ENABLE_RAG_HYBRID_SEARCH=${ENABLE_RAG_HYBRID_SEARCH:-false}
+      - TOP_K=${TOP_K:-5}
+
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+
+    volumes:
+      # Persist OpenWebUI data
+      - openwebui_data:/app/backend/data
+
+    extra_hosts:
+      # Enable access to host machine for Ollama server
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    networks:
+      - openwebui_network
+
+  searxng:
+    image: ${SEARXNG_IMAGE:-searxng/searxng:latest}
+    container_name: searxng
+    restart: unless-stopped
+
+    # Optional host access for debugging: http://localhost:8088
+    ports:
+      - "8088:8080"
+
+    volumes:
+      - ./searxng:/etc/searxng:rw
+      - searxng_cache:/var/cache/searxng:rw
+
+    networks:
+      - openwebui_network
+
+volumes:
+  openwebui_data:
+    driver: local
+    name: openwebui_data
+
+  searxng_cache:
+    driver: local
+    name: searxng_cache
+
+networks:
+  openwebui_network:
+    driver: bridge
+    name: openwebui_network

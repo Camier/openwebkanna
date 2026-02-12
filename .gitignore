@@ -1,0 +1,34 @@
+# Secrets and local env
+.env
+.env.local
+
+# Runtime artifacts
+*.log
+*.pid
+logs/
+vllm.log
+vllm.pid
+.vllm_pid
+bin/
+cliproxyapi/auth/
+cliproxyapi/logs/
+cliproxyapi/vendor/
+
+# Backup artifacts
+backups/
+openwebui_documentation.md.backup
+openwebui_documentation.md.backup2
+openwebui_documentation.md.bak
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Large/local research data (keep repo lightweight)
+data/
