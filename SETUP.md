@@ -62,6 +62,25 @@ Baseline validation (fast checks):
 ```
 
 If you enable web search, `test-rag.sh --baseline` probes SearXNG from both the host and the OpenWebUI container.
+
+## Tune "Documents" Settings (Manual-Only)
+
+OpenWebUI stores "Documents" (retrieval) settings persistently in its DB. For reproducible tuning and rollback, use:
+
+```bash
+# Snapshot only (dry-run)
+OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh
+
+# Apply the tuned values
+OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh --apply
+
+# Restore from a snapshot JSON written under logs/
+OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh --restore logs/openwebui-documents-snapshot-<timestamp>.json
+```
+
+Notes:
+- This is intentionally manual-token only (no auto sign-in), to avoid hidden credential assumptions.
+- UI path for the same settings: `http://localhost:<WEBUI_PORT>/admin/settings/documents`
 If the host probe works but the container probe fails, the host firewall is likely blocking docker-to-host connections on port 8888.
 
 ## 5. Validate OAuth aliases
