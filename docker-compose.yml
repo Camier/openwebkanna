@@ -1,4 +1,74 @@
 services:
+  # PostgreSQL with pgvector extension for vector storage
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: openwebui_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-openwebui}
+      - POSTGRES_USER=${POSTGRES_USER:-openwebui}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - openwebui_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openwebui} -d ${POSTGRES_DB:-openwebui}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openwebui_network
+
+  # Jupyter Notebook for code execution
+  jupyter:
+    image: ${JUPYTER_IMAGE:-jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33}
+    container_name: openwebui_jupyter
+    restart: unless-stopped
+    environment:
+      # Security: Token authentication
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:?JUPYTER_TOKEN is required}
+      # OpenWebUI integration and execution defaults
+      - JUPYTER_ALLOW_CORS=${JUPYTER_ALLOW_CORS:-true}
+      - JUPYTER_EXECUTION_TIMEOUT=${JUPYTER_EXECUTION_TIMEOUT:-300}
+      - JUPYTER_CULL_IDLE_TIMEOUT=${JUPYTER_CULL_IDLE_TIMEOUT:-900}
+      - JUPYTER_CULL_INTERVAL=${JUPYTER_CULL_INTERVAL:-120}
+      - JUPYTER_CULL_CONNECTED=${JUPYTER_CULL_CONNECTED:-true}
+      - JUPYTER_CULL_BUSY=${JUPYTER_CULL_BUSY:-false}
+      - JUPYTER_SHUTDOWN_NO_ACTIVITY_TIMEOUT=${JUPYTER_SHUTDOWN_NO_ACTIVITY_TIMEOUT:-0}
+      - JUPYTER_TERMINALS_ENABLED=${JUPYTER_TERMINALS_ENABLED:-false}
+      - JUPYTER_LOG_LEVEL=${JUPYTER_LOG_LEVEL:-INFO}
+      - JUPYTER_LAB_EXTENSION_MANAGER=${JUPYTER_LAB_EXTENSION_MANAGER:-readonly}
+      - JUPYTER_ALLOW_REMOTE_ACCESS=${JUPYTER_ALLOW_REMOTE_ACCESS:-false}
+      - JUPYTER_LOCAL_HOSTNAMES=${JUPYTER_LOCAL_HOSTNAMES:-localhost,jupyter,openwebui_jupyter}
+      # Runtime
+      - NB_UID=1000
+      - NB_GID=100
+      - CHOWN_HOME=true
+      # Kernel settings
+      - NB_ASK_CONFIRM=False
+      - NB_DISABLE_GIT=True
+      - JUPYTER_ALLOW_ROOT=False
+      - PYTHONSTARTUP=/opt/continua/continua.py
+    ports:
+      - "127.0.0.1:${JUPYTER_PORT:-8890}:8888"
+    volumes:
+      - openwebui_jupyter_data:/home/jovyan/work
+      - ./jupyter/jupyter_server_config.py:/home/jovyan/.jupyter/jupyter_server_config.py:ro
+    # Security: Run as non-root user
+    user: "1000:100"
+    cpus: "${JUPYTER_CPUS:-2.0}"
+    mem_limit: "${JUPYTER_MEM_LIMIT:-2g}"
+    pids_limit: ${JUPYTER_PIDS_LIMIT:-512}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: token $$JUPYTER_TOKEN\" http://localhost:8888/api/status >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - openwebui_network
+
   cliproxyapi:
     image: ${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:latest}
     container_name: cliproxyapi
@@ -6,7 +76,7 @@ services:
     environment:
       - DEPLOY=${CLIPROXYAPI_DEPLOY:-}
     ports:
-      - "${CLIPROXYAPI_PORT:-8317}:8317"
+      - "${CLIPROXYAPI_BIND_ADDRESS:-127.0.0.1}:${CLIPROXYAPI_PORT:-8317}:8317"
     volumes:
       - ./cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml:ro
       - ./cliproxyapi/auth:/CLIProxyAPI/cliproxyapi/auth:rw
@@ -21,18 +91,29 @@ services:
       - openwebui_network
 
   openwebui:
-    image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.7.2}
+    image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}
     container_name: openwebui
     restart: unless-stopped
     env_file: .env
     depends_on:
+      postgres:
+        condition: service_healthy
       cliproxyapi:
+        condition: service_healthy
+      jupyter:
         condition: service_healthy
 
     environment:
       # Authentication
       - WEBUI_AUTH=${WEBUI_AUTH:-false}
-      - WEBUI_NAME=${WEBUI_NAME:-OpenWebUI}
+      - WEBUI_NAME=${WEBUI_NAME:-My AI Hub}
+
+      # Branding
+      - CUSTOM_NAME=${CUSTOM_NAME:-My AI Hub}
+      - CUSTOM_LOGO_URL=${CUSTOM_LOGO_URL:-}
+      - CUSTOM_FAVICON_URL=${CUSTOM_FAVICON_URL:-}
+      - CUSTOM_WELCOME_MESSAGE=${CUSTOM_WELCOME_MESSAGE:-Bienvenue sur My AI Hub}
+      - ENABLE_CUSTOM_SCSS=${ENABLE_CUSTOM_SCSS:-true}
 
       # Ollama Connection (using host.docker.internal for native server access)
       - ENABLE_OLLAMA_API=${ENABLE_OLLAMA_API:-false}
@@ -45,15 +126,20 @@ services:
       - CHUNK_SIZE=${CHUNK_SIZE:-1500}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
 
-      # Vector Store
-      - VECTOR_DB=${VECTOR_DB:-chroma}
+      # Vector Store - PGVector (Postgres + pgvector)
+      - VECTOR_DB=${VECTOR_DB:-pgvector}
+      - PGVECTOR_DB_URL=${PGVECTOR_DB_URL:-postgresql://${POSTGRES_USER:-openwebui}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-openwebui}}
+      - PGVECTOR_CREATE_EXTENSION=${PGVECTOR_CREATE_EXTENSION:-true}
+      - PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH=${PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH:-1536}
 
       # Additional Settings
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-your-secret-key-change-me}
+      # NOTE: Keep this at >= 32 bytes to avoid weak-key warnings and unstable sessions.
+      # WEBUI_SECRET_KEY must be set in `.env` for stable sessions and secure cookie signing.
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:?WEBUI_SECRET_KEY is required}
       - ENABLE_OPENAI_API=${ENABLE_OPENAI_API:-true}
       - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-http://cliproxyapi:8317/v1}
       - OPENAI_API_BASE_URLS=${OPENAI_API_BASE_URLS:-http://cliproxyapi:8317/v1}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-change-me-cliproxyapi-key}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is required}
       - OPENAI_API_MODEL_NAME=${OPENAI_API_MODEL_NAME:-}
 
       # Web Search (OpenWebUI env vars; SearXNG is host-local on port 8888)
@@ -65,8 +151,28 @@ services:
       - WEB_SEARCH_CONCURRENT_REQUESTS=${WEB_SEARCH_CONCURRENT_REQUESTS:-10}
       - SEARXNG_QUERY_URL=${SEARXNG_QUERY_URL:-http://host.docker.internal:8888/search?q={query}&format=json}
 
+      # Jupyter Integration
+      - JUPYTER_URL=${JUPYTER_URL:-http://jupyter:8888}
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:?JUPYTER_TOKEN is required}
+
+      # Code Execution / Interpreter (Jupyter-backed)
+      - ENABLE_CODE_EXECUTION=${ENABLE_CODE_EXECUTION:-true}
+      - CODE_EXECUTION_ENGINE=${CODE_EXECUTION_ENGINE:-jupyter}
+      - CODE_EXECUTION_JUPYTER_URL=${CODE_EXECUTION_JUPYTER_URL:-http://jupyter:8888}
+      - CODE_EXECUTION_JUPYTER_AUTH=${CODE_EXECUTION_JUPYTER_AUTH:-token}
+      - CODE_EXECUTION_JUPYTER_AUTH_TOKEN=${CODE_EXECUTION_JUPYTER_AUTH_TOKEN:-}
+      - CODE_EXECUTION_JUPYTER_AUTH_PASSWORD=${CODE_EXECUTION_JUPYTER_AUTH_PASSWORD:-}
+      - CODE_EXECUTION_JUPYTER_TIMEOUT=${CODE_EXECUTION_JUPYTER_TIMEOUT:-60}
+      - ENABLE_CODE_INTERPRETER=${ENABLE_CODE_INTERPRETER:-true}
+      - CODE_INTERPRETER_ENGINE=${CODE_INTERPRETER_ENGINE:-jupyter}
+      - CODE_INTERPRETER_JUPYTER_URL=${CODE_INTERPRETER_JUPYTER_URL:-http://jupyter:8888}
+      - CODE_INTERPRETER_JUPYTER_AUTH=${CODE_INTERPRETER_JUPYTER_AUTH:-token}
+      - CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=${CODE_INTERPRETER_JUPYTER_AUTH_TOKEN:-}
+      - CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD=${CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD:-}
+      - CODE_INTERPRETER_JUPYTER_TIMEOUT=${CODE_INTERPRETER_JUPYTER_TIMEOUT:-60}
+
     ports:
-      - "${WEBUI_PORT:-3000}:8080"
+      - "127.0.0.1:${WEBUI_PORT:-3000}:8080"
 
     volumes:
       # Persist OpenWebUI data
@@ -90,6 +196,12 @@ volumes:
   openwebui_data:
     driver: local
     name: openwebui_data
+  openwebui_postgres_data:
+    driver: local
+    name: openwebui_postgres_data
+  openwebui_jupyter_data:
+    driver: local
+    name: openwebui_jupyter_data
 
 networks:
   openwebui_network:
