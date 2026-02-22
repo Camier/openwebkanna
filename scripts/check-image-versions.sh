@@ -459,6 +459,7 @@ main() {
     check_dependencies
 
     # Define images to check
+    # shellcheck disable=SC2034
     declare -A IMAGES=(
         ["openwebui"]='${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}'
         ["cliproxyapi"]='${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}'

@@ -20,6 +20,7 @@ QWEN_EMAIL="${CLIPROXYAPI_QWEN_EMAIL:-qwen-cli}"
 # Script-specific helper: expand ~ to $HOME
 expand_home_path() {
     local candidate="$1"
+    # shellcheck disable=SC2088
     if [ "${candidate:0:2}" = "~/" ]; then
         printf "%s/%s" "$HOME" "${candidate:2}"
         return
@@ -117,14 +118,14 @@ main() {
         --arg expired "$expired_at" \
         --arg last_refresh "$now_utc" \
         '{
-          access_token: $access_token,
-          refresh_token: $refresh_token,
-          resource_url: $resource_url,
-          token_type: $token_type,
-          email: $email,
-          type: "qwen",
-          expired: $expired,
-          last_refresh: $last_refresh
+            access_token: $access_token,
+            refresh_token: $refresh_token,
+            resource_url: $resource_url,
+            token_type: $token_type,
+            email: $email,
+            type: "qwen",
+            expired: $expired,
+            last_refresh: $last_refresh
         }' >"$target_path"
 
     chmod 600 "$target_path"

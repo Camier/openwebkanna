@@ -241,7 +241,8 @@ export_methodology() {
     local export_dir="${PROJECT_ROOT}/thesis-exports/methodology"
     mkdir -p "${export_dir}"
 
-    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
     local output_file="${export_dir}/rag-methodology-${timestamp}.md"
 
     cat >"${output_file}" <<EOF
@@ -264,7 +265,8 @@ EOF
 
     # Count documents in knowledge base if available
     if [[ -f "${PROJECT_ROOT}/data/corpus/biblio_corpus.jsonl" ]]; then
-        local doc_count=$(wc -l <"${PROJECT_ROOT}/data/corpus/biblio_corpus.jsonl" 2>/dev/null || echo "unknown")
+        local doc_count
+        doc_count=$(wc -l <"${PROJECT_ROOT}/data/corpus/biblio_corpus.jsonl" 2>/dev/null || echo "unknown")
         echo "- Total Documents: ${doc_count}" >>"${output_file}"
     fi
 
@@ -273,7 +275,8 @@ EOF
     echo "### Document Collections" >>"${output_file}"
     for dir in "${PROJECT_ROOT}/data/pdfs"/*/; do
         if [[ -d ${dir} ]]; then
-            local count=$(find "${dir}" -name "*.pdf" | wc -l)
+            local count
+            count=$(find "${dir}" -name "*.pdf" | wc -l)
             echo "- $(basename "${dir}"): ${count} PDFs" >>"${output_file}"
         fi
     done

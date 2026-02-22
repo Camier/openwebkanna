@@ -23,7 +23,6 @@ CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
 CLIPROXYAPI_START_SCRIPT="./start-cliproxyapi.sh"
 CLIPROXYAPI_RESTART_SCRIPT="./restart-cliproxyapi.sh"
 CLIPROXYAPI_CHECK_SCRIPT="./check-cliproxyapi.sh"
-COMPOSE_CMD=()
 
 ###############################################################################
 # Helper Functions
@@ -343,8 +342,7 @@ ensure_cliproxyapi() {
 
     # Keep update flow stable: chat completion checks can fail due to transient upstream
     # throttling (HTTP 429) while the proxy itself is healthy.
-    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] &&
-        CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
+    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
         print_success "CLIProxyAPI is already healthy"
         return 0
     fi
@@ -368,8 +366,7 @@ ensure_cliproxyapi() {
         fi
     fi
 
-    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] &&
-        CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
+    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
         print_success "CLIProxyAPI is healthy"
         return 0
     fi

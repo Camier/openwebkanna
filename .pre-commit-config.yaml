@@ -39,9 +39,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^data/
+        exclude: ^(data/|searxng/)
       - id: end-of-file-fixer
-        exclude: ^data/
+        exclude: ^(data/|searxng/)
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json
@@ -58,7 +58,7 @@ repos:
     rev: 2.1.1
     hooks:
       - id: bashate
-        args: ["-i", "E006,E043,E044"]
+        args: ["-i", "E003,E006,E043,E044"]
         files: \.sh$
 
 # Global exclude patterns

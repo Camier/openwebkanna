@@ -12,9 +12,11 @@ load_env_defaults
 cd "$SCRIPT_DIR"
 
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
+# shellcheck disable=SC2034
 COMPOSE_FILE="docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
+# shellcheck disable=SC2034
 COMPOSE_CMD=()
 
 ###############################################################################

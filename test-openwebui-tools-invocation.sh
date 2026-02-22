@@ -1397,29 +1397,29 @@ openwebui_chat_completion() {
         --argjson stream "$stream_value" \
         --argjson max_tokens "$TOOL_INVOCATION_MAX_TOKENS" \
         '{
-          model: $model,
-          messages: [{role: "user", content: $prompt}],
-          max_tokens: $max_tokens,
-          temperature: 0,
-          stream: $stream,
-          tool_ids: [$tool_id],
-          chat_id: $chat_id,
-          id: $message_id,
-          session_id: $session_id,
-          params: { function_calling: $function_calling }
+            model: $model,
+            messages: [{role: "user", content: $prompt}],
+            max_tokens: $max_tokens,
+            temperature: 0,
+            stream: $stream,
+            tool_ids: [$tool_id],
+            chat_id: $chat_id,
+            id: $message_id,
+            session_id: $session_id,
+            params: { function_calling: $function_calling }
         }
         + (
-          # Only send OpenAI-style tool_choice when OpenWebUI is configured to use upstream
-          # native tool calling (params.function_calling=native). In "default" mode OpenWebUI
-          # executes tools internally and forwarding tool_choice upstream can break providers.
-          if (
-            ($function_name != "")
-            and (($force_tool_call|ascii_downcase) | IN("true","1","yes"))
-            and (($function_calling|ascii_downcase) == "native")
-          )
-          then {tool_choice: {type: "function", function: {name: $function_name}}}
-          else {}
-          end
+            # Only send OpenAI-style tool_choice when OpenWebUI is configured to use upstream
+            # native tool calling (params.function_calling=native). In "default" mode OpenWebUI
+            # executes tools internally and forwarding tool_choice upstream can break providers.
+            if (
+                ($function_name != "")
+                and (($force_tool_call|ascii_downcase) | IN("true","1","yes"))
+                and (($function_calling|ascii_downcase) == "native")
+            )
+            then {tool_choice: {type: "function", function: {name: $function_name}}}
+            else {}
+            end
         )' >"$payload_file"
 
     if is_true "$VERBOSE"; then
@@ -1618,7 +1618,9 @@ EOF
     local out_file="$OUTPUT_DIR/web_scraper_search_web.response.json"
     local payload_file="$OUTPUT_DIR/web_scraper_search_web.payload.json"
     local code
-    local chat_id message_id session_id task_id chat_file chat_id_encoded
+    local chat_id message_id session_id task_id chat_id_encoded
+    # shellcheck disable=SC2034
+    local chat_file
     chat_id="$(create_ephemeral_chat "Tool Invocation Test :: web_scraper_search_web" "$OUTPUT_DIR/web_scraper_search_web.chat.new.json" 2>/dev/null || true)"
     if [ -z "$chat_id" ]; then
         warn_test "web_scraper.search_web could not create a chat (missing auth or /api/v1/chats/new failed)"
@@ -1750,6 +1752,7 @@ Return ONLY the tool result, verbatim. Do not add any text.
 EOF
     )"
 
+    # shellcheck disable=SC2034
     local result
     if run_tool_chat_and_assert_nonce "llm_council" "$prompt" "llm_council_council" "$SERVER_NONCE" "council"; then
         pass_test

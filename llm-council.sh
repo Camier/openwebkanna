@@ -98,6 +98,7 @@ declare -A JUDGE_STATUS_TOTALS=()
 
 LAST_JUDGE_STATUS=""
 LAST_JUDGE_CHOICE=""
+# shellcheck disable=SC2034
 LAST_JUDGE_RAW=""
 LAST_PARSE_REASON=""
 LAST_PARSED_CHOICE=""
@@ -460,7 +461,8 @@ chat_completion() {
     local temperature="$4"
     local out_file="$5"
     local system_prompt="${6:-}"
-    local payload_file="$TMP_DIR/payload_$(date +%s%N)_$RANDOM.json"
+    local payload_file
+    payload_file="$TMP_DIR/payload_$(date +%s%N)_$RANDOM.json"
     local code=""
 
     jq -cn \
@@ -915,6 +917,7 @@ run_judge_vote() {
     done
 
     LAST_JUDGE_STATUS="${parse_reason:-UNPARSEABLE}"
+    # shellcheck disable=SC2034
     LAST_JUDGE_RAW="$judge_raw"
     increment_judge_status "$LAST_JUDGE_STATUS"
     print_warning "Judge $judge_label returned invalid vote after ${max_attempts} attempts: ${judge_raw:-<empty>}"

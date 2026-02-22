@@ -60,7 +60,8 @@ EOF
 
 export_chat() {
     local chat_id="$1"
-    local output_file="${EXPORT_DIR}/chat-${chat_id}-$(date +%Y%m%d).md"
+    local output_file
+    output_file="${EXPORT_DIR}/chat-${chat_id}-$(date +%Y%m%d).md"
 
     mkdir -p "${EXPORT_DIR}"
 

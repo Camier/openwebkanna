@@ -26,6 +26,7 @@ QWEN_IMPORT_SCRIPT="${QWEN_IMPORT_SCRIPT:-./import-qwen-auth.sh}"
 
 expand_home_path() {
     local candidate="$1"
+    # shellcheck disable=SC2088
     if [ "${candidate:0:2}" = "~/" ]; then
         printf "%s/%s" "$HOME" "${candidate:2}"
         return

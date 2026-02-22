@@ -25,6 +25,7 @@ mkdir -p "${REPORT_DIR}"
 
 # Default to weekly
 PERIOD="weekly"
+# shellcheck disable=SC2034
 ACTION="show"
 
 collect_usage_data() {
@@ -81,6 +82,7 @@ show_summary() {
     echo "  4. Use cheaper models for background tasks (TASK_MODEL_EXTERNAL)"
 }
 
+# shellcheck disable=SC2120
 estimate_costs() {
     echo "=== API Cost Estimation ==="
     echo ""
@@ -119,7 +121,8 @@ estimate_costs() {
 }
 
 export_to_csv() {
-    local output_file="${REPORT_DIR}/api-usage-$(date +%Y%m%d).csv"
+    local output_file
+    output_file="${REPORT_DIR}/api-usage-$(date +%Y%m%d).csv"
 
     echo "Exporting API usage data to CSV..."
 

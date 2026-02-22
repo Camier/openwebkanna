@@ -149,6 +149,7 @@ verify_server_endpoint() {
 configure_servers() {
     local token="$1"
     local current_config
+    # shellcheck disable=SC2034
     local new_servers=()
     local existing_count=0
     local added_count=0
@@ -249,7 +250,7 @@ verify_all_servers() {
     print_info "Successful: ${success_count}"
     [[ $fail_count -gt 0 ]] && print_error "Failed: ${fail_count}"
 
-    return $([[ $fail_count -eq 0 ]] && echo 0 || echo 1)
+    [[ $fail_count -eq 0 ]] && return 0 || return 1
 }
 
 main() {

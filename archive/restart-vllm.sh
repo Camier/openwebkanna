@@ -9,6 +9,7 @@ load_env_defaults
 cd "$SCRIPT_DIR"
 
 # Configuration
+# shellcheck disable=SC2034
 PID_FILE="vllm.pid"
 
 print_header "vLLM Server Restart"

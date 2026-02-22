@@ -222,10 +222,7 @@ test_vllm_responding() {
 
     # CLIProxyAPI deployments may expose "/" instead of "/health".
     root_response=$(curl -s -f "$VLLM_URL/" 2>/dev/null || true)
-    if [ -n "$root_response" ] && (
-        (command -v jq >/dev/null 2>&1 && echo "$root_response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1) ||
-            echo "$root_response" | grep -q "CLI Proxy API Server"
-    ); then
+    if [ -n "$root_response" ] && { command -v jq >/dev/null 2>&1 && echo "$root_response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1 || echo "$root_response" | grep -q "CLI Proxy API Server"; }; then
         test_pass
         return 0
     else
@@ -533,7 +530,8 @@ It contains information about artificial intelligence and machine learning.
 RAG systems combine retrieval and generation for better responses.
 This document will be used to test the knowledge base functionality."
 
-    local temp_file="/tmp/rag_test_doc_$(date +%s).txt"
+    local temp_file
+    temp_file="/tmp/rag_test_doc_$(date +%s).txt"
     echo "$test_content" >"$temp_file"
 
     local response
@@ -656,7 +654,8 @@ test_rag_query() {
         -d "$data" 2>&1)
 
     if echo "$response" | grep -q "choices"; then
-        local reply=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+        local reply
+        reply=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
         print_success "RAG query successful"
         print_info "Response preview: $(echo "$reply" | head -c 100)..."
         test_pass
@@ -741,7 +740,8 @@ test_retrieval() {
         -d "$data" 2>&1)
 
     if echo "$response" | grep -q "results\|documents"; then
-        local doc_count=$(echo "$response" | jq '.results | length' 2>/dev/null || echo "0")
+        local doc_count
+        doc_count=$(echo "$response" | jq '.results | length' 2>/dev/null || echo "0")
         print_success "Retrieved $doc_count documents"
         test_pass
         return 0

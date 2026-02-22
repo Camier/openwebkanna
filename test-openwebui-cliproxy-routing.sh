@@ -130,10 +130,10 @@ openwebui_chat_probe() {
         --arg prompt "$ROUTING_TEST_PROMPT" \
         --argjson max_tokens "$ROUTING_TEST_MAX_TOKENS" \
         '{
-          model: $model,
-          messages: [{role: "user", content: $prompt}],
-          max_tokens: $max_tokens,
-          stream: false
+            model: $model,
+            messages: [{role: "user", content: $prompt}],
+            max_tokens: $max_tokens,
+            stream: false
         }' >"$payload_file"
 
     if [ -n "$OPENWEBUI_AUTH_TOKEN" ]; then

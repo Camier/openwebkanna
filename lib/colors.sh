@@ -6,6 +6,9 @@
 # Usage:
 #   source /path/to/lib/colors.sh
 #   echo -e "${GREEN}Success${NC}"
+#
+# shellcheck disable=SC2034
+# ^ Variables are intentionally exported for sourcing scripts to use
 ###############################################################################
 
 # Standard ANSI color codes

@@ -12,7 +12,9 @@ source "${SCRIPT_DIR}/lib/init.sh"
 cd "$SCRIPT_DIR"
 
 # Configuration
+# shellcheck disable=SC2034
 VLLM_PORT=8000
+# shellcheck disable=SC2034
 OPENWEBUI_PORT=3000
 COMPOSE_FILE="docker-compose.yml"
 VLLM_LOG_FILE="logs/vllm.log"
@@ -75,7 +77,8 @@ show_cliproxyapi_logs() {
         return 1
     fi
 
-    local total_lines=$(wc -l <"$CLIPROXYAPI_LOG_FILE")
+    local total_lines
+    total_lines=$(wc -l <"$CLIPROXYAPI_LOG_FILE")
     print_info "Log file: $CLIPROXYAPI_LOG_FILE ($total_lines total lines)"
     tail -n "$lines" "$CLIPROXYAPI_LOG_FILE"
 }
@@ -107,6 +110,7 @@ show_docker_logs() {
     fi
 }
 
+# shellcheck disable=SC2120
 follow_docker_logs() {
     local service=${1:-}
 
@@ -167,8 +171,9 @@ show_log_summary() {
 
     # CLIProxyAPI log info
     if [ -f "$CLIPROXYAPI_LOG_FILE" ]; then
-        local cliproxyapi_size=$(du -h "$CLIPROXYAPI_LOG_FILE" | cut -f1)
-        local cliproxyapi_lines=$(wc -l <"$CLIPROXYAPI_LOG_FILE")
+        local cliproxyapi_size cliproxyapi_lines
+        cliproxyapi_size=$(du -h "$CLIPROXYAPI_LOG_FILE" | cut -f1)
+        cliproxyapi_lines=$(wc -l <"$CLIPROXYAPI_LOG_FILE")
         echo -e "${GREEN}CLIProxyAPI:${NC} $cliproxyapi_lines lines, $cliproxyapi_size"
     else
         echo -e "${YELLOW}CLIProxyAPI:${NC} No log file found"

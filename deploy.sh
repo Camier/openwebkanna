@@ -19,6 +19,7 @@ MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 PLUGIN_AUDIT_ENABLED="${PLUGIN_AUDIT_ENABLED:-true}"
 PLUGIN_AUDIT_SCRIPT="${PLUGIN_AUDIT_SCRIPT:-./audit-openwebui-plugins.sh}"
 PLUGIN_AUDIT_FOCUS="${PLUGIN_AUDIT_FOCUS:-all}"
+# shellcheck disable=SC2034
 COMPOSE_CMD=()
 
 ###############################################################################

@@ -223,7 +223,8 @@ check_image_freshness() {
         created_ts=$(date -d "$created" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "$created" +%s 2>/dev/null || echo "0")
         local now_ts
         now_ts=$(date +%s)
-        local age_days=$(((now_ts - created_ts) / 86400))
+        local age_days
+        age_days=$(((now_ts - created_ts) / 86400))
 
         if [[ $age_days -gt 90 ]]; then
             print_warning "Image is ${age_days} days old - consider updating"

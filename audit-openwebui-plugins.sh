@@ -20,7 +20,9 @@ PLUGIN_AUDIT_TIMEOUT_SECONDS="${PLUGIN_AUDIT_TIMEOUT_SECONDS:-60}"
 PLUGIN_AUDIT_CHECK_PIPELINES_DIR="${PLUGIN_AUDIT_CHECK_PIPELINES_DIR:-false}"
 PLUGIN_AUDIT_IMPORT_CHECK="${PLUGIN_AUDIT_IMPORT_CHECK:-true}"
 PIPELINES_DIR="${PIPELINES_DIR:-}"
+# shellcheck disable=SC2034
 QUIET=false
+# shellcheck disable=SC2034
 COMPOSE_CMD=()
 
 usage() {
@@ -173,6 +175,7 @@ main() {
                 shift
                 ;;
             --quiet)
+                # shellcheck disable=SC2034
                 QUIET=true
                 shift
                 ;;

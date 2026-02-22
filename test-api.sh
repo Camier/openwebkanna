@@ -118,13 +118,15 @@ test_start() {
 
 test_pass() {
     ((TESTS_PASSED += 1))
-    local duration=$(($(date +%s) - TEST_START_TIME))
+    local duration
+    duration=$(($(date +%s) - TEST_START_TIME))
     print_success "$TEST_NAME (${duration}s)"
 }
 
 test_fail() {
     ((TESTS_FAILED += 1))
-    local duration=$(($(date +%s) - TEST_START_TIME))
+    local duration
+    duration=$(($(date +%s) - TEST_START_TIME))
     print_error "$TEST_NAME failed (${duration}s): $1"
 }
 
@@ -438,7 +440,8 @@ test_model_info() {
 test_file_upload_text() {
     test_start "File Upload (Text)"
 
-    local temp_file="/tmp/test_upload_$(date +%s).txt"
+    local temp_file
+    temp_file="/tmp/test_upload_$(date +%s).txt"
     echo "This is a test document for API validation." >"$temp_file"
 
     local response
@@ -452,7 +455,8 @@ test_file_upload_text() {
     rm -f "$temp_file"
 
     if echo "$response" | grep -q "id"; then
-        local file_id=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
+        local file_id
+        file_id=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
         CREATED_FILES+=("$file_id")
         print_success "File uploaded with ID: $file_id"
         test_pass
@@ -467,7 +471,8 @@ test_file_upload_pdf() {
     test_start "File Upload (PDF)"
 
     # Create a minimal PDF
-    local temp_file="/tmp/test_upload_$(date +%s).pdf"
+    local temp_file
+    temp_file="/tmp/test_upload_$(date +%s).pdf"
     echo "%PDF-1.4
 1 0 obj
 <<
@@ -515,7 +520,8 @@ startxref
     rm -f "$temp_file"
 
     if echo "$response" | grep -q "id"; then
-        local file_id=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
+        local file_id
+        file_id=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
         CREATED_FILES+=("$file_id")
         print_success "PDF uploaded with ID: $file_id"
         test_pass
@@ -559,7 +565,8 @@ test_knowledge_create() {
     save_response "knowledge_create" "$response"
 
     if echo "$response" | grep -q "id"; then
-        local kb_id=$(echo "$response" | jq -r '.id // .knowledge_id // empty' 2>/dev/null)
+        local kb_id
+        kb_id=$(echo "$response" | jq -r '.id // .knowledge_id // empty' 2>/dev/null)
         CREATED_KNOWLEDGE_BASES+=("$kb_id")
         print_success "Knowledge base created with ID: $kb_id"
         test_pass
@@ -638,7 +645,8 @@ test_chat_completion_simple() {
     save_response "chat_completion_simple" "$response"
 
     if echo "$response" | grep -q "choices"; then
-        local reply=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+        local reply
+        reply=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
         print_success "Got response: $(echo "$reply" | head -c 50)..."
         test_pass
         return 0
@@ -704,7 +712,8 @@ test_embedding_single() {
 test_embedding_batch() {
     test_start "Embedding Generation (Batch)"
 
-    local collection_name="api-test-collection-$(date +%s)"
+    local collection_name
+    collection_name="api-test-collection-$(date +%s)"
     local data='{
         "name": "api-test-embed-batch",
         "content": "First text. Second text. Third text.",

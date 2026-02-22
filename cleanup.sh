@@ -12,6 +12,7 @@ source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
 
 # Configuration
+# shellcheck disable=SC2034  # VLLM_PORT used by lib/init.sh
 VLLM_PORT=8000
 COMPOSE_FILE="docker-compose.yml"
 VLLM_LOG_FILE="logs/vllm.log"
@@ -242,14 +243,14 @@ cleanup_logs() {
     # Clear vLLM log
     if [ -f "$VLLM_LOG_FILE" ]; then
         print_info "Clearing vLLM log file..."
-        >"$VLLM_LOG_FILE"
+        : >"$VLLM_LOG_FILE"
         print_success "vLLM log cleared"
     fi
 
     # Clear CLIProxyAPI log
     if [ -f "$CLIPROXYAPI_LOG_FILE" ]; then
         print_info "Clearing CLIProxyAPI log file..."
-        >"$CLIPROXYAPI_LOG_FILE"
+        : >"$CLIPROXYAPI_LOG_FILE"
         print_success "CLIProxyAPI log cleared"
     fi
 
@@ -308,7 +309,6 @@ main() {
     CLEAN_DOCKER=false
     CLEAN_LOGS=false
     CLEAN_CACHE=false
-    STOP_ONLY=true
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -332,7 +332,6 @@ main() {
                 CLEAN_DOCKER=true
                 CLEAN_LOGS=true
                 CLEAN_CACHE=true
-                STOP_ONLY=false
                 shift
                 ;;
             -h | --help)

@@ -90,9 +90,9 @@ chat_probe() {
         --arg prompt "$CLIPROXYAPI_TEST_PROMPT" \
         --argjson max_tokens "$CLIPROXYAPI_TEST_MAX_TOKENS" \
         '{
-          model: $model,
-          messages: [{role: "user", content: $prompt}],
-          max_tokens: $max_tokens
+            model: $model,
+            messages: [{role: "user", content: $prompt}],
+            max_tokens: $max_tokens
         }' >"$payload_file"
 
     if [ -n "$CLIPROXYAPI_API_KEY" ]; then

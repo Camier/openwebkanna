@@ -22,9 +22,10 @@ source "${_PRINT_UTILS_DIR}/colors.sh"
 print_header() {
     local title="$1"
     local width=60
-    local padding=$(((width - ${#title}) / 2))
+    local padding
     local left_pad=""
     local right_pad=""
+    padding=$(((width - ${#title}) / 2))
 
     # Calculate padding for centering
     for ((i = 0; i < padding; i++)); do
