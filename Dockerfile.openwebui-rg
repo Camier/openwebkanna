@@ -1,0 +1,19 @@
+"""
+Dockerfile.openwebui-rg
+
+Derives from an upstream OpenWebUI image and installs small debugging tools.
+
+Currently installs:
+- ripgrep (`rg`)
+
+Use with the optional compose override `docker-compose.rg.yml`.
+"""
+
+ARG BASE_IMAGE=ghcr.io/open-webui/open-webui:v0.8.3
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/sh", "-lc"]
+
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends ripgrep \
+  && rm -rf /var/lib/apt/lists/*

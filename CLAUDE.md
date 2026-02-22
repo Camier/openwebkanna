@@ -24,7 +24,6 @@ Current default mode is **OpenWebUI + Docker-managed CLIProxyAPI**.
 ## OAuth aliases expected
 
 - `openai-codex`
-- `antigravity-oauth`
 - `qwen-cli`
 - `kimi-cli`
 

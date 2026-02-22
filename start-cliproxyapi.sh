@@ -8,51 +8,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
+cd "$SCRIPT_DIR"
 
 # Configuration
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
@@ -70,18 +28,18 @@ CLIPROXYAPI_HEALTH_RETRIES="${CLIPROXYAPI_HEALTH_RETRIES:-45}"
 CLIPROXYAPI_STARTUP_WAIT_SECONDS="${CLIPROXYAPI_STARTUP_WAIT_SECONDS:-2}"
 CLIPROXYAPI_PORT="${CLIPROXYAPI_PORT:-8317}"
 CLIPROXYAPI_EXTRA_ARGS="${CLIPROXYAPI_EXTRA_ARGS:-}"
-CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-layra-cliproxyapi-key}"
+CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}"
+CLIPROXYAPI_ALLOW_INSECURE_DEFAULT_KEY="${CLIPROXYAPI_ALLOW_INSECURE_DEFAULT_KEY:-false}"
 CLIPROXYAPI_AUTH_DIR="${CLIPROXYAPI_AUTH_DIR:-./cliproxyapi/auth}"
 CLIPROXYAPI_AUTH_DIR_PATH=""
 CLIPROXYAPI_CONFIG_AUTOGEN="${CLIPROXYAPI_CONFIG_AUTOGEN:-true}"
+CLIPROXYAPI_CONFIG_AUTOGEN_OVERWRITE="${CLIPROXYAPI_CONFIG_AUTOGEN_OVERWRITE:-false}"
 CLIPROXYAPI_PROVIDER_MODE="${CLIPROXYAPI_PROVIDER_MODE:-claude-api-key}"
 CLIPROXYAPI_UPSTREAM_NAME="${CLIPROXYAPI_UPSTREAM_NAME:-upstream}"
 CLIPROXYAPI_UPSTREAM_BASE_URL="${CLIPROXYAPI_UPSTREAM_BASE_URL:-}"
 CLIPROXYAPI_UPSTREAM_API_KEY="${CLIPROXYAPI_UPSTREAM_API_KEY:-}"
 CLIPROXYAPI_UPSTREAM_MODEL="${CLIPROXYAPI_UPSTREAM_MODEL:-}"
 CLIPROXYAPI_UPSTREAM_MODEL_ALIAS="${CLIPROXYAPI_UPSTREAM_MODEL_ALIAS:-}"
-CLIPROXYAPI_OAUTH_ANTIGRAVITY_MODEL="${CLIPROXYAPI_OAUTH_ANTIGRAVITY_MODEL:-}"
-CLIPROXYAPI_OAUTH_ANTIGRAVITY_ALIAS="${CLIPROXYAPI_OAUTH_ANTIGRAVITY_ALIAS:-}"
 CLIPROXYAPI_OAUTH_CODEX_MODEL="${CLIPROXYAPI_OAUTH_CODEX_MODEL:-}"
 CLIPROXYAPI_OAUTH_CODEX_ALIAS="${CLIPROXYAPI_OAUTH_CODEX_ALIAS:-}"
 CLIPROXYAPI_OAUTH_QWEN_MODEL="${CLIPROXYAPI_OAUTH_QWEN_MODEL:-}"
@@ -89,111 +47,71 @@ CLIPROXYAPI_OAUTH_QWEN_ALIAS="${CLIPROXYAPI_OAUTH_QWEN_ALIAS:-}"
 CLIPROXYAPI_OAUTH_KIMI_MODEL="${CLIPROXYAPI_OAUTH_KIMI_MODEL:-}"
 CLIPROXYAPI_OAUTH_KIMI_ALIAS="${CLIPROXYAPI_OAUTH_KIMI_ALIAS:-}"
 CLIPROXYAPI_DISABLE_MANAGEMENT_PANEL="${CLIPROXYAPI_DISABLE_MANAGEMENT_PANEL:-true}"
+CLIPROXYAPI_VERIFY_MODELS_ON_START="${CLIPROXYAPI_VERIFY_MODELS_ON_START:-true}"
+CLIPROXYAPI_EXPECT_MODELS_NON_EMPTY="${CLIPROXYAPI_EXPECT_MODELS_NON_EMPTY:-true}"
+CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH="${CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH:-true}"
+CLIPROXYAPI_SYNC_CONFIG_API_KEY="${CLIPROXYAPI_SYNC_CONFIG_API_KEY:-true}"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
-normalize_base_url() {
+is_weak_local_key() {
     local value="$1"
-    printf "%s" "${value%/}"
+    [ -z "$value" ] && return 0
+
+    case "$value" in
+        layra-cliproxyapi-key | change-me-cliproxyapi-key | replace-with-strong-local-api-key | change-me | changeme | default | test | test-key)
+            return 0
+            ;;
+    esac
+
+    return 1
 }
 
-normalize_path() {
-    local value="$1"
-    if [ -z "$value" ]; then
-        printf "/"
-        return
+extract_models_count() {
+    local payload_file="$1"
+
+    if command_exists jq; then
+        jq -er '.data | if type == "array" then length else empty end' "$payload_file" 2>/dev/null || return 1
+        return 0
     fi
-    if [[ "$value" != /* ]]; then
-        value="/$value"
+
+    if ! grep -q '"data"[[:space:]]*:' "$payload_file"; then
+        return 1
     fi
-    printf "%s" "$value"
-}
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-executable_exists() {
-    local executable="$1"
-    if [[ "$executable" == */* ]]; then
-        [ -x "$executable" ]
-        return $?
-    fi
-    command_exists "$executable"
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
+    grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$payload_file" | wc -l | tr -d '[:space:]'
 }
 
 yaml_quote() {
     local value="$1"
     value="${value//\\/\\\\}"
     value="${value//\"/\\\"}"
-    printf "\"%s\"" "$value"
+    printf '"%s"' "$value"
 }
 
-if [[ "$CLIPROXYAPI_CMD" == */* ]]; then
+executable_exists() {
+    local executable="$1"
+    if [[ $executable == */* ]]; then
+        [ -x "$executable" ]
+        return $?
+    fi
+    command_exists "$executable"
+}
+
+if [[ $CLIPROXYAPI_CMD == */* ]]; then
     CLIPROXYAPI_CMD="$(resolve_path "$CLIPROXYAPI_CMD")"
 fi
 CLIPROXYAPI_CONFIG="$(resolve_path "$CLIPROXYAPI_CONFIG")"
-if [[ "$CLIPROXYAPI_SETUP_SCRIPT" == */* ]]; then
+if [[ $CLIPROXYAPI_SETUP_SCRIPT == */* ]]; then
     CLIPROXYAPI_SETUP_SCRIPT="$(resolve_path "$CLIPROXYAPI_SETUP_SCRIPT")"
 fi
 CLIPROXYAPI_LOG_FILE="$(resolve_path "${CLIPROXYAPI_LOG_FILE:-logs/cliproxyapi.log}")"
 CLIPROXYAPI_PID_FILE="$(resolve_path "${CLIPROXYAPI_PID_FILE:-.cliproxyapi.pid}")"
-if [[ "$CLIPROXYAPI_AUTH_DIR" = /* ]]; then
+if [[ $CLIPROXYAPI_AUTH_DIR == /* ]]; then
     CLIPROXYAPI_AUTH_DIR_PATH="$CLIPROXYAPI_AUTH_DIR"
 else
     CLIPROXYAPI_AUTH_DIR_PATH="$(resolve_path "$CLIPROXYAPI_AUTH_DIR")"
 fi
 CLIPROXYAPI_BASE_URL="$(normalize_base_url "$CLIPROXYAPI_BASE_URL")"
 CLIPROXYAPI_HEALTH_PATH="$(normalize_path "$CLIPROXYAPI_HEALTH_PATH")"
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     CLIProxyAPI Server Starter                            ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
-}
 
 prepare_provider_defaults() {
     CLIPROXYAPI_PROVIDER_MODE="$(printf "%s" "$CLIPROXYAPI_PROVIDER_MODE" | tr '[:upper:]' '[:lower:]')"
@@ -206,12 +124,6 @@ prepare_provider_defaults() {
     fi
 
     if [ "$CLIPROXYAPI_PROVIDER_MODE" = "oauth" ]; then
-        if [ -z "$CLIPROXYAPI_OAUTH_ANTIGRAVITY_MODEL" ]; then
-            CLIPROXYAPI_OAUTH_ANTIGRAVITY_MODEL="gemini-3-pro-high"
-        fi
-        if [ -z "$CLIPROXYAPI_OAUTH_ANTIGRAVITY_ALIAS" ]; then
-            CLIPROXYAPI_OAUTH_ANTIGRAVITY_ALIAS="antigravity-oauth"
-        fi
         if [ -z "$CLIPROXYAPI_OAUTH_CODEX_MODEL" ]; then
             CLIPROXYAPI_OAUTH_CODEX_MODEL="gpt-5-codex"
         fi
@@ -242,9 +154,6 @@ prepare_provider_defaults() {
         if [ -z "$CLIPROXYAPI_UPSTREAM_MODEL" ] && [ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ]; then
             CLIPROXYAPI_UPSTREAM_MODEL="$ANTHROPIC_DEFAULT_SONNET_MODEL"
         fi
-        if [ -z "$CLIPROXYAPI_UPSTREAM_MODEL" ]; then
-            CLIPROXYAPI_UPSTREAM_MODEL="glm-4.7"
-        fi
     fi
 
     if [ -z "$CLIPROXYAPI_UPSTREAM_MODEL_ALIAS" ]; then
@@ -254,8 +163,7 @@ prepare_provider_defaults() {
 
 validate_provider_config() {
     case "$CLIPROXYAPI_PROVIDER_MODE" in
-        claude-api-key|openai-compatibility|oauth)
-            ;;
+        claude-api-key | openai-compatibility | oauth) ;;
         *)
             print_error "Unsupported CLIPROXYAPI_PROVIDER_MODE: $CLIPROXYAPI_PROVIDER_MODE"
             print_info "Supported values: claude-api-key, openai-compatibility, oauth"
@@ -264,6 +172,16 @@ validate_provider_config() {
     esac
 
     if [ "$CLIPROXYAPI_PROVIDER_MODE" = "oauth" ]; then
+        if [ ! -d "$CLIPROXYAPI_AUTH_DIR_PATH" ]; then
+            print_error "OAuth mode requires auth directory: $CLIPROXYAPI_AUTH_DIR_PATH"
+            print_info "Run ./configure-cliproxyapi-oauth.sh to populate credentials"
+            return 1
+        fi
+        if ! find "$CLIPROXYAPI_AUTH_DIR_PATH" -maxdepth 2 -type f -name '*.json' | grep -q .; then
+            print_error "OAuth mode requires credential JSON files in $CLIPROXYAPI_AUTH_DIR_PATH"
+            print_info "Run ./configure-cliproxyapi-oauth.sh to create/update provider credentials"
+            return 1
+        fi
         return 0
     fi
 
@@ -283,7 +201,33 @@ validate_provider_config() {
     return 0
 }
 
+validate_local_api_key() {
+    local require_for_autogen="${1:-false}"
+
+    if [ -z "$CLIPROXYAPI_API_KEY" ]; then
+        if is_true "$require_for_autogen" || is_true "$CLIPROXYAPI_VERIFY_MODELS_ON_START"; then
+            print_error "CLIPROXYAPI_API_KEY is required for config autogen and startup verification"
+            return 1
+        fi
+        return 0
+    fi
+
+    if is_weak_local_key "$CLIPROXYAPI_API_KEY" && ! is_true "$CLIPROXYAPI_ALLOW_INSECURE_DEFAULT_KEY"; then
+        print_error "CLIPROXYAPI_API_KEY uses a weak default value"
+        print_info "Set a unique local key or set CLIPROXYAPI_ALLOW_INSECURE_DEFAULT_KEY=true (not recommended)"
+        return 1
+    fi
+
+    return 0
+}
+
 autogenerate_config() {
+    if [ -f "$CLIPROXYAPI_CONFIG" ] && ! is_true "$CLIPROXYAPI_CONFIG_AUTOGEN_OVERWRITE"; then
+        print_error "Config already exists and overwrite is disabled: $CLIPROXYAPI_CONFIG"
+        print_info "Set CLIPROXYAPI_CONFIG_AUTOGEN_OVERWRITE=true to regenerate"
+        return 1
+    fi
+
     mkdir -p "$(dirname "$CLIPROXYAPI_CONFIG")"
     mkdir -p "$CLIPROXYAPI_AUTH_DIR_PATH"
 
@@ -297,7 +241,6 @@ autogenerate_config() {
     print_step "Generating CLIProxyAPI config"
     print_info "Provider mode: $CLIPROXYAPI_PROVIDER_MODE"
     if [ "$CLIPROXYAPI_PROVIDER_MODE" = "oauth" ]; then
-        print_info "Antigravity alias: $CLIPROXYAPI_OAUTH_ANTIGRAVITY_ALIAS -> $CLIPROXYAPI_OAUTH_ANTIGRAVITY_MODEL"
         print_info "Codex alias: $CLIPROXYAPI_OAUTH_CODEX_ALIAS -> $CLIPROXYAPI_OAUTH_CODEX_MODEL"
         print_info "Qwen alias: $CLIPROXYAPI_OAUTH_QWEN_ALIAS -> $CLIPROXYAPI_OAUTH_QWEN_MODEL"
         print_info "Kimi alias: $CLIPROXYAPI_OAUTH_KIMI_ALIAS -> $CLIPROXYAPI_OAUTH_KIMI_MODEL"
@@ -306,7 +249,7 @@ autogenerate_config() {
         print_info "Model alias: $CLIPROXYAPI_UPSTREAM_MODEL_ALIAS"
     fi
 
-cat > "$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
+    cat >"$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
 host: $(yaml_quote "$CLIPROXYAPI_BIND_HOST")
 port: $CLIPROXYAPI_PORT
 
@@ -345,7 +288,7 @@ routing:
 EOF_CONFIG
 
     if [ "$CLIPROXYAPI_PROVIDER_MODE" = "claude-api-key" ]; then
-        cat >> "$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
+        cat >>"$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
 
 claude-api-key:
   - api-key: $(yaml_quote "$CLIPROXYAPI_UPSTREAM_API_KEY")
@@ -355,7 +298,7 @@ claude-api-key:
         alias: $(yaml_quote "$CLIPROXYAPI_UPSTREAM_MODEL_ALIAS")
 EOF_CONFIG
     elif [ "$CLIPROXYAPI_PROVIDER_MODE" = "openai-compatibility" ]; then
-        cat >> "$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
+        cat >>"$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
 
 openai-compatibility:
   - name: $(yaml_quote "$CLIPROXYAPI_UPSTREAM_NAME")
@@ -367,12 +310,9 @@ openai-compatibility:
         alias: $(yaml_quote "$CLIPROXYAPI_UPSTREAM_MODEL_ALIAS")
 EOF_CONFIG
     else
-        cat >> "$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
+        cat >>"$CLIPROXYAPI_CONFIG" <<EOF_CONFIG
 
 oauth-model-alias:
-  antigravity:
-    - name: $(yaml_quote "$CLIPROXYAPI_OAUTH_ANTIGRAVITY_MODEL")
-      alias: $(yaml_quote "$CLIPROXYAPI_OAUTH_ANTIGRAVITY_ALIAS")
   codex:
     - name: $(yaml_quote "$CLIPROXYAPI_OAUTH_CODEX_MODEL")
       alias: $(yaml_quote "$CLIPROXYAPI_OAUTH_CODEX_ALIAS")
@@ -385,7 +325,7 @@ oauth-model-alias:
 EOF_CONFIG
     fi
 
-    cat >> "$CLIPROXYAPI_CONFIG" <<'EOF_CONFIG'
+    cat >>"$CLIPROXYAPI_CONFIG" <<'EOF_CONFIG'
 
 ws-auth: false
 nonstream-keepalive-interval: 0
@@ -395,7 +335,7 @@ EOF_CONFIG
 }
 
 install_official_binary() {
-    if [[ "$CLIPROXYAPI_CMD" != */* ]]; then
+    if [[ $CLIPROXYAPI_CMD != */* ]]; then
         print_error "CLIPROXYAPI_CMD must be a filesystem path to install binary: $CLIPROXYAPI_CMD"
         return 1
     fi
@@ -455,6 +395,56 @@ wait_for_health() {
     return 1
 }
 
+verify_models_on_start() {
+    local models_url="${CLIPROXYAPI_BASE_URL}/v1/models"
+    local attempt=1
+    local tmp_file=""
+    local code=""
+    local models_count=""
+
+    if ! is_true "$CLIPROXYAPI_VERIFY_MODELS_ON_START"; then
+        return 0
+    fi
+
+    if [ -z "$CLIPROXYAPI_API_KEY" ]; then
+        print_error "CLIPROXYAPI_API_KEY is required when CLIPROXYAPI_VERIFY_MODELS_ON_START=true"
+        return 1
+    fi
+
+    print_step "Verifying authenticated models endpoint"
+    print_info "URL: $models_url"
+
+    while [ "$attempt" -le "$CLIPROXYAPI_HEALTH_RETRIES" ]; do
+        tmp_file="$(mktemp)"
+        code="$(curl -sS -m 8 \
+            -H "Authorization: Bearer $CLIPROXYAPI_API_KEY" \
+            -o "$tmp_file" -w "%{http_code}" \
+            "$models_url" || true)"
+
+        if [ "$code" = "200" ]; then
+            models_count="$(extract_models_count "$tmp_file" 2>/dev/null || true)"
+            rm -f "$tmp_file"
+
+            if [ -z "$models_count" ]; then
+                print_warning "Unable to parse models payload (attempt ${attempt}/${CLIPROXYAPI_HEALTH_RETRIES})"
+            elif is_true "$CLIPROXYAPI_EXPECT_MODELS_NON_EMPTY" && [ "$models_count" -le 0 ] 2>/dev/null; then
+                print_warning "Models list is empty (attempt ${attempt}/${CLIPROXYAPI_HEALTH_RETRIES})"
+            else
+                print_success "Authenticated models endpoint is ready (${models_count:-unknown} models)"
+                return 0
+            fi
+        else
+            rm -f "$tmp_file"
+        fi
+
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    print_error "Authenticated models endpoint did not become ready: $models_url"
+    return 1
+}
+
 show_usage() {
     cat <<'EOF_USAGE'
 Usage: ./start-cliproxyapi.sh [--help]
@@ -468,6 +458,7 @@ Environment variables:
   CLIPROXYAPI_VERSION                Release tag or latest (default: latest)
   CLIPROXYAPI_REBUILD                Force reinstall on start (default: false)
   CLIPROXYAPI_CONFIG_AUTOGEN         Generate config from env (default: true)
+  CLIPROXYAPI_CONFIG_AUTOGEN_OVERWRITE Overwrite existing config when autogen is enabled
   CLIPROXYAPI_PROVIDER_MODE          claude-api-key, openai-compatibility, or oauth
   CLIPROXYAPI_BIND_HOST              Listener host written to config (default: 0.0.0.0)
   CLIPROXYAPI_UPSTREAM_BASE_URL      Required upstream base URL
@@ -475,12 +466,18 @@ Environment variables:
   CLIPROXYAPI_UPSTREAM_MODEL         Required upstream model id
   CLIPROXYAPI_UPSTREAM_MODEL_ALIAS   Model alias exposed to clients
   CLIPROXYAPI_UPSTREAM_NAME          Provider name for openai-compatibility mode
-  CLIPROXYAPI_OAUTH_*                OAuth alias mapping env vars for antigravity/codex/qwen/kimi
+  CLIPROXYAPI_OAUTH_*                OAuth alias mapping env vars for codex/qwen/kimi
   CLIPROXYAPI_API_KEY                Local key accepted by CLIProxyAPI
+  CLIPROXYAPI_VERIFY_MODELS_ON_START Validate authenticated /v1/models after health checks
+  CLIPROXYAPI_ALLOW_INSECURE_DEFAULT_KEY Allow known weak default keys (not recommended)
+  CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH Require config api-key to match CLIPROXYAPI_API_KEY
+  CLIPROXYAPI_SYNC_CONFIG_API_KEY    Sync first config api-key entry with CLIPROXYAPI_API_KEY
 EOF_USAGE
 }
 
 main() {
+    local autogen_needed=false
+
     if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
         show_usage
         return 0
@@ -503,19 +500,37 @@ main() {
         return 1
     fi
 
+    if is_true "$CLIPROXYAPI_CONFIG_AUTOGEN"; then
+        if [ -f "$CLIPROXYAPI_CONFIG" ] && ! is_true "$CLIPROXYAPI_CONFIG_AUTOGEN_OVERWRITE"; then
+            print_info "Config autogen skipped (existing config preserved): $CLIPROXYAPI_CONFIG"
+        else
+            autogen_needed=true
+        fi
+    fi
+
+    if ! validate_local_api_key "$autogen_needed"; then
+        return 1
+    fi
+
     ensure_binary
 
     prepare_provider_defaults
 
-    if is_true "$CLIPROXYAPI_CONFIG_AUTOGEN"; then
+    if [ "$autogen_needed" = true ]; then
         if ! validate_provider_config; then
             return 1
         fi
-        autogenerate_config
+        if ! autogenerate_config; then
+            return 1
+        fi
     fi
 
     if [ ! -f "$CLIPROXYAPI_CONFIG" ]; then
         print_error "Config file not found: $CLIPROXYAPI_CONFIG"
+        return 1
+    fi
+
+    if ! ensure_cliproxyapi_config_api_key_alignment; then
         return 1
     fi
 
@@ -544,7 +559,7 @@ main() {
     local -a command=("$CLIPROXYAPI_CMD" "$CLIPROXYAPI_CONFIG_FLAG" "$CLIPROXYAPI_CONFIG")
     if [ -n "$CLIPROXYAPI_EXTRA_ARGS" ]; then
         # shellcheck disable=SC2206
-        local -a extra_args=( $CLIPROXYAPI_EXTRA_ARGS )
+        local -a extra_args=($CLIPROXYAPI_EXTRA_ARGS)
         command+=("${extra_args[@]}")
     fi
 
@@ -565,6 +580,11 @@ main() {
     fi
 
     if ! wait_for_health; then
+        tail -n 40 "$CLIPROXYAPI_LOG_FILE" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! verify_models_on_start; then
         tail -n 40 "$CLIPROXYAPI_LOG_FILE" 2>/dev/null || true
         return 1
     fi

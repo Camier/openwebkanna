@@ -3,19 +3,16 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
+
 # Configuration
 HOST="localhost"
 PORT=8000
 PID_FILE="vllm.pid"
 HEALTH_URL="http://${HOST}:${PORT}/health"
 MODELS_URL="http://${HOST}:${PORT}/v1/models"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
 
 echo "=== vLLM Server Status Check ==="
 echo ""
@@ -29,8 +26,8 @@ if [ -f "${PID_FILE}" ]; then
     echo -e "${BLUE}PID file found: ${VLLM_PID}${NC}"
 
     # Check if process is running
-    if ps -p ${VLLM_PID} > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ vLLM process is running (PID: ${VLLM_PID})${NC}"
+    if ps -p ${VLLM_PID} >/dev/null 2>&1; then
+        echo -e "${GREEN}OK vLLM process is running (PID: ${VLLM_PID})${NC}"
         VLLM_RUNNING=true
 
         # Show process details
@@ -39,7 +36,7 @@ if [ -f "${PID_FILE}" ]; then
             echo "  ${line}"
         done
     else
-        echo -e "${RED}✗ vLLM process is NOT running (stale PID file)${NC}"
+        echo -e "${RED}X vLLM process is NOT running (stale PID file)${NC}"
     fi
 else
     echo -e "${YELLOW}No PID file found.${NC}"
@@ -51,19 +48,19 @@ echo ""
 echo -e "${BLUE}Port check:${NC}"
 if lsof -Pi :${PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
     PORT_PID=$(lsof -ti:${PORT})
-    echo -e "${GREEN}✓ Port ${PORT} is in use (process: ${PORT_PID})${NC}"
+    echo -e "${GREEN}OK Port ${PORT} is in use (process: ${PORT_PID})${NC}"
 
     # Check if it matches our PID file
     if [ -f "${PID_FILE}" ]; then
         VLLM_PID=$(cat "${PID_FILE}")
         if [ "${PORT_PID}" == "${VLLM_PID}" ]; then
-            echo -e "${GREEN}✓ Port process matches PID file${NC}"
+            echo -e "${GREEN}OK Port process matches PID file${NC}"
         else
-            echo -e "${YELLOW}⚠ Port process (${PORT_PID}) does not match PID file (${VLLM_PID})${NC}"
+            echo -e "${YELLOW}! Port process (${PORT_PID}) does not match PID file (${VLLM_PID})${NC}"
         fi
     fi
 else
-    echo -e "${RED}✗ Port ${PORT} is NOT in use${NC}"
+    echo -e "${RED}X Port ${PORT} is NOT in use${NC}"
 fi
 
 echo ""
@@ -72,14 +69,14 @@ echo ""
 echo -e "${BLUE}Server health check:${NC}"
 
 # Check if curl is available
-if ! command -v curl &> /dev/null; then
+if ! command_exists curl; then
     echo -e "${YELLOW}curl not found. Skipping HTTP health check.${NC}"
 else
     # Try health endpoint
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" 2>/dev/null || echo "000")
 
     if [ "${HTTP_CODE}" == "200" ]; then
-        echo -e "${GREEN}✓ Health endpoint responding (HTTP ${HTTP_CODE})${NC}"
+        echo -e "${GREEN}OK Health endpoint responding (HTTP ${HTTP_CODE})${NC}"
         VLLM_RESPONDING=true
 
         # Try models endpoint to show loaded model
@@ -89,7 +86,7 @@ else
             echo "${MODELS_RESPONSE}" | python3 -m json.tool 2>/dev/null || echo "${MODELS_RESPONSE}"
         fi
     else
-        echo -e "${RED}✗ Health endpoint not responding (HTTP ${HTTP_CODE})${NC}"
+        echo -e "${RED}X Health endpoint not responding (HTTP ${HTTP_CODE})${NC}"
         echo "  URL: ${HEALTH_URL}"
     fi
 fi

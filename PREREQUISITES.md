@@ -43,7 +43,7 @@ Expected values for CLIProxyAPI-first mode:
 
 ## OAuth prerequisites
 
-For aliases `openai-codex`, `antigravity-oauth`, `qwen-cli`, `kimi-cli`:
+For aliases `openai-codex`, `qwen-cli`, `kimi-cli`:
 
 1. Complete provider OAuth manually when prompted.
 2. Ensure auth artifacts exist under `cliproxyapi/auth/`.

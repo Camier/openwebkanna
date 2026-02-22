@@ -8,51 +8,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
+cd "$SCRIPT_DIR"
 
 # Configuration
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
@@ -62,7 +20,7 @@ CLIPROXYAPI_CHAT_PATH="${CLIPROXYAPI_CHAT_PATH:-/v1/chat/completions}"
 CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
 CLIPROXYAPI_START_SCRIPT="${CLIPROXYAPI_START_SCRIPT:-./start-cliproxyapi.sh}"
 CLIPROXYAPI_STOP_SCRIPT="${CLIPROXYAPI_STOP_SCRIPT:-./stop-cliproxyapi.sh}"
-CLIPROXYAPI_TEST_ALIASES="${CLIPROXYAPI_TEST_ALIASES:-openai-codex antigravity-oauth qwen-cli kimi-cli}"
+CLIPROXYAPI_TEST_ALIASES="${CLIPROXYAPI_TEST_ALIASES:-openai-codex qwen-cli kimi-cli}"
 CLIPROXYAPI_TEST_PROMPT="${CLIPROXYAPI_TEST_PROMPT:-reply with exactly: ok}"
 CLIPROXYAPI_TEST_MAX_TOKENS="${CLIPROXYAPI_TEST_MAX_TOKENS:-12}"
 CLIPROXYAPI_REQUEST_TIMEOUT="${CLIPROXYAPI_REQUEST_TIMEOUT:-70}"
@@ -71,15 +29,6 @@ CLIPROXYAPI_CHAT_RETRY_SLEEP_SECONDS="${CLIPROXYAPI_CHAT_RETRY_SLEEP_SECONDS:-2}
 CLIPROXYAPI_AUTO_START="${CLIPROXYAPI_AUTO_START:-true}"
 CLIPROXYAPI_STOP_AFTER_TEST="${CLIPROXYAPI_STOP_AFTER_TEST:-true}"
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
 # Test counters
 TESTS_TOTAL=0
 TESTS_PASSED=0
@@ -87,70 +36,6 @@ TESTS_FAILED=0
 
 STARTED_BY_SCRIPT=false
 TMP_DIR=""
-
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
-normalize_base_url() {
-    local value="$1"
-    printf "%s" "${value%/}"
-}
-
-normalize_path() {
-    local value="$1"
-    if [ -z "$value" ]; then
-        printf "/"
-        return
-    fi
-    if [[ "$value" != /* ]]; then
-        value="/$value"
-    fi
-    printf "%s" "$value"
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     CLIProxyAPI OAuth Regression Test                     ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
-}
 
 test_pass() {
     local label="$1"
@@ -208,7 +93,7 @@ chat_probe() {
           model: $model,
           messages: [{role: "user", content: $prompt}],
           max_tokens: $max_tokens
-        }' > "$payload_file"
+        }' >"$payload_file"
 
     if [ -n "$CLIPROXYAPI_API_KEY" ]; then
         curl -sS -m "$CLIPROXYAPI_REQUEST_TIMEOUT" \
@@ -273,7 +158,12 @@ main() {
     TMP_DIR="$(mktemp -d)"
     trap cleanup EXIT
 
-    print_header
+    echo -e "${CYAN}${BOLD}"
+    echo "+------------------------------------------------------------+"
+    echo "|         CLIProxyAPI OAuth Regression Test                  |"
+    echo "+------------------------------------------------------------+"
+    echo -e "${NC}"
+
     print_info "Base URL: $CLIPROXYAPI_BASE_URL"
     print_info "Aliases: $CLIPROXYAPI_TEST_ALIASES"
     print_info "Chat retries: $CLIPROXYAPI_CHAT_RETRIES"

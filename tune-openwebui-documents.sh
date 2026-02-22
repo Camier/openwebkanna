@@ -13,88 +13,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║  OpenWebUI Documents Settings Tuner                        ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_info() {
-    echo -e "  ${CYAN}ℹ${NC} $1"
-}
-
-print_success() {
-    echo -e "  ${GREEN}✓${NC} $1"
-}
-
-print_warning() {
-    echo -e "  ${YELLOW}⚠${NC} $1"
-}
-
-print_error() {
-    echo -e "  ${RED}✗${NC} $1" >&2
-}
+cd "$SCRIPT_DIR"
 
 require_cmd() {
     local cmd="$1"
@@ -343,7 +264,7 @@ parse_args() {
                 RESTORE_FILE="$2"
                 shift 2
                 ;;
-            -h|--help)
+            -h | --help)
                 SHOW_HELP=true
                 shift 1
                 ;;
@@ -367,7 +288,7 @@ main() {
     require_cmd jq
     require_cmd rg
 
-    print_header
+    print_header "OpenWebUI Documents Settings Tuner"
     print_step "Configuration"
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
     print_info "Apply changes: $APPLY_CHANGES"

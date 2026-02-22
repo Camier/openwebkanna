@@ -8,66 +8,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "${key?}"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
-
-# Color definitions (standard repository set)
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
+cd "$SCRIPT_DIR"
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
+OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
+OPENWEBUI_TOKEN="${OPENWEBUI_TOKEN:-}"
+OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
+OPENWEBUI_DOCKER_SERVICE="${OPENWEBUI_DOCKER_SERVICE:-openwebui}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-45}"
 VERBOSE="${VERBOSE:-false}"
 OUTPUT_DIR="${OUTPUT_DIR:-/tmp/openwebui_tool_audit_$(date +%Y%m%d_%H%M%S)}"
@@ -94,62 +48,6 @@ TESTS_SKIPPED=0
 
 declare -a FAILURES=()
 declare -a WARNINGS=()
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║       OpenWebUI Tool-by-Tool Functional Audit             ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_section() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
-
-require_dependencies() {
-    local missing=0
-    for cmd in curl jq; do
-        if ! command_exists "$cmd"; then
-            print_error "Missing dependency: $cmd"
-            missing=1
-        fi
-    done
-
-    if [ "$missing" -ne 0 ]; then
-        exit 1
-    fi
-}
 
 start_test() {
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -185,6 +83,119 @@ skip_test() {
 uri_encode() {
     local value="$1"
     jq -nr --arg v "$value" '$v|@uri'
+}
+
+read_dot007_key() {
+    local wanted="$1"
+    local dotfile="$HOME/.007"
+
+    [ -f "$dotfile" ] || return 1
+
+    awk -v k="$wanted" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            line=$0
+            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+            sep = index(line, "=") ? "=" : (index(line, ":") ? ":" : "")
+            if (sep == "") next
+            split(line, parts, sep)
+            key=parts[1]
+            sub(/^[[:space:]]+/, "", key); sub(/[[:space:]]+$/, "", key)
+            if (key != k) next
+            val = substr(line, length(parts[1]) + 2)
+            sub(/^[[:space:]]+/, "", val); sub(/[[:space:]]+$/, "", val)
+            if ((val ~ /^".*"$/) || (val ~ /^\x27.*\x27$/)) {
+                val = substr(val, 2, length(val)-2)
+            }
+            print val
+            exit 0
+        }
+    ' "$dotfile"
+}
+
+docker_compose_ps_q() {
+    local service="$1"
+
+    if command_exists docker && docker compose version >/dev/null 2>&1; then
+        docker compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null || true
+        return 0
+    fi
+
+    if command_exists docker-compose; then
+        docker-compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null || true
+        return 0
+    fi
+
+    return 1
+}
+
+try_mint_openwebui_admin_jwt() {
+    if ! command_exists python3 || ! command_exists docker; then
+        return 1
+    fi
+
+    if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
+        return 1
+    fi
+
+    local cid=""
+    cid="$(docker_compose_ps_q "$OPENWEBUI_DOCKER_SERVICE" | tr -d '\r' | head -n 1)"
+    if [ -z "$cid" ]; then
+        cid="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_SERVICE}$" 2>/dev/null | head -n 1 || true)"
+    fi
+    if [ -z "$cid" ]; then
+        return 1
+    fi
+
+    local admin_id=""
+    admin_id="$(docker exec "$cid" python3 -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+    if [ -z "$admin_id" ]; then
+        return 1
+    fi
+
+    local token=""
+    token="$(
+        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" python3 - <<'PY'
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+import uuid
+
+secret = os.environ.get("WEBUI_SECRET_KEY", "")
+user_id = os.environ.get("OPENWEBUI_ADMIN_ID", "")
+if not secret or not user_id:
+    raise SystemExit(1)
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+header = {"alg": "HS256", "typ": "JWT"}
+payload = {
+    "id": user_id,
+    "exp": int(time.time()) + 60 * 60 * 24 * 30,
+    "jti": str(uuid.uuid4()),
+}
+
+header_b64 = b64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+payload_b64 = b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+token = f"{header_b64}.{payload_b64}.{b64url(sig)}"
+print(token)
+PY
+    )"
+
+    if [ -z "$token" ]; then
+        return 1
+    fi
+
+    API_TOKEN="$token"
+    print_info "Authenticated via locally minted admin JWT (WEBUI_SECRET_KEY)"
+    return 0
 }
 
 response_detail() {
@@ -229,43 +240,84 @@ request_api() {
 }
 
 sign_in() {
-    local signin_output payload_file signin_url signin_code role
+    local dot_token=""
+    dot_token="$(read_dot007_key "OPENWEBUI_TOKEN" 2>/dev/null || true)"
+    if [ -z "$dot_token" ]; then
+        dot_token="$(read_dot007_key "OPENWEBUI_API_KEY" 2>/dev/null || true)"
+    fi
+    if [ -z "$dot_token" ]; then
+        dot_token="$(read_dot007_key "OPENWEBUI_LOCAL_API_KEY" 2>/dev/null || true)"
+    fi
 
-    signin_output="$OUTPUT_DIR/auth_signin.json"
-    payload_file="$OUTPUT_DIR/auth_signin.payload.json"
-    signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
+    if [ -n "$OPENWEBUI_TOKEN" ]; then
+        API_TOKEN="$OPENWEBUI_TOKEN"
+        print_info "Using OPENWEBUI_TOKEN for auth"
+        return 0
+    fi
+    if [ -n "$OPENWEBUI_API_KEY" ]; then
+        API_TOKEN="$OPENWEBUI_API_KEY"
+        print_info "Using OPENWEBUI_API_KEY for auth"
+        return 0
+    fi
+    if [ -n "$dot_token" ]; then
+        API_TOKEN="$dot_token"
+        print_info "Using ~/.007 OpenWebUI token for auth"
+        return 0
+    fi
 
-    jq -n \
-        --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-        --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-        '{email: $email, password: $password}' > "$payload_file"
+    if is_true "$OPENWEBUI_AUTO_AUTH"; then
+        local signin_output payload_file signin_url signin_code role
 
-    signin_code="$(curl -sS -m "$CURL_TIMEOUT" -X POST "$signin_url" \
-        -H "Content-Type: application/json" \
-        --data @"$payload_file" \
-        -o "$signin_output" -w "%{http_code}" 2>"$OUTPUT_DIR/auth_signin.curl.err" || true)"
+        signin_output="$OUTPUT_DIR/auth_signin.json"
+        payload_file="$OUTPUT_DIR/auth_signin.payload.json"
+        signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
 
-    if [ "$signin_code" != "200" ]; then
-        print_error "OpenWebUI signin failed (HTTP $signin_code)"
-        if [ -s "$signin_output" ]; then
-            cat "$signin_output"
+        jq -n \
+            --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
+            --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
+            '{email: $email, password: $password}' >"$payload_file"
+
+        signin_code="$(curl -sS -m "$CURL_TIMEOUT" -X POST "$signin_url" \
+            -H "Content-Type: application/json" \
+            --data @"$payload_file" \
+            -o "$signin_output" -w "%{http_code}" 2>"$OUTPUT_DIR/auth_signin.curl.err" || true)"
+
+        if [ "$signin_code" = "200" ]; then
+            API_TOKEN="$(jq -r '.token // empty' "$signin_output" 2>/dev/null || true)"
+            role="$(jq -r '.role // empty' "$signin_output" 2>/dev/null || true)"
+            if [ -n "$API_TOKEN" ]; then
+                if [ -n "$role" ]; then
+                    print_info "Authenticated with role: $role"
+                else
+                    print_info "Authenticated successfully"
+                fi
+                return 0
+            fi
+            print_warning "Signin succeeded but no token returned"
+        else
+            local detail=""
+            detail="$(jq -r '.detail // .error.message // .message // empty' "$signin_output" 2>/dev/null || true)"
+            print_warning "OpenWebUI signin failed (HTTP ${signin_code}${detail:+: $detail}); trying local JWT fallback"
         fi
-        exit 1
-    fi
-
-    API_TOKEN="$(jq -r '.token // empty' "$signin_output")"
-    role="$(jq -r '.role // empty' "$signin_output")"
-
-    if [ -z "$API_TOKEN" ]; then
-        print_error "Signin succeeded but no token returned"
-        exit 1
-    fi
-
-    if [ -n "$role" ]; then
-        print_info "Authenticated with role: $role"
     else
-        print_info "Authenticated successfully"
+        print_warning "OPENWEBUI_AUTO_AUTH=false and no token provided; trying local JWT fallback"
     fi
+
+    if try_mint_openwebui_admin_jwt; then
+        return 0
+    fi
+
+    # If auth is not required, allow proceeding without a token.
+    local probe_file="$OUTPUT_DIR/auth_probe_models.json"
+    local probe_code=""
+    probe_code="$(curl -sS -m "$CURL_TIMEOUT" -o "$probe_file" -w "%{http_code}" "${OPENWEBUI_URL%/}/api/models" 2>"$OUTPUT_DIR/auth_probe_models.curl.err" || true)"
+    if [ "$probe_code" = "200" ]; then
+        print_warning "Proceeding without auth token (OpenWebUI /api/models is accessible unauthenticated)"
+        return 0
+    fi
+
+    print_error "Unable to authenticate to OpenWebUI (set OPENWEBUI_TOKEN/OPENWEBUI_API_KEY, configure OPENWEBUI_SIGNIN_EMAIL/OPENWEBUI_SIGNIN_PASSWORD, or ensure WEBUI_SECRET_KEY is available for local JWT minting)"
+    exit 1
 }
 
 bootstrap_function_if_registry_empty() {
@@ -282,7 +334,8 @@ bootstrap_function_if_registry_empty() {
 
     start_test "POST /api/v1/functions/create bootstraps minimal function"
 
-    function_content="$(cat <<'PY'
+    function_content="$(
+        cat <<'PY'
 from typing import Optional
 
 
@@ -290,7 +343,7 @@ class Pipe:
     def pipe(self, body: dict, __user__: Optional[dict] = None) -> str:
         return "audit-ping-ok"
 PY
-)"
+    )"
 
     payload_file="$OUTPUT_DIR/functions_bootstrap.payload.json"
     jq -n \
@@ -303,7 +356,7 @@ PY
             name: $name,
             content: $content,
             meta: {description: $description}
-        }' > "$payload_file"
+        }' >"$payload_file"
 
     request_api "POST" "/api/v1/functions/create" "$payload_file" "functions_bootstrap_create"
     if [ "$RESPONSE_CODE" = "200" ] && jq -e --arg id "$AUDIT_BOOTSTRAP_FUNCTION_ID" '.id == $id' "$RESPONSE_FILE" >/dev/null 2>&1; then
@@ -313,7 +366,7 @@ PY
     fi
 
     detail="$(response_detail)"
-    if [ "$RESPONSE_CODE" = "400" ] && [[ "$detail" == *"ID_TAKEN"* || "$detail" == *"ID already taken"* ]]; then
+    if [ "$RESPONSE_CODE" = "400" ] && [[ $detail == *"ID_TAKEN"* || $detail == *"ID already taken"* ]]; then
         warn_test "Bootstrap function id already exists"
         return 0
     fi
@@ -355,6 +408,9 @@ cleanup_bootstrap_function_if_needed() {
 
 test_tools_endpoints() {
     local tools_count first_tool_id first_tool_id_encoded
+    local tool_id tool_id_encoded idx
+    local details_label details_file
+    local spec_names expected_specs missing
 
     print_section "Tools Endpoints"
 
@@ -391,6 +447,107 @@ test_tools_endpoints() {
         start_test "GET /api/v1/tools/id/{id} returns tool details"
         skip_test "No tools available in /api/v1/tools/list"
     fi
+
+    # Tool-by-tool valves + specs sanity checks.
+    idx=0
+    while IFS= read -r tool_id; do
+        [ -z "$tool_id" ] && continue
+
+        tool_id_encoded="$(uri_encode "$tool_id")"
+        details_label="tool_${idx}_details"
+        details_file="$OUTPUT_DIR/${details_label}.json"
+
+        start_test "GET /api/v1/tools/id/{id} returns tool details (${tool_id})"
+        request_api "GET" "/api/v1/tools/id/${tool_id_encoded}" "" "$details_label"
+        if [ "$RESPONSE_CODE" = "200" ] && jq -e 'type == "object"' "$RESPONSE_FILE" >/dev/null 2>&1; then
+            pass_test
+        else
+            fail_test "HTTP $RESPONSE_CODE :: $(response_detail)"
+            idx=$((idx + 1))
+            continue
+        fi
+
+        start_test "Tool specs do not expose private'_' helpers (${tool_id})"
+        if jq -r '.specs[]?.name // empty' "$details_file" 2>/dev/null | grep -q '^_'; then
+            spec_names="$(jq -r '.specs[]?.name // empty' "$details_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+            fail_test "Found private spec(s): ${spec_names}"
+        else
+            pass_test
+        fi
+
+        # Enforce expected public API per local tool (guards accidental helper exposure).
+        expected_specs=""
+        case "$tool_id" in
+            llm_council) expected_specs="council" ;;
+            web_scraper) expected_specs="search_web scrape_url" ;;
+            run_code) expected_specs="run_code" ;;
+            tavily) expected_specs="search" ;;
+            pubmed) expected_specs="search_pubmed" ;;
+            arxiv) expected_specs="search_arxiv" ;;
+            github) expected_specs="search_repos" ;;
+        esac
+
+        if [ -n "$expected_specs" ]; then
+            start_test "Tool specs match expected public functions (${tool_id})"
+            missing=""
+            for fn in $expected_specs; do
+                if ! jq -e --arg fn "$fn" '[.specs[]?.name // empty] | index($fn) != null' "$details_file" >/dev/null 2>&1; then
+                    missing="${missing}${missing:+,}${fn}"
+                fi
+            done
+            if [ -n "$missing" ]; then
+                spec_names="$(jq -r '.specs[]?.name // empty' "$details_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+                fail_test "Missing expected function(s): ${missing} (actual: ${spec_names})"
+            else
+                # Ensure no unexpected extra functions exist.
+                if [ "$(jq -r '.specs | length' "$details_file" 2>/dev/null || echo 0)" -ne "$(printf "%s\n" $expected_specs | wc -l | tr -d ' ')" ]; then
+                    spec_names="$(jq -r '.specs[]?.name // empty' "$details_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+                    fail_test "Unexpected extra spec(s) present (actual: ${spec_names})"
+                else
+                    pass_test
+                fi
+            fi
+        fi
+
+        start_test "GET /api/v1/tools/id/{id}/valves/spec returns valves schema (${tool_id})"
+        request_api "GET" "/api/v1/tools/id/${tool_id_encoded}/valves/spec" "" "tool_${idx}_valves_spec"
+        if [ "$RESPONSE_CODE" = "200" ] && jq -e '(type == "object") or (. == null)' "$RESPONSE_FILE" >/dev/null 2>&1; then
+            # For local tools, Valves should exist (schema object, not null).
+            if [[ $tool_id != server:* ]] && jq -e '. == null' "$RESPONSE_FILE" >/dev/null 2>&1; then
+                fail_test "Valves schema is null (tool likely missing Valves class)"
+            else
+                pass_test
+            fi
+        else
+            fail_test "HTTP $RESPONSE_CODE :: $(response_detail)"
+        fi
+
+        start_test "GET /api/v1/tools/id/{id}/valves returns valves values (${tool_id})"
+        request_api "GET" "/api/v1/tools/id/${tool_id_encoded}/valves" "" "tool_${idx}_valves"
+        if [ "$RESPONSE_CODE" = "200" ] && jq -e '(type == "object") or (. == null)' "$RESPONSE_FILE" >/dev/null 2>&1; then
+            pass_test
+        else
+            fail_test "HTTP $RESPONSE_CODE :: $(response_detail)"
+        fi
+
+        start_test "GET /api/v1/tools/id/{id}/valves/user/spec returns user valves schema (${tool_id})"
+        request_api "GET" "/api/v1/tools/id/${tool_id_encoded}/valves/user/spec" "" "tool_${idx}_user_valves_spec"
+        if [ "$RESPONSE_CODE" = "200" ] && jq -e '(type == "object") or (. == null)' "$RESPONSE_FILE" >/dev/null 2>&1; then
+            pass_test
+        else
+            fail_test "HTTP $RESPONSE_CODE :: $(response_detail)"
+        fi
+
+        start_test "GET /api/v1/tools/id/{id}/valves/user returns user valves values (${tool_id})"
+        request_api "GET" "/api/v1/tools/id/${tool_id_encoded}/valves/user" "" "tool_${idx}_user_valves"
+        if [ "$RESPONSE_CODE" = "200" ] && jq -e '(type == "object") or (. == null)' "$RESPONSE_FILE" >/dev/null 2>&1; then
+            pass_test
+        else
+            fail_test "HTTP $RESPONSE_CODE :: $(response_detail)"
+        fi
+
+        idx=$((idx + 1))
+    done < <(jq -r '.[].id // empty' "$OUTPUT_DIR/tools_list.json" 2>/dev/null || true)
 }
 
 test_functions_endpoints() {
@@ -465,7 +622,7 @@ test_code_execution_endpoints() {
     fi
 
     payload_file="$OUTPUT_DIR/code_execute.payload.json"
-    jq -n --arg code "print(2 + 3)" '{code: $code}' > "$payload_file"
+    jq -n --arg code "print(2 + 3)" '{code: $code}' >"$payload_file"
 
     start_test "POST /api/v1/utils/code/execute executes Python snippet"
     request_api "POST" "/api/v1/utils/code/execute" "$payload_file" "code_execute"
@@ -475,7 +632,7 @@ test_code_execution_endpoints() {
     fi
 
     detail="$(response_detail)"
-    if [ "$RESPONSE_CODE" = "400" ] && [[ "$detail" == *"Code execution engine not supported"* ]]; then
+    if [ "$RESPONSE_CODE" = "400" ] && [[ $detail == *"Code execution engine not supported"* ]]; then
         if [ "$code_exec_enabled" = "true" ] && [ "$code_exec_engine" != "jupyter" ]; then
             fail_test "Config mismatch: ENABLE_CODE_EXECUTION=true but engine=$code_exec_engine is unsupported by /utils/code/execute (expects jupyter)"
         else
@@ -510,7 +667,7 @@ test_web_search_endpoints() {
     fi
 
     payload_file="$OUTPUT_DIR/web_search.payload.json"
-    jq -n '{queries: ["OpenWebUI tool endpoint audit"]}' > "$payload_file"
+    jq -n '{queries: ["OpenWebUI tool endpoint audit"]}' >"$payload_file"
 
     start_test "POST /api/v1/retrieval/process/web/search returns loaded documents"
     request_api "POST" "/api/v1/retrieval/process/web/search" "$payload_file" "web_search_execute"
@@ -536,9 +693,9 @@ test_web_search_endpoints() {
     fi
 
     detail="$(response_detail)"
-    if [[ "$detail" == *"CERTIFICATE_VERIFY_FAILED"* ]] || [[ "$detail" == *"SSL"* ]] || [[ "$detail" == *"certificate"* ]]; then
+    if [[ $detail == *"CERTIFICATE_VERIFY_FAILED"* ]] || [[ $detail == *"SSL"* ]] || [[ $detail == *"certificate"* ]]; then
         fail_test "SSL/CA failure in web search pipeline :: $detail"
-    elif [[ "$detail" == *"No results found from web search"* ]]; then
+    elif [[ $detail == *"No results found from web search"* ]]; then
         fail_test "No results returned by configured search engine :: $detail"
     else
         fail_test "HTTP $RESPONSE_CODE :: $detail"
@@ -574,7 +731,7 @@ write_summary() {
                 echo "- $item"
             done
         fi
-    } > "$summary_file"
+    } >"$summary_file"
 
     print_section "Summary"
     print_info "Output directory: $OUTPUT_DIR"
@@ -588,6 +745,20 @@ write_summary() {
         for item in "${WARNINGS[@]}"; do
             print_warning "$item"
         done
+    fi
+}
+
+require_dependencies() {
+    local missing=0
+    for cmd in curl jq; do
+        if ! command_exists "$cmd"; then
+            print_error "Missing dependency: $cmd"
+            missing=1
+        fi
+    done
+
+    if [ "$missing" -ne 0 ]; then
+        exit 1
     fi
 }
 

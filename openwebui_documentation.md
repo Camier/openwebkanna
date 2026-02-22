@@ -147,7 +147,7 @@ Choose your preferred installation method:
 **Step 1: Pull the Open WebUI Image**
 
 ```bash
-docker pull ghcr.io/open-webui/open-webui:main
+docker pull ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Slim Image Variant**
@@ -161,13 +161,13 @@ docker pull ghcr.io/open-webui/open-webui:main-slim
 **Specific release version** (recommended for production):
 
 ```bash
-docker pull ghcr.io/open-webui/open-webui:v0.7.0
+docker pull ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Step 2: Run the Container**
 
 ```bash
-docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:main
+docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Using GPU Support**
@@ -179,7 +179,7 @@ docker run -d -p 3000:8080 --gpus all -v open-webui:/app/backend/data --name ope
 **Single-User Mode** (Disabling Login)
 
 ```bash
-docker run -d -p 3000:8080 -e WEBUI_AUTH=False -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:main
+docker run -d -p 3000:8080 -e WEBUI_AUTH=False -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Access the WebUI**
@@ -193,7 +193,7 @@ After the container is running, access Open WebUI at: `http://localhost:3000`
 ```yaml
 services:
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.8.3
     ports:
       - "3000:8080"
     volumes:
@@ -271,8 +271,8 @@ docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock nickfedor/wat
 
 ```bash
 docker rm -f open-webui
-docker pull ghcr.io/open-webui/open-webui:main
-docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:main
+docker pull ghcr.io/open-webui/open-webui:v0.8.3
+docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 ### Environment Variable Configuration
@@ -368,9 +368,9 @@ Options: `chroma`, `elasticsearch`, `milvus`, `opensearch`, `pgvector`, `qdrant`
 |----------|------|---------|-------------|
 | `RAG_EMBEDDING_ENGINE` | str | - | Selects an embedding engine for RAG |
 | `RAG_EMBEDDING_MODEL` | str | `sentence-transformers/all-MiniLM-L6-v2` | Sets a model for embeddings |
-| `RAG_TOP_K` | int | `3` | Sets the default number of results for RAG |
-| `CHUNK_SIZE` | int | `1000` | Sets the document chunk size for embeddings |
-| `CHUNK_OVERLAP` | int | `100` | Specifies overlap between chunks |
+| `RAG_TOP_K` | int | `5` | Sets the default number of results for RAG |
+| `CHUNK_SIZE` | int | `1500` | Sets the document chunk size for embeddings |
+| `CHUNK_OVERLAP` | int | `150` | Specifies overlap between chunks |
 
 **Web Search Settings**
 
@@ -835,6 +835,108 @@ Open WebUI provides a comprehensive API that is compatible with the OpenAI API s
 
 To ensure secure access to the API, authentication is required. You can authenticate your API requests using the Bearer Token mechanism. Obtain your API key from Settings > Account in the Open WebUI, or alternatively, use a JWT (JSON Web Token) for authentication.
 
+#### Sign In (Get JWT Token)
+
+```http
+POST /api/v1/auths/signin
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "your-password"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "id": "user-uuid",
+  "email": "user@example.com",
+  "name": "User Name",
+  "role": "user",
+  "profile_image_url": "/user.png"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Missing email or password
+- `401 Unauthorized`: Invalid credentials
+- `500 Internal Server Error`: Server error
+
+#### Sign Up (Create Account)
+
+```http
+POST /api/v1/auths/signup
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "New User",
+  "email": "newuser@example.com",
+  "password": "secure-password"
+}
+```
+
+**Response (201 Created):**
+Same as sign in response.
+
+**Error Responses:**
+- `400 Bad Request`: Invalid input data
+- `409 Conflict`: Email already exists
+
+#### Get Current User Info
+
+```http
+GET /api/v1/users/user/info
+Authorization: Bearer <token>
+```
+
+**Response (200 OK):**
+```json
+{
+  "id": "user-uuid",
+  "email": "user@example.com",
+  "name": "User Name",
+  "role": "user",
+  "profile_image_url": "/user.png"
+}
+```
+
+#### API Key Authentication
+
+API keys can be used instead of JWT tokens. Generate API keys in Settings > Account.
+
+```http
+GET /api/models
+Authorization: Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**Requirements:**
+1. Admin must enable "Enable API Keys" in Admin Panel > Settings
+2. User must have `features.api_keys` permission
+
+#### Token Expiration
+
+JWT tokens expire based on `JWT_EXPIRES_IN` environment variable:
+- `"-1"`: Never expire (not recommended for production)
+- `"4w"`: 4 weeks
+- `"24h"`: 24 hours
+- `"30m"`: 30 minutes
+
+When a token expires, you'll receive:
+```json
+{
+  "detail": "Invalid token or expired token."
+}
+```
+With HTTP 401 status code.
+
 ### Base URL
 
 All API endpoints are prefixed with `/api` (e.g., `http://localhost:3000/api`).
@@ -998,7 +1100,7 @@ docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway \
   -e AUTOMATIC1111_BASE_URL=http://host.docker.internal:7860/ \
   -e ENABLE_IMAGE_GENERATION=True \
   -v open-webui:/app/backend/data --name open-webui --restart always \
-  ghcr.io/open-webui/open-webui:main
+  ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 #### ComfyUI Setup
@@ -1013,7 +1115,7 @@ docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway \
   -e COMFYUI_BASE_URL=http://host.docker.internal:7860/ \
   -e ENABLE_IMAGE_GENERATION=True \
   -v open-webui:/app/backend/data --name open-webui --restart always \
-  ghcr.io/open-webui/open-webui:main
+  ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 ##### Setting Up FLUX.1 Models
@@ -1357,17 +1459,17 @@ NO_PROXY=localhost,127.0.0.1
 
 ```bash
 # Disable SSL verification (not recommended for production)
-WEBSEARCH_SSL_VERIFY=false
+WEB_SEARCH_SSL_VERIFY=false
 ```
 
 #### Search Engine Configuration
 
 ```bash
 # Enable web search
-ENABLE_WEBSEARCH=true
+ENABLE_WEB_SEARCH=true
 
 # Default search engine
-WEBSEARCH_ENGINE=searxng
+WEB_SEARCH_ENGINE=searxng
 
 ---
 # Custom SearXNG instance
@@ -1453,10 +1555,10 @@ A: Configure services to listen on all network interfaces using the IP address `
 A: You must pull the latest image, stop and remove the existing container, then start a new one:
 
 ```bash
-docker pull ghcr.io/open-webui/open-webui:main
+docker pull ghcr.io/open-webui/open-webui:v0.8.3
 docker stop open-webui
 docker rm open-webui
-docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Q: Will I lose my data if I delete my container?**
@@ -1486,7 +1588,7 @@ A: The project leaves HTTPS implementation to users for maximum flexibility and 
 A: This is likely due to the absence of SSL certificates or incorrect HuggingFace configuration. Set up a mirror:
 
 ```bash
-docker run -d -p 3000:8080 -e HF_ENDPOINT=https://hf-mirror.com/ --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+docker run -d -p 3000:8080 -e HF_ENDPOINT=https://hf-mirror.com/ --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 ### Authentication and Sessions
@@ -1773,7 +1875,7 @@ docker rm -f open-webui
 **Step 2: Pull Latest Docker Image**
 
 ```bash
-docker pull ghcr.io/open-webui/open-webui:main
+docker pull ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Step 3: Start Container with Updated Image**
@@ -1784,7 +1886,7 @@ docker run -d \
   -v open-webui:/app/backend/data \
   --name open-webui \
   --restart always \
-  ghcr.io/open-webui/open-webui:main
+  ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Step 4: Verify Update**
@@ -1803,14 +1905,14 @@ docker logs open-webui
 #### Using Image Tags
 
 **For latest version**:
-- `ghcr.io/open-webui/open-webui:main`
+- `ghcr.io/open-webui/open-webui:v0.8.3`
 - `ghcr.io/open-webui/open-webui:cuda`
 - `ghcr.io/open-webui/open-webui:ollama`
 
 **For production** (pinned versions):
-- `ghcr.io/open-webui/open-webui:v0.6.52`
-- `ghcr.io/open-webui/open-webui:v0.6.52-cuda`
-- `ghcr.io/open-webui/open-webui:v0.6.52-ollama`
+- `ghcr.io/open-webui/open-webui:v0.8.3`
+- `ghcr.io/open-webui/open-webui:v0.8.3-cuda`
+- `ghcr.io/open-webui/open-webui:v0.8.3-ollama`
 
 #### Persistent Login Sessions
 
@@ -1823,7 +1925,7 @@ docker run -d \
   --name open-webui \
   --restart always \
   -e WEBUI_SECRET_KEY="your-secret-key-here" \
-  ghcr.io/open-webui/open-webui:main
+  ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Generate secure key**:
@@ -2191,10 +2293,371 @@ curl -X POST http://localhost:3000/api/chat/completions \
 **Ollama Passthrough (`/ollama`)**
 - `POST /ollama/api/generate` - Native Ollama generate endpoint
 - `POST /ollama/api/chat` - Native Ollama chat endpoint
+- `GET /ollama/api/tags` - List available Ollama models
+- `POST /ollama/api/embed` - Generate embeddings using Ollama
 
 **OpenAI Compatibility (`/v1`)**
 - `GET /v1/models` - OpenAI-style model listing
 - `POST /v1/chat/completions` - OpenAI-compatible chat completions
+
+### Tools and Functions Endpoints
+
+**Tools (`/api/v1/tools`)**
+- `GET /api/v1/tools/` - List available tools
+- `GET /api/v1/tools/id/{id}` - Get specific tool details
+
+**Functions (`/api/v1/functions`)**
+- `GET /api/v1/functions/` - List available functions
+
+## Detailed API Endpoint Reference
+
+### File Download Endpoint
+
+#### Download File Content
+
+```http
+GET /api/v1/files/{id}/content
+Authorization: Bearer <token>
+```
+
+**Response:**
+- Content-Type: based on file type
+- Body: Raw file content
+
+**Errors:**
+- `404 Not Found`: File doesn't exist
+- `403 Forbidden`: No access to file
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/files/{file_id}/content \
+  -o downloaded_file.pdf
+```
+
+### Chat Management Endpoints
+
+#### Create New Chat
+
+```http
+POST /api/v1/chats/new
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "chat": {
+    "title": "New Chat",
+    "models": ["model-id"],
+    "messages": [],
+    "history": {}
+  }
+}
+```
+
+**Response (201 Created):**
+Returns the created chat object with generated ID.
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/chats/new \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat": {
+      "title": "Research Discussion",
+      "models": ["llama3.2"],
+      "messages": [],
+      "history": {}
+    }
+  }'
+```
+
+#### List User Chats
+
+```http
+GET /api/v1/chats
+Authorization: Bearer <token>
+```
+
+**Response (200 OK):**
+```json
+{
+  "chats": [
+    {
+      "id": "chat-id",
+      "title": "Chat Title",
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:35:00Z"
+    }
+  ]
+}
+```
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/chats | jq .
+```
+
+#### Get Chat by ID
+
+```http
+GET /api/v1/chats/{id}
+Authorization: Bearer <token>
+```
+
+**Response:** Returns the complete chat object including all messages and metadata.
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/chats/{chat_id} | jq .
+```
+
+#### Update Chat
+
+```http
+POST /api/v1/chats/{id}
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:** Complete chat object with updates
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/chats/{chat_id} \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Updated Chat Title",
+    "messages": [...],
+    "history": {...}
+  }'
+```
+
+#### Delete Chat
+
+```http
+DELETE /api/v1/chats/{id}
+Authorization: Bearer <token>
+```
+
+**Response:** `204 No Content`
+
+**Example:**
+```bash
+curl -X DELETE -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/chats/{chat_id}
+```
+
+### Tools and Functions Endpoints
+
+#### List Tools
+
+```http
+GET /api/v1/tools/
+Authorization: Bearer <token>
+```
+
+**Response (200 OK):**
+```json
+{
+  "tools": [
+    {
+      "id": "tool-id",
+      "name": "Tool Name",
+      "description": "Tool description",
+      "enabled": true
+    }
+  ]
+}
+```
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/tools/ | jq .
+```
+
+#### Get Tool Details
+
+```http
+GET /api/v1/tools/id/{id}
+Authorization: Bearer <token>
+```
+
+**Response:** Returns detailed information about a specific tool including its schema and configuration.
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/tools/id/{tool_id} | jq .
+```
+
+#### List Functions
+
+```http
+GET /api/v1/functions/
+Authorization: Bearer <token>
+```
+
+**Response:** Similar structure to tools endpoint, listing available functions.
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/api/v1/functions/ | jq .
+```
+
+### Ollama Proxy Endpoints
+
+#### Ollama Generate
+
+```http
+POST /ollama/api/generate
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "model": "llama3.2",
+  "prompt": "Why is the sky blue?",
+  "stream": false
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/ollama/api/generate \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "prompt": "Why is the sky blue?",
+    "stream": false
+  }'
+```
+
+#### Ollama Chat
+
+```http
+POST /ollama/api/chat
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "model": "llama3.2",
+  "messages": [
+    {"role": "user", "content": "Hello!"}
+  ],
+  "stream": false
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/ollama/api/chat \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "messages": [
+      {"role": "user", "content": "Hello!"}
+    ],
+    "stream": false
+  }'
+```
+
+#### List Ollama Models
+
+```http
+GET /ollama/api/tags
+Authorization: Bearer <token>
+```
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3000/ollama/api/tags | jq .
+```
+
+#### Generate Embeddings (Ollama)
+
+```http
+POST /ollama/api/embed
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "model": "llama3.2",
+  "input": ["Text to embed", "Another text"]
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/ollama/api/embed \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "input": ["Text to embed", "Another text"]
+  }'
+```
+
+## Error Handling
+
+### HTTP Status Codes
+
+| Code | Meaning | Common Causes |
+|------|---------|---------------|
+| `200 OK` | Success | Request successful |
+| `201 Created` | Resource created | New chat/file created |
+| `204 No Content` | Success (no body) | Deletion successful |
+| `400 Bad Request` | Invalid request | Malformed JSON, missing fields |
+| `401 Unauthorized` | Not authenticated | Missing or invalid token |
+| `403 Forbidden` | No permission | Valid token but insufficient rights |
+| `404 Not Found` | Resource missing | Invalid ID, deleted resource |
+| `422 Unprocessable Entity` | Validation error | Schema validation failed |
+| `429 Too Many Requests` | Rate limited | Too many requests |
+| `500 Internal Server Error` | Server error | Upstream or internal failure |
+
+### Error Response Format
+
+```json
+{
+  "detail": "Human-readable error message"
+}
+```
+
+### Common Error Scenarios
+
+**File Upload Errors:**
+- `400`: File too large (check RAG_FILE_MAX_SIZE)
+- `400`: Unsupported file type (check RAG_ALLOWED_FILE_EXTENSIONS)
+- `408`: Processing timeout
+
+**RAG Errors:**
+- `500`: Embedding model not available
+- `500`: Vector store connection failed
+- `422`: Document parsing failed
+
+**Chat Completion Errors:**
+- `404`: Model not found
+- `400`: Context length exceeded
+- `429`: Rate limit exceeded
 
 ## Swagger Documentation Links
 
@@ -2332,7 +2795,7 @@ WHISPER_COMPUTE_TYPE=float16
 3. **Switch to the Standard Image:**
 ```bash
 # Instead of: ghcr.io/open-webui/open-webui:cuda
-# Use: ghcr.io/open-webui/open-webui:main
+# Use: ghcr.io/open-webui/open-webui:v0.8.3
 ```
 
 **Available Compute Types:**
@@ -3068,7 +3531,7 @@ version: "3.8"
 
 services:
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.8.3
     container_name: open-webui
     ports:
       - 3000:8080

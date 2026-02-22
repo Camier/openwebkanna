@@ -13,6 +13,16 @@ bin/
 cliproxyapi/auth/
 cliproxyapi/logs/
 cliproxyapi/vendor/
+cliproxyapi/config.local.yaml
+cliproxyapi/config.*.local.yaml
+
+# Local CA bundles / certs (mount ./certs -> /certs into containers)
+certs/*.pem
+certs/*.crt
+certs/*.cer
+certs/*.key
+certs/*.p12
+certs/*.pfx
 
 # Backup artifacts
 backups/
@@ -25,6 +35,11 @@ openwebui_documentation.md.bak
 Thumbs.db
 *.swp
 *.swo
+
+# IDE / AI tool state
+.claude-dev-helper/
+.opencode/
+.plugin-config/
 
 # Python cache
 __pycache__/

@@ -8,44 +8,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
+cd "$SCRIPT_DIR"
+
 STOP_SCRIPT="${SCRIPT_DIR}/stop-cliproxyapi.sh"
 START_SCRIPT="${SCRIPT_DIR}/start-cliproxyapi.sh"
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
 CLIPROXYAPI_RESTART_WAIT_SECONDS="${CLIPROXYAPI_RESTART_WAIT_SECONDS:-1}"
-
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     CLIProxyAPI Server Restart                            ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
 
 show_help() {
     cat <<EOF_HELP
@@ -62,7 +32,7 @@ main() {
         exit 0
     fi
 
-    print_header
+    print_header "CLIProxyAPI Server Restart"
 
     if ! is_true "$CLIPROXYAPI_ENABLED"; then
         print_error "CLIProxyAPI lifecycle is disabled (CLIPROXYAPI_ENABLED=$CLIPROXYAPI_ENABLED)"

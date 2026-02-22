@@ -12,24 +12,43 @@ services:
       - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - openwebui_postgres_data:/var/lib/postgresql/data
+    # Resource limits
+    cpus: "${POSTGRES_CPUS:-1.0}"
+    mem_limit: "${POSTGRES_MEM_LIMIT:-1g}"
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-256}
+    # Security hardening
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openwebui} -d ${POSTGRES_DB:-openwebui}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - openwebui_network
+      - backend_network
 
   # Jupyter Notebook for code execution
   jupyter:
-    image: ${JUPYTER_IMAGE:-jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33}
+    image: ${JUPYTER_IMAGE:-jupyter/scipy-notebook:latest}
     container_name: openwebui_jupyter
     restart: unless-stopped
     environment:
       # Security: Token authentication
       - JUPYTER_TOKEN=${JUPYTER_TOKEN:?JUPYTER_TOKEN is required}
+      # Keep Jupyter's internal port distinct from host-local SearXNG (often 8888).
+      - JUPYTER_INTERNAL_PORT=${JUPYTER_INTERNAL_PORT:-8889}
       # OpenWebUI integration and execution defaults
       - JUPYTER_ALLOW_CORS=${JUPYTER_ALLOW_CORS:-true}
+      - JUPYTER_ALLOW_CREDENTIALS=${JUPYTER_ALLOW_CREDENTIALS:-false}
+      - JUPYTER_ALLOW_PASSWORD_CHANGE=${JUPYTER_ALLOW_PASSWORD_CHANGE:-false}
       - JUPYTER_EXECUTION_TIMEOUT=${JUPYTER_EXECUTION_TIMEOUT:-300}
       - JUPYTER_CULL_IDLE_TIMEOUT=${JUPYTER_CULL_IDLE_TIMEOUT:-900}
       - JUPYTER_CULL_INTERVAL=${JUPYTER_CULL_INTERVAL:-120}
@@ -51,17 +70,23 @@ services:
       - JUPYTER_ALLOW_ROOT=False
       - PYTHONSTARTUP=/opt/continua/continua.py
     ports:
-      - "127.0.0.1:${JUPYTER_PORT:-8890}:8888"
+      - "127.0.0.1:${JUPYTER_PORT:-8890}:${JUPYTER_INTERNAL_PORT:-8889}"
     volumes:
       - openwebui_jupyter_data:/home/jovyan/work
       - ./jupyter/jupyter_server_config.py:/home/jovyan/.jupyter/jupyter_server_config.py:ro
     # Security: Run as non-root user
     user: "1000:100"
+    # Resource limits
     cpus: "${JUPYTER_CPUS:-2.0}"
     mem_limit: "${JUPYTER_MEM_LIMIT:-2g}"
     pids_limit: ${JUPYTER_PIDS_LIMIT:-512}
+    # Security hardening
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: token $$JUPYTER_TOKEN\" http://localhost:8888/api/status >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: token $$JUPYTER_TOKEN\" http://localhost:$$JUPYTER_INTERNAL_PORT/api/status >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -70,7 +95,7 @@ services:
       - openwebui_network
 
   cliproxyapi:
-    image: ${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:latest}
+    image: ${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}
     container_name: cliproxyapi
     restart: unless-stopped
     environment:
@@ -78,11 +103,58 @@ services:
     ports:
       - "${CLIPROXYAPI_BIND_ADDRESS:-127.0.0.1}:${CLIPROXYAPI_PORT:-8317}:8317"
     volumes:
-      - ./cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ${CLIPROXYAPI_CONFIG:-./cliproxyapi/config.yaml}:/CLIProxyAPI/config.yaml:ro
       - ./cliproxyapi/auth:/CLIProxyAPI/cliproxyapi/auth:rw
       - ./cliproxyapi/logs:/CLIProxyAPI/logs:rw
+    # Resource limits
+    cpus: "${CLIPROXYAPI_CPUS:-0.5}"
+    mem_limit: "${CLIPROXYAPI_MEM_LIMIT:-512m}"
+    pids_limit: ${CLIPROXYAPI_PIDS_LIMIT:-128}
+    # Security hardening (note: DAC_OVERRIDE needed for volume access)
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8317/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - openwebui_network
+
+  mcpo:
+    image: ${MCPO_IMAGE:-ghcr.io/open-webui/mcpo:main}
+    container_name: mcpo
+    restart: unless-stopped
+    ports:
+      - "${MCPO_BIND_ADDRESS:-127.0.0.1}:${MCPO_PORT:-8000}:8000"
+    volumes:
+      - ${MCPO_CONFIG:-./mcp/config.json}:/app/config.json:ro
+      - ./data:/data:ro
+      - ./thesis-exports:/thesis-exports
+      - ${ZOTERO_DATA_DIR:-/home/miko/Zotero}:/zotero:ro
+    command: ${MCPO_ARGS:---host 0.0.0.0 --port 8000 --config /app/config.json}
+    # Resource limits
+    cpus: "${MCPO_CPUS:-0.5}"
+    mem_limit: "${MCPO_MEM_LIMIT:-512m}"
+    pids_limit: ${MCPO_PIDS_LIMIT:-128}
+    # Security hardening (note: DAC_OVERRIDE needed for volume access)
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -98,14 +170,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      cliproxyapi:
-        condition: service_healthy
       jupyter:
         condition: service_healthy
-
+      mcpo:
+        condition: service_healthy
     environment:
       # Authentication
-      - WEBUI_AUTH=${WEBUI_AUTH:-false}
+      - WEBUI_AUTH=${WEBUI_AUTH:-true}
       - WEBUI_NAME=${WEBUI_NAME:-My AI Hub}
 
       # Branding
@@ -116,18 +187,23 @@ services:
       - ENABLE_CUSTOM_SCSS=${ENABLE_CUSTOM_SCSS:-true}
 
       # Ollama Connection (using host.docker.internal for native server access)
-      - ENABLE_OLLAMA_API=${ENABLE_OLLAMA_API:-false}
+      - ENABLE_OLLAMA_API=${ENABLE_OLLAMA_API:-true}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
 
       # RAG Configuration
       - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
-      - RAG_TOP_K=${RAG_TOP_K:-5}
+      - RAG_TOP_K=${RAG_TOP_K:-15}
+      - RAG_TOP_K_RERANKER=${RAG_TOP_K_RERANKER:-5}
       - RAG_SYSTEM_CONTEXT=${RAG_SYSTEM_CONTEXT:-true}
-      - CHUNK_SIZE=${CHUNK_SIZE:-1500}
-      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
+      - RAG_RELEVANCE_THRESHOLD=${RAG_RELEVANCE_THRESHOLD:-0.3}
+      - CHUNK_SIZE=${CHUNK_SIZE:-3000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-600}
+      - ENABLE_RAG_HYBRID_SEARCH=${ENABLE_RAG_HYBRID_SEARCH:-true}
+      - ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS=${ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS:-true}
+      - RAG_HYBRID_BM25_WEIGHT=${RAG_HYBRID_BM25_WEIGHT:-0.3}
 
       # Vector Store - PGVector (Postgres + pgvector)
-      - VECTOR_DB=${VECTOR_DB:-pgvector}
+      - VECTOR_DB=${VECTOR_DB:-chroma}
       - PGVECTOR_DB_URL=${PGVECTOR_DB_URL:-postgresql://${POSTGRES_USER:-openwebui}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-openwebui}}
       - PGVECTOR_CREATE_EXTENSION=${PGVECTOR_CREATE_EXTENSION:-true}
       - PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH=${PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH:-1536}
@@ -137,8 +213,8 @@ services:
       # WEBUI_SECRET_KEY must be set in `.env` for stable sessions and secure cookie signing.
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:?WEBUI_SECRET_KEY is required}
       - ENABLE_OPENAI_API=${ENABLE_OPENAI_API:-true}
-      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-http://cliproxyapi:8317/v1}
-      - OPENAI_API_BASE_URLS=${OPENAI_API_BASE_URLS:-http://cliproxyapi:8317/v1}
+      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-http://host.docker.internal:4000/v1}
+      - OPENAI_API_BASE_URLS=${OPENAI_API_BASE_URLS:-http://host.docker.internal:4000/v1}
       - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is required}
       - OPENAI_API_MODEL_NAME=${OPENAI_API_MODEL_NAME:-}
 
@@ -152,20 +228,20 @@ services:
       - SEARXNG_QUERY_URL=${SEARXNG_QUERY_URL:-http://host.docker.internal:8888/search?q={query}&format=json}
 
       # Jupyter Integration
-      - JUPYTER_URL=${JUPYTER_URL:-http://jupyter:8888}
+      - JUPYTER_URL=${JUPYTER_URL:-http://jupyter:8889}
       - JUPYTER_TOKEN=${JUPYTER_TOKEN:?JUPYTER_TOKEN is required}
 
       # Code Execution / Interpreter (Jupyter-backed)
       - ENABLE_CODE_EXECUTION=${ENABLE_CODE_EXECUTION:-true}
       - CODE_EXECUTION_ENGINE=${CODE_EXECUTION_ENGINE:-jupyter}
-      - CODE_EXECUTION_JUPYTER_URL=${CODE_EXECUTION_JUPYTER_URL:-http://jupyter:8888}
+      - CODE_EXECUTION_JUPYTER_URL=${CODE_EXECUTION_JUPYTER_URL:-http://jupyter:8889}
       - CODE_EXECUTION_JUPYTER_AUTH=${CODE_EXECUTION_JUPYTER_AUTH:-token}
       - CODE_EXECUTION_JUPYTER_AUTH_TOKEN=${CODE_EXECUTION_JUPYTER_AUTH_TOKEN:-}
       - CODE_EXECUTION_JUPYTER_AUTH_PASSWORD=${CODE_EXECUTION_JUPYTER_AUTH_PASSWORD:-}
       - CODE_EXECUTION_JUPYTER_TIMEOUT=${CODE_EXECUTION_JUPYTER_TIMEOUT:-60}
       - ENABLE_CODE_INTERPRETER=${ENABLE_CODE_INTERPRETER:-true}
       - CODE_INTERPRETER_ENGINE=${CODE_INTERPRETER_ENGINE:-jupyter}
-      - CODE_INTERPRETER_JUPYTER_URL=${CODE_INTERPRETER_JUPYTER_URL:-http://jupyter:8888}
+      - CODE_INTERPRETER_JUPYTER_URL=${CODE_INTERPRETER_JUPYTER_URL:-http://jupyter:8889}
       - CODE_INTERPRETER_JUPYTER_AUTH=${CODE_INTERPRETER_JUPYTER_AUTH:-token}
       - CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=${CODE_INTERPRETER_JUPYTER_AUTH_TOKEN:-}
       - CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD=${CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD:-}
@@ -177,10 +253,21 @@ services:
     volumes:
       # Persist OpenWebUI data
       - openwebui_data:/app/backend/data
+      # Optional: mount local CA bundle(s) for SSL/CA issues (web scraper, web search, etc.)
+      - ./certs:/certs:ro
 
     extra_hosts:
-      # Enable access to host machine for Ollama and local SearXNG
       - "host.docker.internal:host-gateway"
+
+    # Resource limits
+    cpus: "${OPENWEBUI_CPUS:-2.0}"
+    mem_limit: "${OPENWEBUI_MEM_LIMIT:-4g}"
+    pids_limit: ${OPENWEBUI_PIDS_LIMIT:-512}
+    # Security hardening
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -191,6 +278,7 @@ services:
 
     networks:
       - openwebui_network
+      - backend_network
 
 volumes:
   openwebui_data:
@@ -207,3 +295,7 @@ networks:
   openwebui_network:
     driver: bridge
     name: openwebui_network
+  backend_network:
+    driver: bridge
+    name: openwebui_backend
+    internal: true

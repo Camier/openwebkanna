@@ -7,15 +7,9 @@
 
 set -e
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+cd "$SCRIPT_DIR"
 
 # Configuration
 VLLM_PORT=8000
@@ -25,28 +19,16 @@ VLLM_LOG_FILE="logs/vllm.log"
 CLIPROXYAPI_LOG_FILE="${CLIPROXYAPI_LOG_FILE:-logs/cliproxyapi.log}"
 
 ###############################################################################
-# Helper Functions
+# Script-specific Helper Functions
 ###############################################################################
 
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     OpenWebUI + vLLM RAG Logs Viewer                      ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_section() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-    echo -e "${BLUE}──────────────────────────────────────────────────────${NC}\n"
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
+get_file_modified() {
+    local file=$1
+    if date -r "$file" "+%Y-%m-%d %H:%M:%S" >/dev/null 2>&1; then
+        date -r "$file" "+%Y-%m-%d %H:%M:%S"
+    else
+        echo "unknown"
+    fi
 }
 
 show_vllm_logs() {
@@ -60,8 +42,9 @@ show_vllm_logs() {
         return 1
     fi
 
-    local total_lines=$(wc -l < "$VLLM_LOG_FILE")
-    print_info "Log file: $VLLM_LOG_FILE ($total_lines total lines)"
+    local file_size
+    file_size=$(du -h "$VLLM_LOG_FILE" | cut -f1)
+    print_info "Log file: $VLLM_LOG_FILE ($file_size)"
 
     # Show logs with tail
     tail -n "$lines" "$VLLM_LOG_FILE"
@@ -92,7 +75,7 @@ show_cliproxyapi_logs() {
         return 1
     fi
 
-    local total_lines=$(wc -l < "$CLIPROXYAPI_LOG_FILE")
+    local total_lines=$(wc -l <"$CLIPROXYAPI_LOG_FILE")
     print_info "Log file: $CLIPROXYAPI_LOG_FILE ($total_lines total lines)"
     tail -n "$lines" "$CLIPROXYAPI_LOG_FILE"
 }
@@ -117,10 +100,10 @@ show_docker_logs() {
 
     if [ -n "$service" ]; then
         print_section "Docker Compose Logs: $service (last $lines lines)"
-        docker-compose logs --tail="$lines" "$service"
+        docker_compose logs --tail="$lines" "$service"
     else
         print_section "Docker Compose Logs (all services, last $lines lines)"
-        docker-compose logs --tail="$lines"
+        docker_compose logs --tail="$lines"
     fi
 }
 
@@ -131,26 +114,26 @@ follow_docker_logs() {
         print_section "Docker Compose Logs: $service (live tail)"
         print_info "Press Ctrl+C to stop following"
         echo
-        docker-compose logs -f "$service"
+        docker_compose logs -f "$service"
     else
         print_section "Docker Compose Logs (all services, live tail)"
         print_info "Press Ctrl+C to stop following"
         echo
-        docker-compose logs -f
+        docker_compose logs -f
     fi
 }
 
 show_openwebui_logs() {
     local lines=${1:-50}
     print_section "OpenWebUI Logs (last $lines lines)"
-    docker-compose logs --tail="$lines" openwebui
+    docker_compose logs --tail="$lines" openwebui
 }
 
 follow_openwebui_logs() {
     print_section "OpenWebUI Logs (live tail)"
     print_info "Press Ctrl+C to stop following"
     echo
-    docker-compose logs -f openwebui
+    docker_compose logs -f openwebui
 }
 
 show_all_logs() {
@@ -173,9 +156,11 @@ show_log_summary() {
 
     # vLLM log info
     if [ -f "$VLLM_LOG_FILE" ]; then
-        local vllm_size=$(du -h "$VLLM_LOG_FILE" | cut -f1)
-        local vllm_lines=$(wc -l < "$VLLM_LOG_FILE")
-        echo -e "${GREEN}vLLM:${NC} $vllm_lines lines, $vllm_size"
+        local vllm_size
+        local vllm_modified
+        vllm_size=$(du -h "$VLLM_LOG_FILE" | cut -f1)
+        vllm_modified=$(get_file_modified "$VLLM_LOG_FILE")
+        echo -e "${GREEN}vLLM:${NC} size=$vllm_size, modified=$vllm_modified"
     else
         echo -e "${YELLOW}vLLM:${NC} No log file found"
     fi
@@ -183,16 +168,16 @@ show_log_summary() {
     # CLIProxyAPI log info
     if [ -f "$CLIPROXYAPI_LOG_FILE" ]; then
         local cliproxyapi_size=$(du -h "$CLIPROXYAPI_LOG_FILE" | cut -f1)
-        local cliproxyapi_lines=$(wc -l < "$CLIPROXYAPI_LOG_FILE")
+        local cliproxyapi_lines=$(wc -l <"$CLIPROXYAPI_LOG_FILE")
         echo -e "${GREEN}CLIProxyAPI:${NC} $cliproxyapi_lines lines, $cliproxyapi_size"
     else
         echo -e "${YELLOW}CLIProxyAPI:${NC} No log file found"
     fi
 
     # Docker log info
-    if docker info &> /dev/null 2>&1 && [ -f "$COMPOSE_FILE" ]; then
+    if docker info &>/dev/null 2>&1 && [ -f "$COMPOSE_FILE" ]; then
         echo -e "${GREEN}Docker Compose:${NC}"
-        docker-compose ps 2>/dev/null | while read -r line; do
+        docker_compose ps 2>/dev/null | while read -r line; do
             echo "  $line"
         done
     else
@@ -217,8 +202,8 @@ search_logs() {
 
     if [ "$service" = "docker" ] || [ "$service" = "all" ]; then
         echo -e "\n${MAGENTA}--- Docker Compose Logs ---${NC}"
-        if docker info &> /dev/null 2>&1; then
-            docker-compose logs 2>/dev/null | grep -i "$pattern" || echo "No matches found in Docker logs"
+        if docker info &>/dev/null 2>&1; then
+            docker_compose logs 2>/dev/null | grep -i "$pattern" || echo "No matches found in Docker logs"
         else
             echo "Docker is not running"
         fi
@@ -226,8 +211,8 @@ search_logs() {
 
     if [ "$service" = "openwebui" ]; then
         echo -e "\n${MAGENTA}--- OpenWebUI Logs ---${NC}"
-        if docker info &> /dev/null 2>&1; then
-            docker-compose logs openwebui 2>/dev/null | grep -i "$pattern" || echo "No matches found in OpenWebUI logs"
+        if docker info &>/dev/null 2>&1; then
+            docker_compose logs openwebui 2>/dev/null | grep -i "$pattern" || echo "No matches found in OpenWebUI logs"
         else
             echo "Docker is not running"
         fi
@@ -244,7 +229,7 @@ search_logs() {
 }
 
 show_help() {
-    cat << EOF
+    cat <<EOF
 Usage: $0 [OPTIONS] [SERVICE]
 
 View logs from OpenWebUI + vLLM RAG system services.
@@ -289,15 +274,15 @@ main() {
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -f|--follow)
+            -f | --follow)
                 follow_mode=true
                 shift
                 ;;
-            -n|--lines)
+            -n | --lines)
                 lines="$2"
                 shift 2
                 ;;
-            -s|--search)
+            -s | --search)
                 search_pattern="$2"
                 shift 2
                 ;;
@@ -305,11 +290,11 @@ main() {
                 show_summary_only=true
                 shift
                 ;;
-            -h|--help)
+            -h | --help)
                 show_help
                 exit 0
                 ;;
-            vllm|cliproxyapi|docker|openwebui|all)
+            vllm | cliproxyapi | docker | openwebui | all)
                 service="$1"
                 shift
                 ;;
@@ -390,8 +375,8 @@ main() {
 
                 (
                     while true; do
-                        if docker info &> /dev/null 2>&1; then
-                            docker-compose logs -f &
+                        if docker info &>/dev/null 2>&1; then
+                            docker_compose logs -f &
                             wait $!
                         fi
                         sleep 1

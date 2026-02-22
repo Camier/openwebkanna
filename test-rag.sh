@@ -8,49 +8,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
+cd "$SCRIPT_DIR"
 
 resolve_openai_base_root() {
     local candidate="${OPENAI_API_BASE_URL:-}"
@@ -68,21 +28,12 @@ resolve_openai_base_root() {
     candidate="${candidate%/v1}"
 
     # OpenWebUI can use Docker DNS internally; tests run on host and must use loopback.
-    if [[ "$candidate" == *"://cliproxyapi"* ]]; then
+    if [[ $candidate == *"://cliproxyapi"* ]]; then
         candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
     fi
 
     printf "%s" "$candidate"
 }
-
-load_env_defaults
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
@@ -110,36 +61,8 @@ TESTS_TOTAL=0
 TEST_VECTOR_COLLECTION=""
 
 ###############################################################################
-# Helper Functions
+# Script-specific Helper Functions
 ###############################################################################
-
-print_header() {
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}========================================${NC}\n"
-}
-
-print_section() {
-    echo -e "\n${YELLOW}>>> $1${NC}\n"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
 
 openwebui_signin() {
     local output_file="$1"
@@ -150,9 +73,9 @@ openwebui_signin() {
         jq -n \
             --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
             --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-            '{email: $email, password: $password}' > "$payload_file"
+            '{email: $email, password: $password}' >"$payload_file"
     else
-        cat > "$payload_file" <<EOF
+        cat >"$payload_file" <<EOF
 {"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
 EOF
     fi
@@ -187,18 +110,18 @@ ensure_openwebui_api_key() {
 }
 
 test_start() {
-    ((TESTS_TOTAL+=1))
+    ((TESTS_TOTAL += 1))
     TEST_NAME="$1"
     print_info "Testing: $TEST_NAME"
 }
 
 test_pass() {
-    ((TESTS_PASSED+=1))
+    ((TESTS_PASSED += 1))
     print_success "$TEST_NAME passed"
 }
 
 test_fail() {
-    ((TESTS_FAILED+=1))
+    ((TESTS_FAILED += 1))
     print_error "$TEST_NAME failed: $1"
 }
 
@@ -247,7 +170,7 @@ has_non_empty_models_array() {
     fi
 
     model_count=$(echo "$response" | grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | wc -l | tr -d '[:space:]')
-    if [[ "$model_count" =~ ^[0-9]+$ ]] && [ "$model_count" -gt 0 ]; then
+    if [[ $model_count =~ ^[0-9]+$ ]] && [ "$model_count" -gt 0 ]; then
         return 0
     fi
     return 1
@@ -300,8 +223,8 @@ test_vllm_responding() {
     # CLIProxyAPI deployments may expose "/" instead of "/health".
     root_response=$(curl -s -f "$VLLM_URL/" 2>/dev/null || true)
     if [ -n "$root_response" ] && (
-        (command -v jq >/dev/null 2>&1 && echo "$root_response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1) || \
-        echo "$root_response" | grep -q "CLI Proxy API Server"
+        (command -v jq >/dev/null 2>&1 && echo "$root_response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1) ||
+            echo "$root_response" | grep -q "CLI Proxy API Server"
     ); then
         test_pass
         return 0
@@ -422,7 +345,7 @@ test_openwebui_baseline_settings() {
         rag_top_k=$(echo "$response" | jq -r '.RAG_TOP_K // .TOP_K // empty' 2>/dev/null || true)
         if [ -z "$rag_top_k" ]; then
             print_info "RAG_TOP_K not returned by endpoint; skipping strict value check"
-        elif [[ ! "$rag_top_k" =~ ^[0-9]+$ ]] || [ "$rag_top_k" -le 0 ]; then
+        elif [[ ! $rag_top_k =~ ^[0-9]+$ ]] || [ "$rag_top_k" -le 0 ]; then
             test_fail "Invalid RAG_TOP_K value from endpoint: $rag_top_k"
             return 1
         fi
@@ -611,14 +534,14 @@ RAG systems combine retrieval and generation for better responses.
 This document will be used to test the knowledge base functionality."
 
     local temp_file="/tmp/rag_test_doc_$(date +%s).txt"
-    echo "$test_content" > "$temp_file"
+    echo "$test_content" >"$temp_file"
 
     local response
     response=$(curl -s -X POST \
         "$OPENWEBUI_URL/api/v1/files/?process=true&process_in_background=false" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -F "file=@$temp_file" \
-        -F "metadata={\"name\":\"rag_test.txt\"}" 2>&1)
+        -F 'metadata={"name":"rag_test.txt"}' 2>&1)
 
     rm -f "$temp_file"
 
@@ -764,7 +687,7 @@ test_vector_store() {
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -d "$process_payload" 2>&1)
 
-    if ! echo "$process_response" | grep -q "\"status\":true"; then
+    if ! echo "$process_response" | grep -q '"status":true'; then
         test_fail "Vector store ingestion failed"
         [ "$VERBOSE" = "true" ] && print_info "Response: $process_response"
         return 1
@@ -784,7 +707,7 @@ test_vector_store() {
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -d "$query_payload" 2>&1)
 
-    if echo "$query_response" | grep -q "\"documents\""; then
+    if echo "$query_response" | grep -q '"documents"'; then
         print_success "Vector store retrieval is operational"
         test_pass
         return 0
@@ -985,7 +908,7 @@ cleanup_test_resources() {
         print_info "Removing test document $TEST_DOC_ID..."
         curl -s -X DELETE \
             "$OPENWEBUI_URL/api/v1/files/$TEST_DOC_ID" \
-            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} > /dev/null 2>&1
+            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} >/dev/null 2>&1
         print_success "Test document removed"
     fi
 
@@ -993,7 +916,7 @@ cleanup_test_resources() {
         print_info "Removing test knowledge base $TEST_KB_ID..."
         curl -s -X DELETE \
             "$OPENWEBUI_URL/api/v1/knowledge/$TEST_KB_ID/delete" \
-            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} > /dev/null 2>&1
+            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} >/dev/null 2>&1
         print_success "Test knowledge base removed"
     fi
 }
@@ -1098,11 +1021,11 @@ while [[ $# -gt 0 ]]; do
             TEST_MODE="full"
             shift
             ;;
-        -v|--verbose)
+        -v | --verbose)
             VERBOSE=true
             shift
             ;;
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;

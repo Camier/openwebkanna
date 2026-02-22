@@ -8,49 +8,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
+cd "$SCRIPT_DIR"
 
 resolve_openai_base_root() {
     local candidate="${OPENAI_API_BASE_URL:-}"
@@ -65,21 +25,11 @@ resolve_openai_base_root() {
 
     candidate="${candidate%/}"
     candidate="${candidate%/v1}"
-    if [[ "$candidate" == *"://cliproxyapi"* ]]; then
+    if [[ $candidate == *"://cliproxyapi"* ]]; then
         candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
     fi
     printf "%s" "$candidate"
 }
-
-load_env_defaults
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
@@ -111,38 +61,8 @@ SELECTED_MODEL=""
 # Helper Functions
 ###############################################################################
 
-print_header() {
-    echo -e "\n${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║  $1${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}\n"
-}
-
-print_section() {
-    echo -e "\n${YELLOW}─────────────────────────────────────────────────────────────${NC}"
-    echo -e "${YELLOW}  $1${NC}"
-    echo -e "${YELLOW}─────────────────────────────────────────────────────────────${NC}\n"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
 print_endpoint() {
-    echo -e "${CYAN}→ $1${NC}"
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
+    echo -e "${CYAN}>> $1${NC}"
 }
 
 openwebui_signin() {
@@ -154,9 +74,9 @@ openwebui_signin() {
         jq -n \
             --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
             --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-            '{email: $email, password: $password}' > "$payload_file"
+            '{email: $email, password: $password}' >"$payload_file"
     else
-        cat > "$payload_file" <<EOF
+        cat >"$payload_file" <<EOF
 {"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
 EOF
     fi
@@ -190,21 +110,21 @@ ensure_openwebui_api_key() {
 }
 
 test_start() {
-    ((TESTS_TOTAL+=1))
+    ((TESTS_TOTAL += 1))
     TEST_NAME="$1"
     print_endpoint "$TEST_NAME"
     TEST_START_TIME=$(date +%s)
 }
 
 test_pass() {
-    ((TESTS_PASSED+=1))
-    local duration=$(( $(date +%s) - TEST_START_TIME ))
+    ((TESTS_PASSED += 1))
+    local duration=$(($(date +%s) - TEST_START_TIME))
     print_success "$TEST_NAME (${duration}s)"
 }
 
 test_fail() {
-    ((TESTS_FAILED+=1))
-    local duration=$(( $(date +%s) - TEST_START_TIME ))
+    ((TESTS_FAILED += 1))
+    local duration=$(($(date +%s) - TEST_START_TIME))
     print_error "$TEST_NAME failed (${duration}s): $1"
 }
 
@@ -212,7 +132,7 @@ save_response() {
     local test_name="$1"
     local response="$2"
     mkdir -p "$OUTPUT_DIR"
-    echo "$response" > "$OUTPUT_DIR/${test_name}.json"
+    echo "$response" >"$OUTPUT_DIR/${test_name}.json"
     if [ "$VERBOSE" = "true" ]; then
         print_info "Response saved to $OUTPUT_DIR/${test_name}.json"
     fi
@@ -233,7 +153,7 @@ has_non_empty_models_array() {
     fi
 
     model_count=$(echo "$response" | grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | wc -l | tr -d '[:space:]')
-    if [[ "$model_count" =~ ^[0-9]+$ ]] && [ "$model_count" -gt 0 ]; then
+    if [[ $model_count =~ ^[0-9]+$ ]] && [ "$model_count" -gt 0 ]; then
         return 0
     fi
     return 1
@@ -451,8 +371,8 @@ test_cli_proxy_api_smoke() {
     test_start "CliProxyApi Wrapper Help"
     if response=$(./cli-proxy-api.sh --help 2>&1); then
         save_response "cli_proxy_api_help" "$response"
-        if echo "$response" | grep -Fq "models [openwebui|webui|vllm|all]" && \
-           echo "$response" | grep -Fq "chat --model <id> --message <text>"; then
+        if echo "$response" | grep -Fq "models [openwebui|webui|vllm|all]" &&
+            echo "$response" | grep -Fq "chat --model <id> --message <text>"; then
             test_pass
         else
             test_fail "Help output missing expected command contract"
@@ -519,14 +439,14 @@ test_file_upload_text() {
     test_start "File Upload (Text)"
 
     local temp_file="/tmp/test_upload_$(date +%s).txt"
-    echo "This is a test document for API validation." > "$temp_file"
+    echo "This is a test document for API validation." >"$temp_file"
 
     local response
     response=$(curl -s -X POST \
         "$OPENWEBUI_URL/api/v1/files/?process=true&process_in_background=false" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -F "file=@$temp_file" \
-        -F "metadata={\"name\":\"test_doc.txt\"}" 2>&1)
+        -F 'metadata={"name":"test_doc.txt"}' 2>&1)
     save_response "file_upload_text" "$response"
 
     rm -f "$temp_file"
@@ -582,14 +502,14 @@ trailer
 >>
 startxref
 190
-%%EOF" > "$temp_file"
+%%EOF" >"$temp_file"
 
     local response
     response=$(curl -s -X POST \
         "$OPENWEBUI_URL/api/v1/files/?process=true&process_in_background=false" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
         -F "file=@$temp_file" \
-        -F "metadata={\"name\":\"test_doc.pdf\"}" 2>&1)
+        -F 'metadata={"name":"test_doc.pdf"}' 2>&1)
     save_response "file_upload_pdf" "$response"
 
     rm -f "$temp_file"
@@ -795,7 +715,7 @@ test_embedding_batch() {
     response=$(make_request "POST" "/api/v1/retrieval/process/text" "$data" "" 2>&1)
     save_response "embedding_batch" "$response"
 
-    if echo "$response" | grep -q "\"status\":true"; then
+    if echo "$response" | grep -q '"status":true'; then
         print_success "Retrieval embedding pipeline processed text"
         test_pass
         return 0
@@ -813,7 +733,7 @@ test_vector_store_status() {
     response=$(make_request "GET" "/api/v1/retrieval/" "" "" 2>&1)
     save_response "vector_store_status" "$response"
 
-    if echo "$response" | grep -q "\"status\":true"; then
+    if echo "$response" | grep -q '"status":true'; then
         test_pass
         return 0
     else
@@ -895,7 +815,7 @@ cleanup_test_resources() {
         print_info "Removing knowledge base $kb_id..."
         curl -s -X DELETE \
             "$OPENWEBUI_URL/api/v1/knowledge/$kb_id/delete" \
-            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} > /dev/null 2>&1
+            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} >/dev/null 2>&1
         print_success "Knowledge base $kb_id removed"
     done
 
@@ -903,7 +823,7 @@ cleanup_test_resources() {
         print_info "Removing file $file_id..."
         curl -s -X DELETE \
             "$OPENWEBUI_URL/api/v1/files/$file_id" \
-            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} > /dev/null 2>&1
+            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} >/dev/null 2>&1
         print_success "File $file_id removed"
     done
 
@@ -911,7 +831,9 @@ cleanup_test_resources() {
 }
 
 print_summary() {
-    print_header "API Test Summary"
+    echo -e "\n${CYAN}+------------------------------------------------------------+${NC}"
+    echo -e "${CYAN}|  API Test Summary                                           |${NC}"
+    echo -e "${CYAN}+------------------------------------------------------------+${NC}\n"
 
     echo -e "Total Tests: $TESTS_TOTAL"
     echo -e "${GREEN}Passed: $TESTS_PASSED${NC}"
@@ -938,7 +860,10 @@ print_summary() {
 ###############################################################################
 
 main() {
-    print_header "OpenWebUI API Testing Suite"
+    echo -e "\n${CYAN}+------------------------------------------------------------+${NC}"
+    echo -e "${CYAN}|  OpenWebUI API Testing Suite                                |${NC}"
+    echo -e "${CYAN}+------------------------------------------------------------+${NC}\n"
+
     RUN_CLEANUP_ON_EXIT=true
     ensure_openwebui_api_key
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
@@ -1025,7 +950,7 @@ trap on_exit EXIT INT TERM
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -v|--verbose)
+        -v | --verbose)
             VERBOSE=true
             shift
             ;;
@@ -1037,15 +962,15 @@ while [[ $# -gt 0 ]]; do
             TEST_MODE="full"
             shift
             ;;
-        -u|--url)
+        -u | --url)
             OPENWEBUI_URL="$2"
             shift 2
             ;;
-        -k|--key)
+        -k | --key)
             API_KEY="$2"
             shift 2
             ;;
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;

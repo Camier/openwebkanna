@@ -1,4 +1,19 @@
-host: "0.0.0.0"
+#
+# CLIProxyAPI configuration (SAFE EXAMPLE)
+#
+# This file is tracked in git and MUST NOT contain real API keys.
+#
+# Recommended:
+# - Generate `cliproxyapi/config.local.yaml` from `~/.007` (keys) using:
+#     ./configure-cliproxyapi-providers.sh
+# - Then set `CLIPROXYAPI_CONFIG=./cliproxyapi/config.local.yaml` in `.env`
+# - docker-compose mounts `${CLIPROXYAPI_CONFIG}` into the container.
+#
+# NOTE: If you run with this example config, upstream calls will fail because
+#       the provider keys below are placeholders.
+#
+
+host: ""
 port: 8317
 
 tls:
@@ -9,12 +24,16 @@ tls:
 remote-management:
   allow-remote: false
   secret-key: ""
-  disable-control-panel: true
+  disable-control-panel: false
 
-auth-dir: "./cliproxyapi/auth"
+# Keep OAuth credential JSON files out of git (gitignored) and mount them via compose:
+#   ./cliproxyapi/auth -> /CLIProxyAPI/cliproxyapi/auth
+auth-dir: "/CLIProxyAPI/cliproxyapi/auth"
 
+# Local API key(s) accepted by CLIProxyAPI (used by OpenWebUI as OPENAI_API_KEY).
+# Replace this with a strong random value in `.env`.
 api-keys:
-  - "layra-cliproxyapi-key"
+  - "replace-with-strong-local-api-key"
 
 debug: false
 request-log: false
@@ -34,19 +53,61 @@ quota-exceeded:
 routing:
   strategy: "round-robin"
 
-oauth-model-alias:
-  antigravity:
-    - name: "gemini-3-pro-high"
-      alias: "antigravity-oauth"
-  codex:
-    - name: "gpt-5-codex"
-      alias: "openai-codex"
-  qwen:
-    - name: "qwen3-coder-plus"
-      alias: "qwen-cli"
-  kimi:
-    - name: "kimi-k2.5"
-      alias: "kimi-cli"
+# ------------------------------------------------------------------------------
+# Providers (placeholders)
+# ------------------------------------------------------------------------------
+# Z.ai (GLM-5) - OpenAI-compatible base URLs:
+#   - Coding Plan (recommended for GLM coding): https://api.z.ai/api/coding/paas/v4
+#   - General API:                             https://api.z.ai/api/paas/v4
+# Notes:
+# - If you use the General API base with a Coding Plan key, you may get 429
+#   "Insufficient balance or no resource package" even though the key is valid.
+#
+# MiniMax - OpenAI-compatible base URL typically:
+#   https://api.minimax.io/v1
+#
+openai-compatibility:
+  - name: "zai"
+    base-url: "https://api.z.ai/api/coding/paas/v4"
+    api-key-entries:
+      - api-key: "REPLACE_WITH_ZAI_API_KEY"
+    models:
+      - name: "glm-5"
+        alias: "glm-5"
+
+  - name: "minimax"
+    base-url: "https://api.minimax.io/v1"
+    api-key-entries:
+      - api-key: "REPLACE_WITH_MINIMAX_API_KEY"
+    models:
+      # MiniMax Coding Plan model per docs: MiniMax-M2.5
+      #
+      # Preferred model ID for OpenWebUI callers:
+      # - minimax/chat-elite (recommended)
+      # Legacy compatibility:
+      # - minmax (existing callers)
+      # - minimax/chat-thinking (legacy caller)
+      # - minimax/chat-quality (legacy caller)
+      - name: "MiniMax-M2.5"
+        alias: "minmax"
+      - name: "MiniMax-M2.5"
+        alias: "minimax/chat-elite"
+      - name: "MiniMax-M2.5"
+        alias: "minimax/chat-thinking"
+      - name: "MiniMax-M2.5"
+        alias: "minimax/chat-quality"
+
+# OAuth-backed providers (Codex/Qwen/Kimi/Antigravity) are configured via
+# `cliproxyapi/auth/*.json` and an `oauth-model-alias` mapping. Keep this section
+# in your *local* config if you use those providers.
+#
+# oauth-model-alias:
+#   codex:
+#     - name: "gpt-5.3-codex"
+#       alias: "gpt-5.3-codex"
+#   qwen:
+#     - name: "qwen3-coder-flash"
+#       alias: "qwen3-coder-flash"
 
 ws-auth: false
 nonstream-keepalive-interval: 0

@@ -8,51 +8,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
+cd "$SCRIPT_DIR"
 
 # Configuration
 WEBUI_PORT="${WEBUI_PORT:-3000}"
@@ -69,7 +27,8 @@ OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
 CLIPROXYAPI_HEALTH_PATH="${CLIPROXYAPI_HEALTH_PATH:-/}"
 CLIPROXYAPI_MODELS_PATH="${CLIPROXYAPI_MODELS_PATH:-/v1/models}"
-CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
+CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}"
+CLIPROXYAPI_CONFIG="${CLIPROXYAPI_CONFIG:-./cliproxyapi/config.yaml}"
 
 CLIPROXYAPI_START_SCRIPT="${CLIPROXYAPI_START_SCRIPT:-./start-cliproxyapi.sh}"
 CLIPROXYAPI_STOP_SCRIPT="${CLIPROXYAPI_STOP_SCRIPT:-./stop-cliproxyapi.sh}"
@@ -78,95 +37,36 @@ CLIPROXYAPI_STOP_AFTER_TEST="${CLIPROXYAPI_STOP_AFTER_TEST:-false}"
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
 CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
 CLIPROXYAPI_DOCKER_SERVICE="${CLIPROXYAPI_DOCKER_SERVICE:-cliproxyapi}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 
-ROUTING_TEST_ALIASES="${ROUTING_TEST_ALIASES:-openai-codex antigravity-oauth qwen-cli kimi-cli}"
+ROUTING_TEST_ALIASES="${ROUTING_TEST_ALIASES:-}"
+ROUTING_AUTO_ALIAS_LIMIT="${ROUTING_AUTO_ALIAS_LIMIT:-4}"
 ROUTING_TEST_PROMPT="${ROUTING_TEST_PROMPT:-reply with exactly: routed-ok}"
-ROUTING_TEST_MAX_TOKENS="${ROUTING_TEST_MAX_TOKENS:-16}"
+# Some providers expose "reasoning_content" and may spend short budgets thinking,
+# returning an empty "content". Use a slightly higher default budget so the test
+# validates a user-visible answer.
+ROUTING_TEST_MAX_TOKENS="${ROUTING_TEST_MAX_TOKENS:-256}"
+ROUTING_EXPECT_SUBSTRING="${ROUTING_EXPECT_SUBSTRING:-routed-ok}"
 ROUTING_REQUEST_TIMEOUT="${ROUTING_REQUEST_TIMEOUT:-90}"
 ROUTING_CHAT_RETRIES="${ROUTING_CHAT_RETRIES:-3}"
 ROUTING_CHAT_RETRY_SLEEP_SECONDS="${ROUTING_CHAT_RETRY_SLEEP_SECONDS:-2}"
 ROUTING_DOCKER_REACHABILITY_CHECK="${ROUTING_DOCKER_REACHABILITY_CHECK:-true}"
-
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
+# External providers can rate-limit or deny due to quota. Keep the default
+# regression signal focused on config/routing, while still surfacing the issue.
+ROUTING_TREAT_429_AS_WARN="${ROUTING_TREAT_429_AS_WARN:-true}"
 
 TESTS_TOTAL=0
 TESTS_PASSED=0
 TESTS_FAILED=0
+TESTS_WARNINGS=0
 
 TMP_DIR=""
 STARTED_CLIPROXYAPI=false
 OPENWEBUI_AUTH_TOKEN=""
 
-normalize_base_url() {
-    local value="$1"
-    printf "%s" "${value%/}"
-}
-
-normalize_path() {
-    local value="$1"
-    if [ -z "$value" ]; then
-        printf "/"
-        return
-    fi
-    if [[ "$value" != /* ]]; then
-        value="/$value"
-    fi
-    printf "%s" "$value"
-}
-
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║  OpenWebUI -> CLIProxyAPI Routing Regression              ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
-}
+###############################################################################
+# Script-specific Helper Functions
+###############################################################################
 
 test_pass() {
     local label="$1"
@@ -181,6 +81,14 @@ test_fail() {
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_FAILED=$((TESTS_FAILED + 1))
     print_error "$label ($reason)"
+}
+
+test_warn() {
+    local label="$1"
+    local reason="$2"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_WARNINGS=$((TESTS_WARNINGS + 1))
+    print_warning "$label ($reason)"
 }
 
 cleanup() {
@@ -226,7 +134,7 @@ openwebui_chat_probe() {
           messages: [{role: "user", content: $prompt}],
           max_tokens: $max_tokens,
           stream: false
-        }' > "$payload_file"
+        }' >"$payload_file"
 
     if [ -n "$OPENWEBUI_AUTH_TOKEN" ]; then
         curl -sS -m "$ROUTING_REQUEST_TIMEOUT" \
@@ -251,7 +159,7 @@ openwebui_signin() {
     jq -n \
         --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
         --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-        '{email: $email, password: $password}' > "$payload_file"
+        '{email: $email, password: $password}' >"$payload_file"
 
     curl -sS -m "$ROUTING_REQUEST_TIMEOUT" \
         -H "Content-Type: application/json" \
@@ -317,14 +225,14 @@ ensure_cliproxyapi_ready() {
             print_error "docker is required for CLIPROXYAPI_DOCKER_MANAGED=true"
             return 1
         fi
-        if ! command_exists docker-compose; then
-            print_error "docker-compose is required for CLIPROXYAPI_DOCKER_MANAGED=true"
+        if ! init_compose_cmd; then
+            print_error "Docker Compose is required for CLIPROXYAPI_DOCKER_MANAGED=true"
             return 1
         fi
 
         print_step "Starting CLIProxyAPI Docker service for routing test"
-        if ! docker-compose up -d "$CLIPROXYAPI_DOCKER_SERVICE"; then
-            print_error "Failed to start docker-compose service: $CLIPROXYAPI_DOCKER_SERVICE"
+        if ! docker_compose up -d "$CLIPROXYAPI_DOCKER_SERVICE"; then
+            print_error "Failed to start Docker Compose service: $CLIPROXYAPI_DOCKER_SERVICE"
             return 1
         fi
     else
@@ -362,6 +270,38 @@ extract_model_ids() {
     ' "$catalog_file" 2>/dev/null || true
 }
 
+extract_openwebui_openai_model_ids() {
+    local catalog_file="$1"
+    jq -r '
+        if type == "object" and (.data | type == "array") then
+            .data
+        else
+            []
+        end
+        | .[]?
+        | select((.owned_by // "") == "openai" or (.openai? != null))
+        | .id // empty
+    ' "$catalog_file" 2>/dev/null || true
+}
+
+resolve_routing_aliases() {
+    local cliproxy_models_file="$1"
+    local aliases=""
+
+    if [ -n "$ROUTING_TEST_ALIASES" ]; then
+        printf "%s\n" $ROUTING_TEST_ALIASES
+        return 0
+    fi
+
+    aliases="$(extract_config_aliases "$CLIPROXYAPI_CONFIG" | sed '/^$/d' || true)"
+    if [ -n "$aliases" ]; then
+        printf "%s\n" "$aliases"
+        return 0
+    fi
+
+    extract_model_ids "$cliproxy_models_file" | sed '/^$/d' | head -n "$ROUTING_AUTO_ALIAS_LIMIT"
+}
+
 resolve_openwebui_model_id() {
     local catalog_file="$1"
     local alias="$2"
@@ -375,10 +315,36 @@ resolve_openwebui_model_id() {
         fi
     done < <(extract_model_ids "$catalog_file")
 
+    if command_exists jq; then
+        id="$(jq -r --arg alias "$alias" '
+            (
+                if type == "array" then
+                    .
+                elif (type == "object" and (.data | type == "array")) then
+                    .data
+                else
+                    []
+                end
+            )
+            | map(
+                select(
+                    (.id // "") == $alias
+                    or (.name // "") == $alias
+                    or ((.aliases // []) | index($alias) != null)
+                )
+            )
+            | .[0].id // empty
+        ' "$catalog_file" 2>/dev/null | head -n 1 || true)"
+        if [ -n "$id" ]; then
+            printf "%s" "$id"
+            return 0
+        fi
+    fi
+
     while IFS= read -r id; do
         [ -z "$id" ] && continue
         case "$id" in
-            */"$alias"|*."$alias"|*:"$alias"|*"$alias"*)
+            */"$alias" | *."$alias" | *:"$alias")
                 printf "%s" "$id"
                 return 0
                 ;;
@@ -388,9 +354,60 @@ resolve_openwebui_model_id() {
     return 1
 }
 
+resolve_openwebui_openai_model_id() {
+    local catalog_file="$1"
+    local alias="$2"
+    local id=""
+
+    while IFS= read -r id; do
+        [ -z "$id" ] && continue
+        if [ "$id" = "$alias" ]; then
+            printf "%s" "$id"
+            return 0
+        fi
+    done < <(extract_openwebui_openai_model_ids "$catalog_file")
+
+    if command_exists jq; then
+        id="$(jq -r --arg alias "$alias" '
+            (
+                if type == "object" and (.data | type == "array") then
+                    .data
+                else
+                    []
+                end
+            )
+            | map(select((.owned_by // "") == "openai" or (.openai? != null)))
+            | map(
+                select(
+                    (.id // "") == $alias
+                    or (.name // "") == $alias
+                    or ((.aliases // []) | index($alias) != null)
+                )
+            )
+            | .[0].id // empty
+        ' "$catalog_file" 2>/dev/null | head -n 1 || true)"
+        if [ -n "$id" ]; then
+            printf "%s" "$id"
+            return 0
+        fi
+    fi
+
+    while IFS= read -r id; do
+        [ -z "$id" ] && continue
+        case "$id" in
+            */"$alias" | *."$alias" | *:"$alias")
+                printf "%s" "$id"
+                return 0
+                ;;
+        esac
+    done < <(extract_openwebui_openai_model_ids "$catalog_file")
+
+    return 1
+}
+
 build_models_url_from_base() {
     local base_url="$1"
-    if [[ "$base_url" == */v1 ]]; then
+    if [[ $base_url == */v1 ]]; then
         printf "%s/models" "$base_url"
         return
     fi
@@ -449,7 +466,7 @@ main() {
     print_header
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
     print_info "CLIProxyAPI URL: $CLIPROXYAPI_BASE_URL"
-    print_info "Aliases: $ROUTING_TEST_ALIASES"
+    print_info "Aliases: ${ROUTING_TEST_ALIASES:-<auto>}"
     print_info "Chat retries: $ROUTING_CHAT_RETRIES"
     print_info "OpenWebUI auto auth: $OPENWEBUI_AUTO_AUTH"
     print_info "Timestamp (UTC): $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -512,32 +529,50 @@ main() {
         test_fail "OpenWebUI models endpoint" "HTTP $openwebui_models_code"
     fi
 
+    # The goal of this regression test is to validate OpenWebUI -> OpenAI-compatible
+    # routing (CLIProxyAPI). If OpenWebUI only returns Ollama-owned models, the
+    # routing signal is meaningless.
+    if [ "$(extract_openwebui_openai_model_ids "$openwebui_models_file" | sed '/^$/d' | wc -l | tr -d ' ')" -gt 0 ]; then
+        test_pass "OpenWebUI exposes at least one OpenAI-owned model"
+    else
+        test_fail "OpenWebUI OpenAI provider model exposure" "no openai-owned models found in /api/models (check OpenWebUI persistent config and OPENAI_API_KEY)"
+    fi
+
     print_step "Checking required aliases in both model catalogs"
     local alias
     local resolved_model_id=""
-    for alias in $ROUTING_TEST_ALIASES; do
+    local routing_aliases=""
+    routing_aliases="$(resolve_routing_aliases "$cliproxy_models_file" | sed '/^$/d' || true)"
+    if [ -z "$routing_aliases" ]; then
+        test_fail "Routing alias selection" "no aliases found (set ROUTING_TEST_ALIASES or configure aliases in $CLIPROXYAPI_CONFIG)"
+        finalize
+        exit 1
+    fi
+    print_info "Routing aliases under test: $(printf "%s " $routing_aliases)"
+
+    for alias in $routing_aliases; do
         if extract_model_ids "$cliproxy_models_file" | grep -Fxq "$alias"; then
             test_pass "CLIProxyAPI model listed: $alias"
         else
             test_fail "CLIProxyAPI model listed: $alias" "missing from /v1/models"
         fi
 
-        resolved_model_id="$(resolve_openwebui_model_id "$openwebui_models_file" "$alias" || true)"
+        resolved_model_id="$(resolve_openwebui_openai_model_id "$openwebui_models_file" "$alias" || true)"
         if [ -n "$resolved_model_id" ]; then
-            test_pass "OpenWebUI model listed: $alias"
+            test_pass "OpenWebUI model listed (openai): $alias"
             if [ "$resolved_model_id" != "$alias" ]; then
                 print_info "Resolved OpenWebUI id: $alias -> $resolved_model_id"
             fi
         else
-            test_fail "OpenWebUI model listed: $alias" "missing from /api/models"
+            test_fail "OpenWebUI model listed (openai): $alias" "missing from /api/models"
         fi
     done
 
     print_step "Running OpenWebUI chat probes per alias"
-    for alias in $ROUTING_TEST_ALIASES; do
-        resolved_model_id="$(resolve_openwebui_model_id "$openwebui_models_file" "$alias" || true)"
+    for alias in $routing_aliases; do
+        resolved_model_id="$(resolve_openwebui_openai_model_id "$openwebui_models_file" "$alias" || true)"
         if [ -z "$resolved_model_id" ]; then
-            test_fail "OpenWebUI chat probe: $alias" "no matching OpenWebUI model id"
+            test_fail "OpenWebUI chat probe: $alias" "no matching OpenWebUI openai model id"
             continue
         fi
 
@@ -546,14 +581,21 @@ main() {
         local attempt=1
         local code
         local err=""
+        local content=""
 
         while [ "$attempt" -le "$ROUTING_CHAT_RETRIES" ]; do
             code="$(openwebui_chat_probe "$resolved_model_id" "$out_file" "$payload_file")"
             if [ "$code" = "200" ]; then
                 if jq -e '.choices and (.choices | type == "array") and (.choices | length > 0)' "$out_file" >/dev/null 2>&1; then
-                    break
+                    content="$(jq -r '.choices[0].message.content // .choices[0].text // ""' "$out_file" 2>/dev/null || true)"
+                    if [ -n "$ROUTING_EXPECT_SUBSTRING" ] && ! printf "%s" "$content" | grep -Fq "$ROUTING_EXPECT_SUBSTRING"; then
+                        err="missing expected content substring: ${ROUTING_EXPECT_SUBSTRING}"
+                    else
+                        break
+                    fi
+                else
+                    err="missing choices array"
                 fi
-                err="missing choices array"
             else
                 err="$(jq -r '.error.message // .detail // .message // "unknown error"' "$out_file" 2>/dev/null || true)"
             fi
@@ -566,20 +608,32 @@ main() {
         done
 
         if [ "$code" != "200" ]; then
+            if [ "$code" = "429" ] && is_true "$ROUTING_TREAT_429_AS_WARN"; then
+                test_warn "OpenWebUI chat probe: $alias" "HTTP 429 (${err})"
+                continue
+            fi
             test_fail "OpenWebUI chat probe: $alias" "HTTP $code (${err})"
             continue
         fi
 
-        if jq -e '.choices and (.choices | type == "array") and (.choices | length > 0)' "$out_file" >/dev/null 2>&1; then
-            test_pass "OpenWebUI chat probe: $alias"
-        else
+        if ! jq -e '.choices and (.choices | type == "array") and (.choices | length > 0)' "$out_file" >/dev/null 2>&1; then
             test_fail "OpenWebUI chat probe: $alias" "response missing choices"
+            continue
         fi
+
+        content="$(jq -r '.choices[0].message.content // .choices[0].text // ""' "$out_file" 2>/dev/null || true)"
+        if [ -n "$ROUTING_EXPECT_SUBSTRING" ] && ! printf "%s" "$content" | grep -Fq "$ROUTING_EXPECT_SUBSTRING"; then
+            test_fail "OpenWebUI chat probe: $alias" "missing expected content substring: ${ROUTING_EXPECT_SUBSTRING}"
+            continue
+        fi
+
+        test_pass "OpenWebUI chat probe: $alias"
     done
 
     print_step "Summary"
     print_info "Passed: $TESTS_PASSED"
     print_info "Failed: $TESTS_FAILED"
+    print_info "Warnings: $TESTS_WARNINGS"
     print_info "Total:  $TESTS_TOTAL"
 
     if [ "$TESTS_FAILED" -gt 0 ]; then

@@ -63,6 +63,43 @@ Baseline validation (fast checks):
 
 If you enable web search, `test-rag.sh --baseline` probes SearXNG from both the host and the OpenWebUI container.
 
+If you want to align your pinned image to the latest upstream tag:
+
+```bash
+OPENWEBUI_TAG="$(curl -s https://api.github.com/repos/open-webui/open-webui/releases/latest | jq -r '.tag_name')"
+sed -i "s|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:${OPENWEBUI_TAG}|" .env
+```
+
+### Baseline enhancements (SearXNG + Code Interpreter)
+
+For a clean baseline profile, copy defaults and redeploy:
+
+```bash
+cp .env.example .env
+./deploy.sh --no-logs
+```
+
+Core defaults enabled:
+
+- `SEARXNG_QUERY_URL=http://host.docker.internal:${SEARXNG_PORT}/search?q={query}&format=json`
+- `ENABLE_WEB_SEARCH=false` (set to `true` to allow web search immediately)
+- `ENABLE_CODE_EXECUTION=true`
+- `CODE_EXECUTION_ENGINE=jupyter`
+- `CODE_EXECUTION_JUPYTER_URL=http://jupyter:8889`
+- `CODE_EXECUTION_JUPYTER_AUTH=token`
+- `CODE_EXECUTION_JUPYTER_AUTH_TOKEN=<same value as JUPYTER_TOKEN>`
+- `ENABLE_CODE_INTERPRETER=true`
+- `CODE_INTERPRETER_ENGINE=jupyter`
+- `CODE_INTERPRETER_JUPYTER_URL=http://jupyter:8889`
+- `CODE_INTERPRETER_JUPYTER_AUTH=token`
+- `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=<same value as JUPYTER_TOKEN>`
+
+Validate with:
+
+```bash
+./test-rag.sh --baseline
+```
+
 ## Tune "Documents" Settings (Manual-Only)
 
 OpenWebUI stores "Documents" (retrieval) settings persistently in its DB. For reproducible tuning and rollback, use:
@@ -81,7 +118,6 @@ OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh --restore
 Notes:
 - This is intentionally manual-token only (no auto sign-in), to avoid hidden credential assumptions.
 - UI path for the same settings: `http://localhost:<WEBUI_PORT>/admin/settings/documents`
-If the host probe works but the container probe fails, the host firewall is likely blocking docker-to-host connections on port 8888.
 
 ## 5. Validate OAuth aliases
 
@@ -91,9 +127,8 @@ If the host probe works but the container probe fails, the host firewall is like
 
 Expected aliases:
 1. `openai-codex`
-2. `antigravity-oauth`
-3. `qwen-cli`
-4. `kimi-cli`
+2. `qwen-cli`
+3. `kimi-cli`
 
 ## 6. Optional: enable vLLM fallback
 
@@ -141,3 +176,10 @@ docker compose logs --tail=200 cliproxyapi
 ```bash
 ./test-openwebui-cliproxy-routing.sh
 ```
+
+## Troubleshooting (Auth, Models, Pending Activation)
+
+If you see an empty model list, a stuck/pending account activation screen, or repeated 401/502 issues:
+- Runbook: `TROUBLESHOOTING.md`
+- DB snapshot: `./backup-openwebui-db.sh`
+- Promote/activate/reset user (with automatic DB backup): `./openwebui-user-admin.sh --email you@example.com`

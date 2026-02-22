@@ -2,57 +2,15 @@
 
 ###############################################################################
 # CLIProxyAPI OAuth Setup Script
-# Configures auth credentials for antigravity, codex, qwen, and kimi
+# Configures auth credentials for codex, qwen, and kimi
 ###############################################################################
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
+cd "$SCRIPT_DIR"
 
 # Configuration
 CLIPROXYAPI_CMD="${CLIPROXYAPI_CMD:-./bin/cliproxyapi}"
@@ -60,48 +18,11 @@ CLIPROXYAPI_CONFIG="${CLIPROXYAPI_CONFIG:-./cliproxyapi/config.yaml}"
 CLIPROXYAPI_CONFIG_FLAG="${CLIPROXYAPI_CONFIG_FLAG:---config}"
 CLIPROXYAPI_OAUTH_NO_BROWSER="${CLIPROXYAPI_OAUTH_NO_BROWSER:-false}"
 CLIPROXYAPI_QWEN_AUTH_MODE="${CLIPROXYAPI_QWEN_AUTH_MODE:-auto}"
-CLIPROXYAPI_ANTIGRAVITY_CALLBACK_PORT="${CLIPROXYAPI_ANTIGRAVITY_CALLBACK_PORT:-51121}"
 CLIPROXYAPI_CODEX_CALLBACK_PORT="${CLIPROXYAPI_CODEX_CALLBACK_PORT:-1455}"
 CLIPROXYAPI_QWEN_CALLBACK_PORT="${CLIPROXYAPI_QWEN_CALLBACK_PORT:-0}"
 CLIPROXYAPI_KIMI_CALLBACK_PORT="${CLIPROXYAPI_KIMI_CALLBACK_PORT:-0}"
 CLIPROXYAPI_QWEN_SOURCE_FILE="${CLIPROXYAPI_QWEN_SOURCE_FILE:-$HOME/.qwen/oauth_creds.json}"
 QWEN_IMPORT_SCRIPT="${QWEN_IMPORT_SCRIPT:-./import-qwen-auth.sh}"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-executable_exists() {
-    local executable="$1"
-    if [[ "$executable" == */* ]]; then
-        [ -x "$executable" ]
-        return $?
-    fi
-    command_exists "$executable"
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
 
 expand_home_path() {
     local candidate="$1"
@@ -116,29 +37,18 @@ expand_home_path() {
     printf "%s" "$candidate"
 }
 
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     CLIProxyAPI OAuth Setup                               ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
+executable_exists() {
+    local executable="$1"
+    if [[ $executable == */* ]]; then
+        [ -x "$executable" ]
+        return $?
+    fi
+    command_exists "$executable"
 }
 
 show_usage() {
     cat <<'EOF_USAGE'
-Usage: ./configure-cliproxyapi-oauth.sh [all|antigravity|codex|qwen|kimi] [--help]
+Usage: ./configure-cliproxyapi-oauth.sh [all|codex|qwen|kimi] [--help]
 
 Examples:
   ./configure-cliproxyapi-oauth.sh
@@ -150,7 +60,7 @@ Behavior:
       auto  -> import if source file exists, else native -qwen-login OAuth
       import -> imports ~/.qwen/oauth_creds.json using import-qwen-auth.sh
       oauth  -> runs native -qwen-login OAuth flow
-  - antigravity/codex/kimi: runs CLIProxyAPI OAuth login flows
+  - codex/kimi: runs CLIProxyAPI OAuth login flows
 EOF_USAGE
 }
 
@@ -160,7 +70,7 @@ run_oauth_login() {
     local callback_port="$3"
 
     local -a command=("$CLIPROXYAPI_CMD" "$CLIPROXYAPI_CONFIG_FLAG" "$CLIPROXYAPI_CONFIG" "$login_flag")
-    if [[ "$callback_port" =~ ^[0-9]+$ ]] && [ "$callback_port" -gt 0 ]; then
+    if [[ $callback_port =~ ^[0-9]+$ ]] && [ "$callback_port" -gt 0 ]; then
         command+=("-oauth-callback-port" "$callback_port")
     fi
     if is_true "$CLIPROXYAPI_OAUTH_NO_BROWSER"; then
@@ -187,8 +97,7 @@ run_qwen_setup() {
                 auth_mode="oauth"
             fi
             ;;
-        import|oauth)
-            ;;
+        import | oauth) ;;
         *)
             print_error "Unsupported CLIPROXYAPI_QWEN_AUTH_MODE: $CLIPROXYAPI_QWEN_AUTH_MODE"
             print_error "Allowed values: auto, import, oauth"
@@ -236,11 +145,11 @@ main() {
 
     local -a providers=()
     if [ $# -eq 0 ] || [ "${1:-}" = "all" ]; then
-        providers=("qwen" "antigravity" "codex" "kimi")
+        providers=("qwen" "codex" "kimi")
     else
         while [ $# -gt 0 ]; do
             case "$1" in
-                qwen|antigravity|codex|kimi)
+                qwen | codex | kimi)
                     providers+=("$1")
                     ;;
                 *)
@@ -258,9 +167,6 @@ main() {
         case "$provider" in
             qwen)
                 run_qwen_setup
-                ;;
-            antigravity)
-                run_oauth_login "antigravity" "-antigravity-login" "$CLIPROXYAPI_ANTIGRAVITY_CALLBACK_PORT"
                 ;;
             codex)
                 run_oauth_login "codex" "-codex-login" "$CLIPROXYAPI_CODEX_CALLBACK_PORT"

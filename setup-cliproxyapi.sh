@@ -8,50 +8,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
-
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
 
 CLIPROXYAPI_REPO="${CLIPROXYAPI_REPO:-router-for-me/CLIProxyAPI}"
@@ -63,61 +20,6 @@ CLIPROXYAPI_UPSTREAM_CONFIG_SNAPSHOT="${CLIPROXYAPI_UPSTREAM_CONFIG_SNAPSHOT:-./
 CLIPROXYAPI_RELEASE_METADATA_FILE="${CLIPROXYAPI_RELEASE_METADATA_FILE:-./cliproxyapi/upstream-release.txt}"
 CLIPROXYAPI_FORCE_REINSTALL="${CLIPROXYAPI_FORCE_REINSTALL:-false}"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     CLIProxyAPI Official Installer                        ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
-
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
 detect_platform_asset_suffix() {
     local os_name=""
     local arch_name=""
@@ -125,8 +27,7 @@ detect_platform_asset_suffix() {
     arch_name="$(uname -m)"
 
     case "$os_name" in
-        linux|darwin)
-            ;;
+        linux | darwin) ;;
         *)
             print_error "Unsupported OS for upstream binary install: $os_name"
             return 1
@@ -134,10 +35,10 @@ detect_platform_asset_suffix() {
     esac
 
     case "$arch_name" in
-        x86_64|amd64)
+        x86_64 | amd64)
             arch_name="amd64"
             ;;
-        aarch64|arm64)
+        aarch64 | arm64)
             arch_name="arm64"
             ;;
         *)
@@ -269,7 +170,7 @@ main() {
         release_tag="$(json_value "$metadata_path" ".tag_name")"
         release_published_at="$(json_value "$metadata_path" ".published_at")"
     else
-        if [[ "$CLIPROXYAPI_VERSION" == v* ]]; then
+        if [[ $CLIPROXYAPI_VERSION == v* ]]; then
             release_tag="$CLIPROXYAPI_VERSION"
         else
             release_tag="v${CLIPROXYAPI_VERSION}"
@@ -331,7 +232,7 @@ main() {
         printf "published_at=%s\n" "$release_published_at"
         printf "asset=%s\n" "$archive_name"
         printf "installed_at_utc=%s\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    } > "$metadata_file_path"
+    } >"$metadata_file_path"
     print_success "Wrote release metadata to $metadata_file_path"
 
     help_output="$("$install_path" --help 2>&1 || true)"

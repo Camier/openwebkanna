@@ -7,59 +7,30 @@
 
 set -e
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
 
 # Configuration
-OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.7.2}"
-OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:latest}"
+OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}"
+OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.2}"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="backups"
 OPENWEBUI_VOLUME="${OPENWEBUI_VOLUME:-openwebui_data}"
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
+CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
 CLIPROXYAPI_START_SCRIPT="./start-cliproxyapi.sh"
 CLIPROXYAPI_RESTART_SCRIPT="./restart-cliproxyapi.sh"
 CLIPROXYAPI_CHECK_SCRIPT="./check-cliproxyapi.sh"
+COMPOSE_CMD=()
 
 ###############################################################################
 # Helper Functions
 ###############################################################################
 
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     OpenWebUI + vLLM RAG Update Manager                  ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_info() {
-    echo -e "${MAGENTA}ℹ $1${NC}"
-}
+# Note: print_header, print_step, print_success, print_error, print_warning, print_info
+# come from lib/print-utils.sh via lib/init.sh
 
 confirm_action() {
     local message=$1
@@ -82,10 +53,10 @@ confirm_action() {
         response=${response:-$default}
 
         case $response in
-            [Yy]|[Yy][Ee][Ss])
+            [Yy] | [Yy][Ee][Ss])
                 return 0
                 ;;
-            [Nn]|[Nn][Oo])
+            [Nn] | [Nn][Oo])
                 return 1
                 ;;
             *)
@@ -105,14 +76,16 @@ create_backup() {
     # Create backup directory
     mkdir -p "$BACKUP_DIR"
 
-    local timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_file="$BACKUP_DIR/openwebui_backup_$timestamp.tar.gz"
+    local timestamp
+    local backup_file
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    backup_file="$BACKUP_DIR/openwebui_backup_$timestamp.tar.gz"
 
     print_info "Backup file: $backup_file"
 
     # Check if Docker volume exists
     local volume_exists=false
-    if docker info &> /dev/null 2>&1; then
+    if docker info &>/dev/null 2>&1; then
         if docker volume ls --format '{{.Name}}' | grep -Fxq "${OPENWEBUI_VOLUME}"; then
             volume_exists=true
         fi
@@ -126,21 +99,30 @@ create_backup() {
     # Create temporary container for backup
     print_info "Creating backup of OpenWebUI data..."
 
-    local temp_container="openwebui-backup-$timestamp"
-
-    docker run --rm \
+    if docker run --rm \
         -v "${OPENWEBUI_VOLUME}:/data" \
         -v "$(pwd)/$BACKUP_DIR:/backup" \
         alpine tar czf "/backup/$(basename "$backup_file")" -C /data . \
-        2>/dev/null
-
-    if [ $? -eq 0 ] && [ -f "$backup_file" ]; then
-        local size=$(du -h "$backup_file" | cut -f1)
+        2>/dev/null; then
+        local size
+        size=$(du -h "$backup_file" | cut -f1)
         print_success "Backup created successfully ($size)"
 
         # Keep only last 5 backups
         print_info "Cleaning old backups (keeping last 5)..."
-        ls -t "$BACKUP_DIR"/openwebui_backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+        local -a backups=()
+        mapfile -d '' -t backups < <(
+            find "$BACKUP_DIR" -maxdepth 1 -type f -name 'openwebui_backup_*.tar.gz' -printf '%T@ %p\0' |
+                sort -z -nr
+        )
+        if ((${#backups[@]} > 5)); then
+            local backup_entry
+            local backup_path
+            for backup_entry in "${backups[@]:5}"; do
+                backup_path="${backup_entry#* }"
+                rm -f -- "$backup_path"
+            done
+        fi
 
         return 0
     else
@@ -160,8 +142,10 @@ list_backups() {
     echo
     for backup in "$BACKUP_DIR"/openwebui_backup_*.tar.gz; do
         if [ -f "$backup" ]; then
-            local size=$(du -h "$backup" | cut -f1)
-            local date=$(basename "$backup" | sed 's/openwebui_backup_//' | sed 's/\.tar\.gz$//' | tr '_' ' ')
+            local size
+            local date
+            size=$(du -h "$backup" | cut -f1)
+            date=$(basename "$backup" | sed 's/openwebui_backup_//' | sed 's/\.tar\.gz$//' | tr '_' ' ')
             echo -e "  ${CYAN}•${NC} $date (${GREEN}$size${NC})"
         fi
     done
@@ -169,6 +153,7 @@ list_backups() {
 
 restore_backup() {
     local backup_file=$1
+    local backup_base=""
 
     if [ ! -f "$backup_file" ]; then
         print_error "Backup file not found: $backup_file"
@@ -185,21 +170,25 @@ restore_backup() {
 
     # Stop services
     print_info "Stopping services..."
-    docker-compose stop openwebui 2>/dev/null || true
+    docker_compose stop openwebui 2>/dev/null || true
 
     # Restore from backup
     print_info "Restoring data..."
-    docker run --rm \
+    backup_base="$(basename "$backup_file")"
+    if [ -z "$backup_base" ]; then
+        print_error "Invalid backup filename: $backup_file"
+        return 1
+    fi
+
+    if docker run --rm \
         -v "${OPENWEBUI_VOLUME}:/data" \
         -v "$(pwd)/$BACKUP_DIR:/backup" \
-        alpine sh -c "rm -rf /data/* && tar xzf /backup/$(basename "$backup_file") -C /data"
-
-    if [ $? -eq 0 ]; then
+        alpine sh -c 'rm -rf /data/* && tar xzf "$1" -C /data' _ "/backup/$backup_base"; then
         print_success "Backup restored successfully"
 
         # Start services
         print_info "Starting services..."
-        docker-compose start openwebui
+        docker_compose start openwebui
         print_success "Services restarted"
         return 0
     else
@@ -215,13 +204,17 @@ restore_backup() {
 check_docker() {
     print_step "Checking Docker..."
 
-    if ! command -v docker &> /dev/null; then
+    if ! command -v docker &>/dev/null; then
         print_error "Docker is not installed"
         exit 1
     fi
 
-    if ! docker info &> /dev/null 2>&1; then
+    if ! docker info &>/dev/null 2>&1; then
         print_error "Docker is not running"
+        exit 1
+    fi
+
+    if ! init_compose_cmd; then
         exit 1
     fi
 
@@ -231,15 +224,18 @@ check_docker() {
 check_current_version() {
     print_step "Checking current OpenWebUI version..."
 
-    if docker info &> /dev/null 2>&1; then
-        local current_container=$(docker-compose ps -q openwebui 2>/dev/null || echo "")
+    if docker info &>/dev/null 2>&1; then
+        local current_container
+        current_container=$(docker_compose ps -q openwebui 2>/dev/null || echo "")
 
         if [ -n "$current_container" ]; then
-            local current_image=$(docker inspect -f '{{.Config.Image}}' "$current_container" 2>/dev/null || echo "unknown")
+            local current_image
+            local created
+            current_image=$(docker inspect -f '{{.Config.Image}}' "$current_container" 2>/dev/null || echo "unknown")
             print_info "Current image: $current_image"
 
             # Get image creation date
-            local created=$(docker inspect -f '{{.Created}}' "$current_container" 2>/dev/null || echo "unknown")
+            created=$(docker inspect -f '{{.Created}}' "$current_container" 2>/dev/null || echo "unknown")
             if [ "$created" != "unknown" ]; then
                 created=$(date -d "$created" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$created")
                 print_info "Image created: $created"
@@ -255,13 +251,12 @@ pull_latest_image() {
     print_info "Image: $OPENWEBUI_IMAGE"
 
     # Pull the image
-    docker pull "$OPENWEBUI_IMAGE"
-
-    if [ $? -eq 0 ]; then
+    if docker pull "$OPENWEBUI_IMAGE"; then
         print_success "Image pulled successfully"
 
         # Get new image info
-        local new_image_id=$(docker inspect -f '{{.Id}}' "$OPENWEBUI_IMAGE" 2>/dev/null || echo "unknown")
+        local new_image_id
+        new_image_id=$(docker inspect -f '{{.Id}}' "$OPENWEBUI_IMAGE" 2>/dev/null || echo "unknown")
         print_info "New image ID: ${new_image_id:0:12}"
         return 0
     else
@@ -269,9 +264,7 @@ pull_latest_image() {
 
         # Try alternative image
         print_info "Trying alternative image: $OPENWEBUI_ALT_IMAGE"
-        docker pull "$OPENWEBUI_ALT_IMAGE"
-
-        if [ $? -eq 0 ]; then
+        if docker pull "$OPENWEBUI_ALT_IMAGE"; then
             print_success "Alternative image pulled successfully"
             OPENWEBUI_IMAGE="$OPENWEBUI_ALT_IMAGE"
             return 0
@@ -292,7 +285,7 @@ persist_image_selection() {
     if grep -q '^OPENWEBUI_IMAGE=' "$env_file"; then
         sed -i "s|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=${OPENWEBUI_IMAGE}|" "$env_file"
     else
-        printf "\n# Pinned OpenWebUI image for reproducible deployments\nOPENWEBUI_IMAGE=%s\n" "$OPENWEBUI_IMAGE" >> "$env_file"
+        printf "\n# Pinned OpenWebUI image for reproducible deployments\nOPENWEBUI_IMAGE=%s\n" "$OPENWEBUI_IMAGE" >>"$env_file"
     fi
 
     print_success "Persisted OPENWEBUI_IMAGE in .env"
@@ -308,9 +301,7 @@ restart_services() {
 
     # Recreate container with new image
     print_info "Recreating OpenWebUI container..."
-    OPENWEBUI_IMAGE="$OPENWEBUI_IMAGE" docker-compose up -d --force-recreate openwebui
-
-    if [ $? -eq 0 ]; then
+    if OPENWEBUI_IMAGE="$OPENWEBUI_IMAGE" docker_compose up -d --force-recreate openwebui; then
         print_success "Services restarted"
         return 0
     else
@@ -327,8 +318,8 @@ wait_for_openwebui() {
     local attempt=1
 
     while [ $attempt -le $max_attempts ]; do
-        if curl -s -f "$openwebui_url" &> /dev/null || \
-           curl -s -f "${openwebui_url}/api/health" &> /dev/null; then
+        if curl -s -f "$openwebui_url" &>/dev/null ||
+            curl -s -f "${openwebui_url}/api/health" &>/dev/null; then
             print_success "OpenWebUI is ready!"
             return 0
         fi
@@ -350,23 +341,35 @@ ensure_cliproxyapi() {
 
     print_step "Ensuring CLIProxyAPI is healthy..."
 
-    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
+    # Keep update flow stable: chat completion checks can fail due to transient upstream
+    # throttling (HTTP 429) while the proxy itself is healthy.
+    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] &&
+        CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
         print_success "CLIProxyAPI is already healthy"
         return 0
     fi
 
-    if [ -x "$CLIPROXYAPI_RESTART_SCRIPT" ]; then
-        print_info "Restarting CLIProxyAPI service..."
-        CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_RESTART_SCRIPT"
-    elif [ -x "$CLIPROXYAPI_START_SCRIPT" ]; then
-        print_info "Starting CLIProxyAPI service..."
-        CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_START_SCRIPT"
+    if [ "$CLIPROXYAPI_DOCKER_MANAGED" = "true" ]; then
+        print_info "Restarting CLIProxyAPI container (docker-managed)..."
+        if ! docker_compose up -d --force-recreate cliproxyapi; then
+            print_error "Failed to restart docker-managed CLIProxyAPI container"
+            return 1
+        fi
     else
-        print_error "CLIProxyAPI management scripts not found"
-        return 1
+        if [ -x "$CLIPROXYAPI_RESTART_SCRIPT" ]; then
+            print_info "Restarting CLIProxyAPI service..."
+            CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_RESTART_SCRIPT"
+        elif [ -x "$CLIPROXYAPI_START_SCRIPT" ]; then
+            print_info "Starting CLIProxyAPI service..."
+            CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_START_SCRIPT"
+        else
+            print_error "CLIProxyAPI management scripts not found"
+            return 1
+        fi
     fi
 
-    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
+    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] &&
+        CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
         print_success "CLIProxyAPI is healthy"
         return 0
     fi
@@ -410,7 +413,7 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -f|--force)
+            -f | --force)
                 FORCE=true
                 shift
                 ;;
@@ -419,6 +422,12 @@ main() {
                 shift
                 ;;
             --restore)
+                if [ -z "${2:-}" ] || [[ $2 == --* ]]; then
+                    print_error "Please specify a backup file to restore"
+                    echo "Usage: $0 --restore <backup_file>"
+                    echo "Use --list-backups to see available backups"
+                    exit 1
+                fi
                 RESTORE_MODE=true
                 BACKUP_FILE="$2"
                 shift 2
@@ -427,7 +436,7 @@ main() {
                 LIST_BACKUPS=true
                 shift
                 ;;
-            -h|--help)
+            -h | --help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Update OpenWebUI to the latest version."
@@ -536,7 +545,10 @@ main() {
     fi
 
     # Wait for OpenWebUI to be ready
-    wait_for_openwebui
+    if ! wait_for_openwebui; then
+        print_error "OpenWebUI failed readiness checks"
+        exit 1
+    fi
 
     # Ensure CLIProxyAPI service is healthy after OpenWebUI restart
     if ! ensure_cliproxyapi; then

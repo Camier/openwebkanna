@@ -7,21 +7,17 @@
 
 set -e
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
 
 # Configuration
 VLLM_PORT=8000
 COMPOSE_FILE="docker-compose.yml"
 VLLM_LOG_FILE="logs/vllm.log"
-VLLM_PID_FILE=".vllm_pid"
+VLLM_PID_FILE="vllm.pid"
+VLLM_PID_FILE_LEGACY=".vllm_pid"
+OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}"
 CLIPROXYAPI_LOG_FILE="${CLIPROXYAPI_LOG_FILE:-logs/cliproxyapi.log}"
 CLIPROXYAPI_PID_FILE="${CLIPROXYAPI_PID_FILE:-.cliproxyapi.pid}"
 CLIPROXYAPI_STOP_SCRIPT="./stop-cliproxyapi.sh"
@@ -30,33 +26,8 @@ CLIPROXYAPI_STOP_SCRIPT="./stop-cliproxyapi.sh"
 # Helper Functions
 ###############################################################################
 
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     OpenWebUI + vLLM RAG Cleanup Manager                  ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_info() {
-    echo -e "${MAGENTA}ℹ $1${NC}"
-}
+# Note: print_header, print_step, print_success, print_error, print_warning, print_info
+# come from lib/print-utils.sh via lib/init.sh
 
 confirm_action() {
     local message=$1
@@ -79,10 +50,10 @@ confirm_action() {
         response=${response:-$default}
 
         case $response in
-            [Yy]|[Yy][Ee][Ss])
+            [Yy] | [Yy][Ee][Ss])
                 return 0
                 ;;
-            [Nn]|[Nn][Oo])
+            [Nn] | [Nn][Oo])
                 return 1
                 ;;
             *)
@@ -103,7 +74,8 @@ stop_vllm() {
 
     # Check PID file first
     if [ -f "$VLLM_PID_FILE" ]; then
-        local pid=$(cat "$VLLM_PID_FILE")
+        local pid
+        pid=$(cat "$VLLM_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             print_info "Stopping vLLM process (PID: $pid)..."
             kill "$pid"
@@ -118,11 +90,30 @@ stop_vllm() {
 
             stopped=true
         fi
-        rm -f "$VLLM_PID_FILE"
+        rm -f "$VLLM_PID_FILE" "$VLLM_PID_FILE_LEGACY"
+    elif [ -f "$VLLM_PID_FILE_LEGACY" ]; then
+        local pid
+        pid=$(cat "$VLLM_PID_FILE_LEGACY")
+        if kill -0 "$pid" 2>/dev/null; then
+            print_info "Stopping legacy vLLM process (PID: $pid)..."
+            kill "$pid"
+            sleep 2
+
+            # Force kill if still running
+            if kill -0 "$pid" 2>/dev/null; then
+                print_warning "Process still running, sending SIGKILL..."
+                kill -9 "$pid"
+                sleep 1
+            fi
+
+            stopped=true
+        fi
+        rm -f "$VLLM_PID_FILE_LEGACY" "$VLLM_PID_FILE"
     fi
 
     # Check for any vLLM processes
-    local pids=$(pgrep -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true)
+    local pids
+    pids=$(pgrep -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true)
     if [ -n "$pids" ]; then
         print_info "Stopping additional vLLM processes: $pids"
         echo "$pids" | xargs kill
@@ -158,8 +149,9 @@ stop_cliproxyapi() {
     local stopped=false
 
     if [ -f "$CLIPROXYAPI_PID_FILE" ]; then
-        local pid=$(cat "$CLIPROXYAPI_PID_FILE")
-        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        local pid
+        pid=$(cat "$CLIPROXYAPI_PID_FILE")
+        if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
             print_info "Stopping CLIProxyAPI process (PID: $pid)..."
             kill "$pid"
             sleep 1
@@ -187,13 +179,14 @@ stop_docker_compose() {
         return 0
     fi
 
-    if ! docker info &> /dev/null 2>&1; then
+    if ! docker info &>/dev/null 2>&1; then
         print_info "Docker is not running"
         return 0
     fi
 
     # Check if any containers are running
-    local running=$(docker-compose ps -q 2>/dev/null || true)
+    local running
+    running=$(docker-compose ps -q 2>/dev/null || true)
     if [ -z "$running" ]; then
         print_info "No Docker Compose containers are running"
         return 0
@@ -224,9 +217,11 @@ cleanup_docker() {
     # Ask about images
     if confirm_action "Remove OpenWebUI Docker image as well?"; then
         print_info "Removing OpenWebUI image..."
-        docker rmi ghcr.io/open-webui/open-webui:main 2>/dev/null || \
-        docker rmi ghcr.io/open-webui/open-webui:latest 2>/dev/null || \
-        print_info "Image not found or already removed"
+        docker rmi "$OPENWEBUI_IMAGE" 2>/dev/null ||
+            docker rmi ghcr.io/open-webui/open-webui:v0.8.3 2>/dev/null ||
+            docker rmi ghcr.io/open-webui/open-webui:main 2>/dev/null ||
+            docker rmi ghcr.io/open-webui/open-webui:latest 2>/dev/null ||
+            print_info "Image not found or already removed"
     fi
 
     # Clean up dangling images and build cache
@@ -247,14 +242,14 @@ cleanup_logs() {
     # Clear vLLM log
     if [ -f "$VLLM_LOG_FILE" ]; then
         print_info "Clearing vLLM log file..."
-        > "$VLLM_LOG_FILE"
+        >"$VLLM_LOG_FILE"
         print_success "vLLM log cleared"
     fi
 
     # Clear CLIProxyAPI log
     if [ -f "$CLIPROXYAPI_LOG_FILE" ]; then
         print_info "Clearing CLIProxyAPI log file..."
-        > "$CLIPROXYAPI_LOG_FILE"
+        >"$CLIPROXYAPI_LOG_FILE"
         print_success "CLIProxyAPI log cleared"
     fi
 
@@ -317,7 +312,7 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -f|--force)
+            -f | --force)
                 FORCE=true
                 shift
                 ;;
@@ -340,7 +335,7 @@ main() {
                 STOP_ONLY=false
                 shift
                 ;;
-            -h|--help)
+            -h | --help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Stop and cleanup OpenWebUI + vLLM RAG system."

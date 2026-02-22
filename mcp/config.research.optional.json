@@ -1,0 +1,22 @@
+{
+  "_comment": "This is an OPTIONAL configuration file for external/research MCP servers.",
+  "_note": "Copy required servers to mcp/config.json or source this file via MCPO_CONFIG env var.",
+  "mcpServers": {
+    "zotero_plugin_streamable": {
+      "type": "streamable-http",
+      "url": "http://host.docker.internal:23120/mcp"
+    },
+    "zotero_remote": {
+      "type": "streamable-http",
+      "url": "http://host.docker.internal:8811/mcp",
+      "headers": {
+        "_comment": "TODO: Replace with actual Zotero MCP token from your Zotero plugin settings",
+        "Authorization": "Bearer REPLACE_WITH_ZOTERO_MCP_TOKEN"
+      }
+    },
+    "websearch_remote": {
+      "type": "streamable-http",
+      "url": "http://host.docker.internal:8812/mcp"
+    }
+  }
+}

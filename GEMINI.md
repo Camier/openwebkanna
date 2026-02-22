@@ -23,9 +23,8 @@ Last updated: 2026-02-12 (UTC)
 
 Expected aliases exposed by `/v1/models`:
 1. `openai-codex`
-2. `antigravity-oauth`
-3. `qwen-cli`
-4. `kimi-cli`
+2. `qwen-cli`
+3. `kimi-cli`
 
 ## Guardrails
 

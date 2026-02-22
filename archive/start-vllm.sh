@@ -3,25 +3,23 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+
 # vLLM environment path
 VLLM_ENV="${HOME}/.conda/envs/vllm"
 VLLM_PYTHON="${VLLM_ENV}/bin/python"
 
 # Configuration (override via environment variables when needed)
 MODEL_NAME="${VLLM_MODEL_NAME:-meta-llama/Llama-3.1-8B-Instruct}"
-HOST="${VLLM_HOST:-0.0.0.0}"
+HOST="${VLLM_HOST:-127.0.0.1}"
 PORT="${VLLM_PORT:-8000}"
 GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.25}"
 MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-4096}"
 VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 LOG_FILE="vllm.log"
 PID_FILE="vllm.pid"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+LEGACY_PID_FILE=".vllm_pid"
 
 echo "=== vLLM Server Startup Script ==="
 echo "Model: ${MODEL_NAME}"
@@ -32,23 +30,35 @@ echo "Max Model Len: ${MAX_MODEL_LEN}"
 if [ -n "${VLLM_EXTRA_ARGS}" ]; then
     echo "Extra Args: ${VLLM_EXTRA_ARGS}"
 fi
+if [ "${HOST}" = "0.0.0.0" ] || [ "${HOST}" = "::" ]; then
+    echo -e "${YELLOW}Warning: vLLM is configured to listen on all interfaces (${HOST}).${NC}"
+fi
 echo ""
 
 # Check if vLLM is already running
-if [ -f "${PID_FILE}" ]; then
-    PID=$(cat "${PID_FILE}")
-    if ps -p ${PID} > /dev/null 2>&1; then
-        echo -e "${YELLOW}vLLM is already running with PID ${PID}.${NC}"
-        echo "Use 'stop-vllm.sh' to stop it first, or 'check-vllm.sh' to check its status."
-        exit 1
+if [ -f "${PID_FILE}" ] || [ -f "${LEGACY_PID_FILE}" ]; then
+    if [ -f "${PID_FILE}" ]; then
+        PID=$(cat "${PID_FILE}")
     else
-        echo -e "${YELLOW}Removing stale PID file.${NC}"
-        rm -f "${PID_FILE}"
+        PID=$(cat "${LEGACY_PID_FILE}")
+        # Migrate legacy PID file after process validation succeeds.
     fi
+
+    if ps -p "${PID}" >/dev/null 2>&1; then
+        COMMAND=$(ps -p "${PID}" -o args= 2>/dev/null || true)
+        if [[ $COMMAND == *"vllm.entrypoints.openai.api_server"* ]]; then
+            echo -e "${YELLOW}vLLM is already running with PID ${PID}.${NC}"
+            echo "Use 'stop-vllm.sh' to stop it first, or 'check-vllm.sh' to check its status."
+            exit 1
+        fi
+    fi
+
+    echo -e "${YELLOW}Removing stale PID file.${NC}"
+    rm -f "${PID_FILE}" "${LEGACY_PID_FILE}"
 fi
 
 # Check if port is already in use
-if lsof -Pi :${PORT} -sTCP:LISTEN -t >/dev/null 2>&1; then
+if lsof -Pi ":${PORT}" -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo -e "${RED}Error: Port ${PORT} is already in use.${NC}"
     echo "Please check what's using the port and stop it first."
     exit 1
@@ -77,8 +87,7 @@ echo "Using vLLM version: $("${VLLM_PYTHON}" -c 'import vllm; print(vllm.__versi
 declare -a EXTRA_ARGS_ARRAY
 if [ -n "${VLLM_EXTRA_ARGS}" ]; then
     # Split optional extra args on whitespace, e.g. '--dtype float16 --enforce-eager'
-    # shellcheck disable=SC2206
-    EXTRA_ARGS_ARRAY=(${VLLM_EXTRA_ARGS})
+    read -r -a EXTRA_ARGS_ARRAY <<<"${VLLM_EXTRA_ARGS}"
 else
     EXTRA_ARGS_ARRAY=()
 fi
@@ -86,15 +95,16 @@ fi
 # Start vLLM server in background
 nohup "${VLLM_PYTHON}" -m vllm.entrypoints.openai.api_server \
     --model "${MODEL_NAME}" \
-    --host ${HOST} \
-    --port ${PORT} \
-    --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
-    --max-model-len ${MAX_MODEL_LEN} \
+    --host "${HOST}" \
+    --port "${PORT}" \
+    --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+    --max-model-len "${MAX_MODEL_LEN}" \
     "${EXTRA_ARGS_ARRAY[@]}" \
-    > "${LOG_FILE}" 2>&1 &
+    >"${LOG_FILE}" 2>&1 &
 
 VLLM_PID=$!
-echo ${VLLM_PID} > "${PID_FILE}"
+echo "${VLLM_PID}" >"${PID_FILE}"
+echo "${VLLM_PID}" >"${LEGACY_PID_FILE}"
 
 echo "vLLM started with PID: ${VLLM_PID}"
 echo "Logs are being written to: ${LOG_FILE}"
@@ -102,7 +112,7 @@ echo ""
 
 # Wait a moment and check if the process is still running
 sleep 3
-if ps -p ${VLLM_PID} > /dev/null 2>&1; then
+if ps -p "${VLLM_PID}" >/dev/null 2>&1; then
     echo -e "${GREEN}vLLM server is running!${NC}"
     echo ""
     echo "To check the logs:"

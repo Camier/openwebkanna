@@ -8,6 +8,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
 
 # Configuration
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
@@ -17,66 +18,10 @@ CLIPROXYAPI_STOP_TIMEOUT="${CLIPROXYAPI_STOP_TIMEOUT:-20}"
 CLIPROXYAPI_FORCE_KILL="${CLIPROXYAPI_FORCE_KILL:-true}"
 CLIPROXYAPI_CMD="${CLIPROXYAPI_CMD:-./bin/cliproxyapi}"
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
-is_true() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
-}
-
-if [[ "$CLIPROXYAPI_CMD" == */* ]]; then
+if [[ $CLIPROXYAPI_CMD == */* ]]; then
     CLIPROXYAPI_CMD="$(resolve_path "$CLIPROXYAPI_CMD")"
 fi
 CLIPROXYAPI_PID_FILE="$(resolve_path "$CLIPROXYAPI_PID_FILE")"
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║     CLIProxyAPI Server Stopper                            ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "\n${BLUE}${BOLD}▶ $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ Error: $1${NC}" >&2
-}
-
-print_info() {
-    echo -e "${CYAN}ℹ $1${NC}"
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
 
 pid_matches_cli_proxy() {
     local pid="$1"
@@ -90,7 +35,7 @@ pid_matches_cli_proxy() {
     if command_exists ps; then
         local running_cmd
         running_cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-        [[ "$running_cmd" == *"$cmd_fragment"* ]]
+        [[ $running_cmd == *"$cmd_fragment"* ]]
         return $?
     fi
 
@@ -132,7 +77,7 @@ stop_pid() {
 }
 
 main() {
-    print_header
+    print_header "CLIProxyAPI Server Stopper"
 
     if ! is_true "$CLIPROXYAPI_ENABLED"; then
         print_error "CLIProxyAPI lifecycle is disabled (CLIPROXYAPI_ENABLED=$CLIPROXYAPI_ENABLED)"
@@ -147,7 +92,7 @@ main() {
         local pid
         pid="$(cat "$CLIPROXYAPI_PID_FILE")"
 
-        if [[ "$pid" =~ ^[0-9]+$ ]]; then
+        if [[ $pid =~ ^[0-9]+$ ]]; then
             if pid_matches_cli_proxy "$pid"; then
                 print_info "Stopping PID from file: $pid"
                 if stop_pid "$pid"; then
@@ -166,7 +111,7 @@ main() {
     if [ "$stopped" = false ] && command_exists lsof; then
         local port_pid
         port_pid="$(lsof -nP -iTCP:"$CLIPROXYAPI_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true)"
-        if [ -n "$port_pid" ] && [[ "$port_pid" =~ ^[0-9]+$ ]]; then
+        if [ -n "$port_pid" ] && [[ $port_pid =~ ^[0-9]+$ ]]; then
             if pid_matches_cli_proxy "$port_pid"; then
                 print_info "Stopping CLIProxyAPI listener on port $CLIPROXYAPI_PORT (PID: $port_pid)"
                 if stop_pid "$port_pid"; then

@@ -7,19 +7,13 @@
 
 set -e
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/init.sh"
+load_env_defaults
 
 # Defaults
 DEFAULT_OPENWEBUI_URL="http://localhost:3000"
 DEFAULT_VLLM_URL="http://localhost:8000"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Runtime configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-}"
@@ -33,34 +27,6 @@ RAW="false"
 ###############################################################################
 # Helper Functions
 ###############################################################################
-
-print_header() {
-    echo -e "${CYAN}${BOLD}"
-    echo "+------------------------------------------------------------+"
-    echo "|                     CLI Proxy API                          |"
-    echo "+------------------------------------------------------------+"
-    echo -e "${NC}"
-}
-
-print_step() {
-    echo -e "${BLUE}${BOLD}[STEP] $1${NC}" >&2
-}
-
-print_success() {
-    echo -e "${GREEN}[OK] $1${NC}" >&2
-}
-
-print_error() {
-    echo -e "${RED}[ERROR] $1${NC}" >&2
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARN] $1${NC}" >&2
-}
-
-print_info() {
-    echo -e "${CYAN}[INFO] $1${NC}" >&2
-}
 
 usage() {
     cat <<'EOF'
@@ -102,7 +68,7 @@ Examples:
 EOF
 }
 
-load_env_file() {
+load_cli_env_file() {
     local env_file=""
     local file_openwebui_url=""
     local file_vllm_url=""
@@ -122,16 +88,16 @@ load_env_file() {
     fi
 
     if [ -n "$env_file" ]; then
-        file_openwebui_url="$(read_env_value "$env_file" "OPENWEBUI_URL")"
-        file_vllm_url="$(read_env_value "$env_file" "VLLM_URL")"
-        file_openai_api_base_url="$(read_env_value "$env_file" "OPENAI_API_BASE_URL")"
-        file_openai_api_base_urls="$(read_env_value "$env_file" "OPENAI_API_BASE_URLS")"
-        file_cliproxyapi_base_url="$(read_env_value "$env_file" "CLIPROXYAPI_BASE_URL")"
-        file_webui_port="$(read_env_value "$env_file" "WEBUI_PORT")"
-        file_openwebui_api_key="$(read_env_value "$env_file" "OPENWEBUI_API_KEY")"
-        file_vllm_api_key="$(read_env_value "$env_file" "VLLM_API_KEY")"
-        file_openai_api_key="$(read_env_value "$env_file" "OPENAI_API_KEY")"
-        file_cliproxyapi_api_key="$(read_env_value "$env_file" "CLIPROXYAPI_API_KEY")"
+        file_openwebui_url="$(read_cli_env_value "$env_file" "OPENWEBUI_URL")"
+        file_vllm_url="$(read_cli_env_value "$env_file" "VLLM_URL")"
+        file_openai_api_base_url="$(read_cli_env_value "$env_file" "OPENAI_API_BASE_URL")"
+        file_openai_api_base_urls="$(read_cli_env_value "$env_file" "OPENAI_API_BASE_URLS")"
+        file_cliproxyapi_base_url="$(read_cli_env_value "$env_file" "CLIPROXYAPI_BASE_URL")"
+        file_webui_port="$(read_cli_env_value "$env_file" "WEBUI_PORT")"
+        file_openwebui_api_key="$(read_cli_env_value "$env_file" "OPENWEBUI_API_KEY")"
+        file_vllm_api_key="$(read_cli_env_value "$env_file" "VLLM_API_KEY")"
+        file_openai_api_key="$(read_cli_env_value "$env_file" "OPENAI_API_KEY")"
+        file_cliproxyapi_api_key="$(read_cli_env_value "$env_file" "CLIPROXYAPI_API_KEY")"
     fi
 
     if [ -z "$file_vllm_url" ] && [ -n "$file_openai_api_base_url" ]; then
@@ -145,7 +111,7 @@ load_env_file() {
     if [ -z "$file_vllm_url" ] && [ -n "$file_cliproxyapi_base_url" ]; then
         file_vllm_url="$file_cliproxyapi_base_url"
     fi
-    if [ -n "$file_vllm_url" ] && [[ "$file_vllm_url" == *"://cliproxyapi"* ]] && [ -n "$file_cliproxyapi_base_url" ]; then
+    if [ -n "$file_vllm_url" ] && [[ $file_vllm_url == *"://cliproxyapi"* ]] && [ -n "$file_cliproxyapi_base_url" ]; then
         file_vllm_url="$file_cliproxyapi_base_url"
     fi
 
@@ -180,13 +146,13 @@ load_env_file() {
 
     OPENWEBUI_URL="${OPENWEBUI_URL:-$DEFAULT_OPENWEBUI_URL}"
     VLLM_URL="${VLLM_URL:-$DEFAULT_VLLM_URL}"
-    OPENWEBUI_URL="$(normalize_base_url "$OPENWEBUI_URL")"
-    VLLM_URL="$(normalize_base_url "$VLLM_URL")"
+    OPENWEBUI_URL="$(cli_normalize_base_url "$OPENWEBUI_URL")"
+    VLLM_URL="$(cli_normalize_base_url "$VLLM_URL")"
     OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
     VLLM_API_KEY="${VLLM_API_KEY:-}"
 }
 
-read_env_value() {
+read_cli_env_value() {
     local env_file="$1"
     local key="$2"
     local value=""
@@ -232,9 +198,9 @@ read_env_value() {
     value="$(printf '%s' "$value" | sed 's/[[:space:]]#.*$//')"
     value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
-    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    if [[ $value == \"*\" && $value == *\" ]]; then
         value="${value:1:${#value}-2}"
-    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    elif [[ $value == \'*\' && $value == *\' ]]; then
         value="${value:1:${#value}-2}"
     fi
 
@@ -262,21 +228,21 @@ host_is_resolvable() {
     return 1
 }
 
-normalize_base_url() {
+cli_normalize_base_url() {
     local url="$1"
     if [ -z "$url" ]; then
         printf '%s' "$url"
         return 0
     fi
 
-    if [[ "$url" == *"host.docker.internal"* ]]; then
+    if [[ $url == *"host.docker.internal"* ]]; then
         if ! running_in_container; then
             url="$(printf '%s' "$url" | sed 's#://host\.docker\.internal#://localhost#g')"
         elif ! host_is_resolvable "host.docker.internal"; then
             print_warning "host.docker.internal is not resolvable in container context: $url"
         fi
     fi
-    if [[ "$url" == *"://cliproxyapi"* ]]; then
+    if [[ $url == *"://cliproxyapi"* ]]; then
         if ! running_in_container; then
             url="$(printf '%s' "$url" | sed 's#://cliproxyapi#://127.0.0.1#g')"
         elif ! host_is_resolvable "cliproxyapi"; then
@@ -292,10 +258,10 @@ normalize_service_name() {
     service="$(printf '%s' "$service" | tr '[:upper:]' '[:lower:]')"
 
     case "$service" in
-        webui|openwebui)
+        webui | openwebui)
             printf 'openwebui'
             ;;
-        vllm|all)
+        vllm | all)
             printf '%s' "$service"
             ;;
         *)
@@ -348,12 +314,12 @@ resolve_service_url() {
 
 is_float() {
     local value="$1"
-    [[ "$value" =~ ^-?[0-9]+([.][0-9]+)?$ ]]
+    [[ $value =~ ^-?[0-9]+([.][0-9]+)?$ ]]
 }
 
 is_int() {
     local value="$1"
-    [[ "$value" =~ ^-?[0-9]+$ ]]
+    [[ $value =~ ^-?[0-9]+$ ]]
 }
 
 run_curl() {
@@ -615,7 +581,7 @@ handle_chat() {
                 require_arg "${1:-}" "Missing value for --max-tokens"
                 max_tokens="$1"
                 ;;
-            --help|-h)
+            --help | -h)
                 usage
                 exit 0
                 ;;
@@ -696,7 +662,7 @@ handle_files() {
                         require_arg "${1:-}" "Missing value for --path"
                         path="$1"
                         ;;
-                    --help|-h)
+                    --help | -h)
                         usage
                         exit 0
                         ;;
@@ -751,7 +717,7 @@ handle_knowledge() {
 # Main
 ###############################################################################
 
-load_env_file
+load_cli_env_file
 
 # Parse global options
 while [ $# -gt 0 ]; do
@@ -777,7 +743,7 @@ while [ $# -gt 0 ]; do
         --raw)
             RAW="true"
             ;;
-        --help|-h)
+        --help | -h)
             usage
             exit 0
             ;;
@@ -820,7 +786,7 @@ case "$COMMAND" in
     knowledge)
         handle_knowledge "$@"
         ;;
-    --help|-h|help)
+    --help | -h | help)
         usage
         ;;
     *)

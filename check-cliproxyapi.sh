@@ -9,49 +9,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-load_env_defaults() {
-    local env_file=""
-    local line=""
-    local key=""
-    local value=""
+# Source all library modules
+source "${SCRIPT_DIR}/lib/init.sh"
 
-    if [ -f "$SCRIPT_DIR/.env" ]; then
-        env_file="$SCRIPT_DIR/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
-
-    if [ -z "$env_file" ]; then
-        return 0
-    fi
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        line="${line%$'\r'}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        [ -z "$line" ] && continue
-        [[ "$line" = \#* ]] && continue
-        [[ "$line" != *=* ]] && continue
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="$(printf "%s" "$key" | tr -d '[:space:]')"
-
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-        if [ -n "${!key+x}" ]; then
-            continue
-        fi
-
-        if [[ "$value" == \"*\" ]] && [[ "$value" == *\" ]]; then
-            value="${value:1:${#value}-2}"
-        elif [[ "$value" == \'*\' ]] && [[ "$value" == *\' ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-
-        printf -v "$key" "%s" "$value"
-        export "$key"
-    done < "$env_file"
-}
-
+# Load environment
 load_env_defaults
 
 # Configuration
@@ -65,70 +26,39 @@ CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
 CLIPROXYAPI_HEALTH_PATH="${CLIPROXYAPI_HEALTH_PATH:-/}"
 CLIPROXYAPI_MODELS_PATH="${CLIPROXYAPI_MODELS_PATH:-/v1/models}"
 CLIPROXYAPI_CHAT_PATH="${CLIPROXYAPI_CHAT_PATH:-/v1/chat/completions}"
-CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
+CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}"
 CLIPROXYAPI_CHECK_TIMEOUT="${CLIPROXYAPI_CHECK_TIMEOUT:-8}"
 CLIPROXYAPI_EXPECT_MODELS_NON_EMPTY="${CLIPROXYAPI_EXPECT_MODELS_NON_EMPTY:-true}"
 CLIPROXYAPI_CHECK_CHAT_COMPLETION="${CLIPROXYAPI_CHECK_CHAT_COMPLETION:-true}"
 CLIPROXYAPI_CHAT_MODEL="${CLIPROXYAPI_CHAT_MODEL:-${CLIPROXYAPI_UPSTREAM_MODEL:-}}"
 CLIPROXYAPI_CHAT_PROMPT="${CLIPROXYAPI_CHAT_PROMPT:-ping}"
 CLIPROXYAPI_CHAT_MAX_TOKENS="${CLIPROXYAPI_CHAT_MAX_TOKENS:-12}"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
+CLIPROXYAPI_REQUIRE_AUTH_CHECKS="${CLIPROXYAPI_REQUIRE_AUTH_CHECKS:-true}"
+CLIPROXYAPI_EXPECT_ALIASES="${CLIPROXYAPI_EXPECT_ALIASES:-}"
+CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH="${CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH:-true}"
 
 QUIET=false
 
-resolve_path() {
-    local candidate="$1"
-    if [[ "$candidate" = /* ]]; then
-        printf "%s" "$candidate"
-    else
-        printf "%s/%s" "$SCRIPT_DIR" "$candidate"
-    fi
-}
-
-normalize_base_url() {
-    local value="$1"
-    printf "%s" "${value%/}"
-}
-
-normalize_path() {
-    local value="$1"
-    if [ -z "$value" ]; then
-        printf "/"
-        return
-    fi
-    if [[ "$value" != /* ]]; then
-        value="/$value"
-    fi
-    printf "%s" "$value"
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
+###############################################################################
+# Script-specific Functions
+###############################################################################
 
 executable_exists() {
     local executable="$1"
-    if [[ "$executable" == */* ]]; then
+    if [[ $executable == */* ]]; then
         [ -x "$executable" ]
         return $?
     fi
     command_exists "$executable"
 }
 
-is_true() {
+is_false() {
     local value
     value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "true" ] || [ "$value" = "1" ] || [ "$value" = "yes" ]
+    [ "$value" = "false" ] || [ "$value" = "0" ] || [ "$value" = "no" ]
 }
 
-print_header() {
+print_check_header() {
     $QUIET && return 0
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════════════════════════╗"
@@ -161,35 +91,7 @@ print_error() {
     echo -e "${RED}✗ Error: $1${NC}" >&2
 }
 
-is_false() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')"
-    [ "$value" = "false" ] || [ "$value" = "0" ] || [ "$value" = "no" ]
-}
-
-http_status() {
-    local url="$1"
-    local header="${2:-}"
-
-    if [ -n "$header" ]; then
-        curl -sS -m "$CLIPROXYAPI_CHECK_TIMEOUT" -o /dev/null -w "%{http_code}" -H "$header" "$url" || true
-    else
-        curl -sS -m "$CLIPROXYAPI_CHECK_TIMEOUT" -o /dev/null -w "%{http_code}" "$url" || true
-    fi
-}
-
-http_status_with_body() {
-    local url="$1"
-    local out_file="$2"
-    local header="${3:-}"
-
-    if [ -n "$header" ]; then
-        curl -sS -m "$CLIPROXYAPI_CHECK_TIMEOUT" -o "$out_file" -w "%{http_code}" -H "$header" "$url" || true
-    else
-        curl -sS -m "$CLIPROXYAPI_CHECK_TIMEOUT" -o "$out_file" -w "%{http_code}" "$url" || true
-    fi
-}
-
+# Additional HTTP helper specific to this script
 extract_models_count() {
     local payload_file="$1"
 
@@ -216,8 +118,74 @@ extract_first_model() {
     grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$payload_file" | head -n 1 | cut -d'"' -f4
 }
 
+assert_config_api_key_alignment() {
+    local config_api_key=""
+
+    if [ -z "${CLIPROXYAPI_API_KEY:-}" ]; then
+        return 0
+    fi
+
+    config_api_key="$(extract_first_config_api_key "$CLIPROXYAPI_CONFIG" || true)"
+    if [ -z "$config_api_key" ]; then
+        print_warning "No api-keys entry found in $CLIPROXYAPI_CONFIG"
+        if is_true "$CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH"; then
+            print_error "Cannot validate authenticated checks without config api-keys"
+            return 1
+        fi
+        return 0
+    fi
+
+    if [ "$config_api_key" = "$CLIPROXYAPI_API_KEY" ]; then
+        return 0
+    fi
+
+    print_error "CLIPROXYAPI_API_KEY does not match first api-keys entry in $CLIPROXYAPI_CONFIG"
+    print_info "Set CLIPROXYAPI_API_KEY to config value or update config.yaml api-keys to match OPENAI_API_KEY"
+    if is_true "$CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH"; then
+        return 1
+    fi
+    return 0
+}
+
+assert_expected_aliases_local() {
+    local payload_file="$1"
+    local alias=""
+    local ids=""
+    local expected_aliases=""
+
+    expected_aliases="$(resolved_expected_aliases | sed '/^$/d' || true)"
+    if [ -z "$expected_aliases" ]; then
+        return 0
+    fi
+
+    ids="$(extract_model_ids "$payload_file" | sed '/^$/d' || true)"
+    if [ -z "$ids" ]; then
+        print_error "Unable to extract model ids for alias assertions"
+        return 1
+    fi
+
+    for alias in $expected_aliases; do
+        if ! printf "%s\n" "$ids" | grep -Fxq "$alias"; then
+            print_error "Expected model alias missing from /v1/models: $alias"
+            return 1
+        fi
+    done
+
+    print_success "Expected aliases present"
+    return 0
+}
+
 check_process_and_port() {
     local ok=true
+
+    # In Docker-managed mode, host port mappings are commonly implemented via
+    # iptables/NAT without a userland process listening on the host. Tools like
+    # `lsof` can therefore report "not listening" even though the port is
+    # reachable. Rely on the HTTP health check instead to avoid false alarms.
+    if is_true "$CLIPROXYAPI_DOCKER_MANAGED"; then
+        print_info "Docker-managed runtime: skipping PID/port LISTEN checks (health endpoint is authoritative)"
+        return 0
+    fi
 
     if [ -f "$CLIPROXYAPI_PID_FILE" ]; then
         local pid
@@ -252,7 +220,7 @@ check_http_health() {
     local code
 
     print_step "Checking health endpoint"
-    code="$(http_status "$health_url")"
+    code="$(http_status "$health_url" "$CLIPROXYAPI_CHECK_TIMEOUT")"
     if [ "$code" = "200" ]; then
         print_success "Health endpoint OK ($health_url)"
         return 0
@@ -271,9 +239,12 @@ check_models() {
     print_step "Checking models endpoint"
 
     local code
-    code="$(http_status_with_body "$models_url" "$tmp_file" "$header")"
+    code="$(http_status_with_body "$models_url" "$tmp_file" "$CLIPROXYAPI_CHECK_TIMEOUT" "$header")"
     if [ "$code" != "200" ]; then
         print_error "Models endpoint failed ($models_url), status: $code"
+        if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+            assert_config_api_key_alignment || true
+        fi
         rm -f "$tmp_file"
         return 1
     fi
@@ -302,6 +273,11 @@ check_models() {
 
     if [ -z "$CLIPROXYAPI_CHAT_MODEL" ] && [ -n "$first_model" ]; then
         CLIPROXYAPI_CHAT_MODEL="$first_model"
+    fi
+
+    if ! assert_expected_aliases_local "$tmp_file"; then
+        rm -f "$tmp_file"
+        return 1
     fi
 
     rm -f "$tmp_file"
@@ -373,6 +349,11 @@ Options:
   --quiet   Minimal output (exit code only)
   --help    Show help
 
+Environment:
+  CLIPROXYAPI_REQUIRE_AUTH_CHECKS   Fail when CLIPROXYAPI_API_KEY is unset (default: true)
+  CLIPROXYAPI_EXPECT_ALIASES        Optional aliases that must exist in /v1/models (auto-derived when empty)
+  CLIPROXYAPI_ENFORCE_CONFIG_API_KEY_MATCH  Require config api-key to match CLIPROXYAPI_API_KEY (default: true)
+
 Exit codes:
   0 on success
   1 on any failed check
@@ -385,7 +366,7 @@ parse_args() {
             --quiet)
                 QUIET=true
                 ;;
-            -h|--help)
+            -h | --help)
                 show_usage
                 exit 0
                 ;;
@@ -402,7 +383,7 @@ parse_args() {
 main() {
     parse_args "$@"
 
-    if [[ "$CLIPROXYAPI_CMD" == */* ]]; then
+    if [[ $CLIPROXYAPI_CMD == */* ]]; then
         CLIPROXYAPI_CMD="$(resolve_path "$CLIPROXYAPI_CMD")"
     fi
     CLIPROXYAPI_CONFIG="$(resolve_path "$CLIPROXYAPI_CONFIG")"
@@ -412,7 +393,7 @@ main() {
     CLIPROXYAPI_MODELS_PATH="$(normalize_path "$CLIPROXYAPI_MODELS_PATH")"
     CLIPROXYAPI_CHAT_PATH="$(normalize_path "$CLIPROXYAPI_CHAT_PATH")"
 
-    print_header
+    print_check_header
 
     if ! is_true "$CLIPROXYAPI_ENABLED"; then
         print_error "CLIProxyAPI lifecycle disabled (CLIPROXYAPI_ENABLED=$CLIPROXYAPI_ENABLED)"
@@ -422,6 +403,10 @@ main() {
     print_step "Checking files and command"
     if [ ! -f "$CLIPROXYAPI_CONFIG" ]; then
         print_error "Config file not found: $CLIPROXYAPI_CONFIG"
+        return 1
+    fi
+
+    if ! assert_config_api_key_alignment; then
         return 1
     fi
 
@@ -446,7 +431,11 @@ main() {
         check_models
         check_chat_completion
     else
-        print_warning "CLIPROXYAPI_API_KEY is empty; skipping authenticated models/chat checks"
+        if is_true "$CLIPROXYAPI_REQUIRE_AUTH_CHECKS"; then
+            print_error "CLIPROXYAPI_API_KEY is empty and CLIPROXYAPI_REQUIRE_AUTH_CHECKS=true"
+            return 1
+        fi
+        print_warning "CLIPROXYAPI_API_KEY is empty; authenticated models/chat checks are disabled"
     fi
 
     print_success "All checks passed"

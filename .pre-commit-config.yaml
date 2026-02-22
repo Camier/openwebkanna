@@ -1,0 +1,75 @@
+# Pre-commit hooks configuration
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+#
+# Installation:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run manually:
+#   pre-commit run --all-files
+
+repos:
+  # Shell script linting with shellcheck
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning", "-x", "-s", "bash"]
+        files: \.sh$
+
+  # Shell script formatting with shfmt
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.11.0-1
+    hooks:
+      - id: shfmt
+        args: ["-w", "-s", "-i", "4", "-ci"]
+        files: \.sh$
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ["-d", "{extends: relaxed, rules: {line-length: {max: 150}}}"]
+        files: \.(ya?ml)$
+
+  # General file checks from pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^data/
+      - id: end-of-file-fixer
+        exclude: ^data/
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # Check for common bash issues
+  - repo: https://github.com/openstack/bashate
+    rev: 2.1.1
+    hooks:
+      - id: bashate
+        args: ["-i", "E006,E043,E044"]
+        files: \.sh$
+
+# Global exclude patterns
+exclude: |
+  (?x)^(
+    data/|
+    logs/|
+    backups/|
+    cliproxyapi/auth/|
+    cliproxyapi/logs/|
+    \.env|
+    .*\.pid|
+    .*\.log
+  )$
