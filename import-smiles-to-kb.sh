@@ -25,6 +25,12 @@ LIMIT_COUNT="${LIMIT_COUNT:-0}"
 PAPER_FILTER="${PAPER_FILTER:-}"
 PROCESS_TIMEOUT_SECONDS="${PROCESS_TIMEOUT_SECONDS:-900}"
 PROCESS_POLL_SECONDS="${PROCESS_POLL_SECONDS:-3}"
+CONVERT_MARKDOWN="${CONVERT_MARKDOWN:-false}"
+MARKDOWN_FILE_NAME="${MARKDOWN_FILE_NAME:-molecules_high_confidence.md}"
+MARKDOWN_TITLE="${MARKDOWN_TITLE:-SMILES High Confidence Molecules}"
+MARKDOWN_SCRIPT="${MARKDOWN_SCRIPT:-$SCRIPT_DIR/scripts/jsonl_to_markdown_smiles.py}"
+FIND_MIN_DEPTH="${FIND_MIN_DEPTH:-2}"
+FIND_MAX_DEPTH="${FIND_MAX_DEPTH:-2}"
 
 SHOW_HELP=false
 
@@ -42,6 +48,12 @@ Options:
   --url URL               OpenWebUI URL override
   --timeout SECONDS       Processing timeout per file (default: 900)
   --poll SECONDS          Poll interval seconds (default: 3)
+  --convert-markdown      Convert JSONL artifacts to markdown before upload
+  --markdown-file NAME    Markdown artifact name (default: molecules_high_confidence.md)
+  --markdown-title TEXT   Markdown top-level title
+  --markdown-script PATH  Converter script path
+  --find-min-depth N      Min depth for artifact discovery (default: 2)
+  --find-max-depth N      Max depth for artifact discovery (default: 2)
   -h, --help              Show help
 
 Auth:
@@ -318,6 +330,30 @@ parse_args() {
                 PROCESS_POLL_SECONDS="$2"
                 shift 2
                 ;;
+            --convert-markdown)
+                CONVERT_MARKDOWN=true
+                shift
+                ;;
+            --markdown-file)
+                MARKDOWN_FILE_NAME="$2"
+                shift 2
+                ;;
+            --markdown-title)
+                MARKDOWN_TITLE="$2"
+                shift 2
+                ;;
+            --markdown-script)
+                MARKDOWN_SCRIPT="$2"
+                shift 2
+                ;;
+            --find-min-depth)
+                FIND_MIN_DEPTH="$2"
+                shift 2
+                ;;
+            --find-max-depth)
+                FIND_MAX_DEPTH="$2"
+                shift 2
+                ;;
             -h | --help)
                 SHOW_HELP=true
                 shift
@@ -331,6 +367,33 @@ parse_args() {
     done
 }
 
+prepare_upload_artifact() {
+    local artifact="$1"
+    local temp_dir="$2"
+
+    if [ "$CONVERT_MARKDOWN" != "true" ]; then
+        echo "$artifact"
+        return 0
+    fi
+
+    if [ ! -f "$artifact" ]; then
+        return 1
+    fi
+
+    local paper_id artifact_dir output_file
+    artifact_dir="$(dirname "$artifact")"
+    paper_id="$(basename "$artifact_dir")"
+    output_file="$temp_dir/${paper_id}-${MARKDOWN_FILE_NAME}"
+
+    python3 "$MARKDOWN_SCRIPT" \
+        --input "$artifact" \
+        --output "$output_file" \
+        --title "$MARKDOWN_TITLE" \
+        --paper-id "$paper_id"
+
+    echo "$output_file"
+}
+
 main() {
     parse_args "$@"
     if [ "$SHOW_HELP" = true ]; then
@@ -341,12 +404,20 @@ main() {
     require_cmd curl
     require_cmd jq
     require_cmd rg
+    if [ "$CONVERT_MARKDOWN" = "true" ]; then
+        require_cmd python3
+        if [ ! -f "$MARKDOWN_SCRIPT" ]; then
+            print_error "Markdown converter script not found: $MARKDOWN_SCRIPT"
+            exit 1
+        fi
+    fi
 
     print_header "OpenWebUI SMILES Artifact Import"
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
     print_info "Source root: $SOURCE_ROOT"
     print_info "Artifact file: $FILE_NAME"
     print_info "Knowledge Base: $KB_NAME"
+    print_info "Convert markdown: $CONVERT_MARKDOWN"
 
     if ! curl -sS -m 10 -f -o /dev/null "${OPENWEBUI_URL%/}/health" 2>/dev/null; then
         print_error "OpenWebUI health check failed at ${OPENWEBUI_URL%/}/health"
@@ -364,7 +435,7 @@ main() {
     local -a files=()
     while IFS= read -r f; do
         files+=("$f")
-    done < <(find "$SOURCE_ROOT" -mindepth 2 -maxdepth 2 -type f -name "$FILE_NAME" | sort)
+    done < <(find "$SOURCE_ROOT" -mindepth "$FIND_MIN_DEPTH" -maxdepth "$FIND_MAX_DEPTH" -type f -name "$FILE_NAME" | sort)
 
     if [ -n "$PAPER_FILTER" ]; then
         local -a filtered=()
@@ -383,18 +454,27 @@ main() {
     fi
 
     local total=0 uploaded=0 processed=0 attached=0 failed=0
-    local artifact response file_id
+    local artifact upload_artifact response file_id tmp_upload_dir
+    tmp_upload_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_upload_dir"' EXIT
     for artifact in "${files[@]}"; do
         if [ "$LIMIT_COUNT" -gt 0 ] && [ "$total" -ge "$LIMIT_COUNT" ]; then
             break
         fi
         total=$((total + 1))
-        print_step "[$total] Uploading $(basename "$artifact")"
-        response="$(upload_file "$artifact")"
+        upload_artifact="$(prepare_upload_artifact "$artifact" "$tmp_upload_dir")"
+        if [ -z "$upload_artifact" ] || [ ! -f "$upload_artifact" ]; then
+            failed=$((failed + 1))
+            print_error "Preparation failed: $artifact"
+            continue
+        fi
+
+        print_step "[$total] Uploading $(basename "$upload_artifact")"
+        response="$(upload_file "$upload_artifact")"
         file_id="$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null || true)"
         if [ -z "$file_id" ]; then
             failed=$((failed + 1))
-            print_error "Upload failed: $artifact"
+            print_error "Upload failed: $upload_artifact"
             continue
         fi
         uploaded=$((uploaded + 1))
@@ -403,16 +483,16 @@ main() {
             processed=$((processed + 1))
         else
             failed=$((failed + 1))
-            print_error "Processing failed: $artifact"
+            print_error "Processing failed: $upload_artifact"
             continue
         fi
 
         if attach_file_to_kb "$kb_id" "$file_id"; then
             attached=$((attached + 1))
-            print_success "Attached: $(basename "$artifact")"
+            print_success "Attached: $(basename "$upload_artifact")"
         else
             failed=$((failed + 1))
-            print_error "Attach failed: $artifact"
+            print_error "Attach failed: $upload_artifact"
         fi
     done
 
