@@ -1,0 +1,35 @@
+[tasks."smiles:extract"]
+description = "Run SMILES extraction for one paper"
+run = "if command -v micromamba >/dev/null 2>&1; then micromamba run -n smiles-extraction python scripts/extract_smiles_from_images.py --paper ${PAPER:?Set PAPER=...} ${ARGS:-}; else python scripts/extract_smiles_from_images.py --paper ${PAPER:?Set PAPER=...} ${ARGS:-}; fi"
+
+[tasks."smiles:extract-all"]
+description = "Run SMILES extraction for all papers"
+run = "if command -v micromamba >/dev/null 2>&1; then micromamba run -n smiles-extraction python scripts/extract_smiles_from_images.py --all ${ARGS:-}; else python scripts/extract_smiles_from_images.py --all ${ARGS:-}; fi"
+
+[tasks."smiles:embed"]
+description = "Build multimodal chunks with optional molecule metadata"
+run = "python scripts/embed_images_in_chunks.py --paper ${PAPER:?Set PAPER=...} --include-molecule-metadata ${ARGS:-}"
+
+[tasks."smiles:validate"]
+description = "Validate smiles_extracted.json and molecules.jsonl outputs"
+run = "python scripts/validate_smiles_outputs.py ${ARGS:-}"
+
+[tasks."smiles:high-confidence"]
+description = "Filter molecules.jsonl into high-confidence subset"
+run = "if command -v micromamba >/dev/null 2>&1; then micromamba run -n smiles-extraction python scripts/filter_high_confidence_smiles.py ${ARGS:-}; else python scripts/filter_high_confidence_smiles.py ${ARGS:-}; fi"
+
+[tasks."smiles:qa-summary"]
+description = "Generate per-paper QA summary JSON"
+run = "python scripts/smiles_qa_summary.py ${ARGS:-}"
+
+[tasks."smiles:publish-kb"]
+description = "Upload high-confidence molecule artifacts to OpenWebUI KB"
+run = "bash ./import-smiles-to-kb.sh --source-root /LAB/@thesis/openwebui/prod_max --file-name molecules_high_confidence.jsonl --kb-name \"${KB_NAME:-Molecular SMILES High Confidence}\" --kb-description \"${KB_DESCRIPTION:-High-confidence molecular extractions for retrieval}\" ${ARGS:-}"
+
+[tasks."smiles:kb-dedupe"]
+description = "Remove duplicate same-name KB entries while keeping one ID"
+run = "bash ./dedupe-smiles-kb.sh --kb-name \"${KB_NAME:-Molecular SMILES High Confidence}\" ${ARGS:-}"
+
+[tasks."smiles:pipeline"]
+description = "Run bounded extraction + embed + validation"
+run = "if command -v micromamba >/dev/null 2>&1; then micromamba run -n smiles-extraction python scripts/extract_smiles_from_images.py --all --limit ${LIMIT:-1} --write-molecules-jsonl ${EXTRACT_ARGS:-}; else python scripts/extract_smiles_from_images.py --all --limit ${LIMIT:-1} --write-molecules-jsonl ${EXTRACT_ARGS:-}; fi && python scripts/embed_images_in_chunks.py --limit ${LIMIT:-1} --include-molecule-metadata ${EMBED_ARGS:-} && python scripts/validate_smiles_outputs.py --limit ${LIMIT:-1} && if command -v micromamba >/dev/null 2>&1; then micromamba run -n smiles-extraction python scripts/filter_high_confidence_smiles.py --limit ${LIMIT:-1} ${FILTER_ARGS:-}; else python scripts/filter_high_confidence_smiles.py --limit ${LIMIT:-1} ${FILTER_ARGS:-}; fi && python scripts/smiles_qa_summary.py --limit ${LIMIT:-1} --output smiles_qa_summary.json ${QA_ARGS:-}"

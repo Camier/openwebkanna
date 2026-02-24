@@ -514,6 +514,16 @@ IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
 
 - `test-openwebui-tools-invocation.sh`: End-to-end integration test proving tools actually execute through `POST /api/chat/completions`. Uses local HTTP servers with nonces to verify real tool execution.
 
+### Molecular retrieval pipeline
+
+- `scripts/extract_smiles_from_images.py`: Extract SMILES candidates from paper images with backend order control (`molscribe,decimer,vlm`), RDKit validation, and optional `molecules.jsonl` output.
+- `scripts/embed_images_in_chunks.py`: Build multimodal chunk JSONL and optionally include molecule hints for matching image blocks.
+- `scripts/filter_high_confidence_smiles.py`: Keep only high-confidence molecule rows in `molecules_high_confidence.jsonl`.
+- `scripts/smiles_qa_summary.py`: Generate per-paper and aggregate QA metrics (`smiles_qa_summary.json`).
+- `import-smiles-to-kb.sh`: Upload high-confidence molecule artifacts to an OpenWebUI Knowledge Base.
+- `dedupe-smiles-kb.sh`: Remove duplicate same-name Knowledge Bases and keep one target ID.
+- `SMILES_PIPELINE.md`: End-to-end operator guide for commands, environments, and task flow.
+
 ## Key files
 
 - `docker-compose.yml`: OpenWebUI + CLIProxyAPI services (SearXNG is host-local)
