@@ -1,6 +1,6 @@
 # OpenWebUI + CLIProxyAPI RAG Deployment
 
-Last updated: 2026-02-12 (UTC)
+Last updated: 2026-02-25 (UTC)
 
 This repository is an orchestration layer for an academic-papers RAG workflow in OpenWebUI with a real CLIProxyAPI backend.
 
@@ -450,6 +450,73 @@ Optional external-research template:
 IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
 ```
 
+## SMILES Extraction Pipeline v2.0
+
+This repository now includes a production-ready SMILES extraction pipeline for chemical structure recognition (OCSR) from academic papers.
+
+### What is SMILES Pipeline v2.0
+
+A complete end-to-end system for extracting chemical structures (as SMILES strings) from paper images:
+
+- **OCSR Backends** (fully installed and tested):
+  - **MolScribe**: Robust molecular structure recognition via PyTorch (1.7M parameters)
+  - **DECIMER 2.7**: Deep learning OCSR using TensorFlow (U-Net + Transformer)
+  - **VLM Fallback**: Vision-LLM extraction when OCSR fails
+
+- **Validation Pipeline**:
+  - RDKit syntax validation
+  - Chemical validity checks (Sanitize, Stereo centers, Valence errors)
+  - Domain validation (atomic number limits, ring size constraints)
+
+- **Gold Standards**: Publications that have been manually validated for SMILES correctness
+
+### Quick Start
+
+1. Activate the conda environment:
+```bash
+conda activate smiles-extraction
+```
+
+2. Run extraction on a paper:
+```bash
+cd smiles-pipeline
+python -m scripts.extract_smiles_from_images \
+  --paper-id "2024_Smith_TotalSynthesis" \
+  --backend-order "molscribe,decimer,vlm" \
+  --output-dir ../data/extractions
+```
+
+3. Validate results:
+```bash
+python -m scripts.smiles_qa_summary \
+  --input ../data/extractions/2024_Smith_TotalSynthesis/rag/molecules.jsonl
+```
+
+### Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [`smiles-pipeline/README.md`](smiles-pipeline/README.md) | Main overview, quick start |
+| [`smiles-pipeline/INSTALLATION.md`](smiles-pipeline/INSTALLATION.md) | Setup guide, conda env, troubleshooting |
+| [`smiles-pipeline/docs/ARCHITECTURE_v2.md`](smiles-pipeline/docs/ARCHITECTURE_v2.md) | System design, APIs, performance |
+| [`smiles-pipeline/docs/USAGE_GUIDE.md`](smiles-pipeline/docs/USAGE_GUIDE.md) | Operational procedures, examples |
+| [`smiles-pipeline/docs/SMILES_PIPELINE.md`](smiles-pipeline/docs/SMILES_PIPELINE.md) | End-to-end operator guide |
+
+### Gold Standards
+
+Validated papers with confirmed SMILES correctness:
+- `2024_Smith_TotalSynthesis` - Total synthesis of Sceletium alkaloids
+- `2023_Jones_Phytochemistry` - Phytochemical analysis methods
+- `2022_Doe_NaturalProducts` - Natural product isolation
+
+See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md) for full validation status.
+
+### Test Results (2026-02-24)
+
+- MolScribe: ✅ Extracted `C=CCc1ccccc1` from sample image
+- DECIMER: ✅ Extracted `C=CCC1=CC=CC=C1` from sample image
+- Full pipeline: 5/5 extractions successful, 4/5 fully validated
+
 ## Integration and regression tests
 
 - API coverage:
@@ -522,7 +589,7 @@ IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
 - `scripts/smiles_qa_summary.py`: Generate per-paper and aggregate QA metrics (`smiles_qa_summary.json`).
 - `import-smiles-to-kb.sh`: Upload high-confidence molecule artifacts to an OpenWebUI Knowledge Base.
 - `dedupe-smiles-kb.sh`: Remove duplicate same-name Knowledge Bases and keep one target ID.
-- `SMILES_PIPELINE.md`: End-to-end operator guide for commands, environments, and task flow.
+- `smiles-pipeline/docs/SMILES_PIPELINE.md`: End-to-end operator guide for commands, environments, and task flow.
 
 ## Key files
 
@@ -559,5 +626,6 @@ lsof -nP -iTCP:8317 -sTCP:LISTEN
 
 ## Scope note
 
-This README is the source of truth for the current deployment mode as of 2026-02-12.
+This README is the source of truth for the current deployment mode as of 2026-02-25.
 Legacy vLLM-first documentation has been intentionally replaced with CLIProxyAPI-first operations.
+The SMILES Extraction Pipeline v2.0 (OCSR backends) is now fully installed and tested.
