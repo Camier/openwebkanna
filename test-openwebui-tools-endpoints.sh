@@ -765,7 +765,7 @@ require_dependencies() {
 main() {
     mkdir -p "$OUTPUT_DIR"
 
-    print_header
+    print_header "OpenWebUI Tools Functional Audit"
     print_info "Target OpenWebUI URL: $OPENWEBUI_URL"
 
     require_dependencies

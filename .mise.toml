@@ -26,6 +26,10 @@ run = "python scripts/smiles_qa_summary.py ${ARGS:-}"
 description = "Upload high-confidence molecule artifacts to OpenWebUI KB"
 run = "bash ./import-smiles-to-kb.sh --source-root /LAB/@thesis/openwebui/prod_max --file-name molecules_high_confidence.jsonl --kb-name \"${KB_NAME:-Molecular SMILES High Confidence}\" --kb-description \"${KB_DESCRIPTION:-High-confidence molecular extractions for retrieval}\" ${ARGS:-}"
 
+[tasks."smiles:publish-kb-markdown"]
+description = "Upload markdown-rendered high-confidence molecule artifacts to OpenWebUI KB"
+run = "bash ./import-smiles-to-kb.sh --source-root /LAB/@thesis/openwebui/prod_max --file-name molecules_high_confidence.jsonl --convert-markdown --markdown-file \"${MARKDOWN_FILE_NAME:-molecules_high_confidence.md}\" --markdown-title \"${MARKDOWN_TITLE:-SMILES High Confidence Molecules}\" --kb-name \"${KB_NAME:-Molecular SMILES High Confidence Markdown}\" --kb-description \"${KB_DESCRIPTION:-High-confidence molecular extractions rendered as markdown for retrieval}\" ${ARGS:-}"
+
 [tasks."smiles:kb-dedupe"]
 description = "Remove duplicate same-name KB entries while keeping one ID"
 run = "bash ./dedupe-smiles-kb.sh --kb-name \"${KB_NAME:-Molecular SMILES High Confidence}\" ${ARGS:-}"

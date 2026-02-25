@@ -80,15 +80,14 @@ run_python_audit() {
     local timeout_cmd
     timeout_cmd="$(get_timeout_cmd)"
 
-    local -a compose_exec_cmd=("${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" exec -T "$OPENWEBUI_SERVICE" python "$audit_script" "$FOCUS" "$PLUGIN_AUDIT_IMPORT_CHECK")
+    local -a compose_exec_cmd=("${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" exec -T "$OPENWEBUI_SERVICE" python - "$FOCUS" "$PLUGIN_AUDIT_IMPORT_CHECK")
 
     if [ -n "$timeout_cmd" ]; then
-        "$timeout_cmd" "${PLUGIN_AUDIT_TIMEOUT_SECONDS}s" "${compose_exec_cmd[@]}"
+        "$timeout_cmd" "${PLUGIN_AUDIT_TIMEOUT_SECONDS}s" "${compose_exec_cmd[@]}" <"$audit_script"
         return $?
     fi
 
-    # No timeout available, run directly
-    "${compose_exec_cmd[@]}"
+    "${compose_exec_cmd[@]}" <"$audit_script"
 }
 
 run_filesystem_pipeline_audit() {

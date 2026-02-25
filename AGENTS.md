@@ -1,7 +1,7 @@
 # Repository Map: OpenWebUI + LiteLLM RAG Deployment
 
 ## TL;DR
-This repository is an **orchestration and deployment layer** for OpenWebUI + LiteLLM, optimized for ethnopharmacological research (specifically Sceletium tortuosum and related medicinal plants). OpenWebUI, LiteLLM, and supporting services run in Docker. No custom Python source code — all logic is in shell scripts and configuration files.
+This repository is an **orchestration and deployment layer** for OpenWebUI + LiteLLM, optimized for ethnopharmacological research (specifically Sceletium tortuosum and related medicinal plants). OpenWebUI, LiteLLM, and supporting services run in Docker. Primary operations are shell-first, with supporting Python utilities for extraction, validation, and pipeline quality checks.
 
 ## Project Overview
 

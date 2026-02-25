@@ -48,3 +48,9 @@ __pycache__/
 
 # Large/local research data (keep repo lightweight)
 data/
+
+# Large/local research data (keep repo lightweight)
+data/
+prod_max/
+prod_max_multimodal/
+research/

@@ -162,6 +162,53 @@ services:
     networks:
       - openwebui_network
 
+  # Docling-Serve for multimodal PDF extraction (OCR + Image Description)
+  docling:
+    image: quay.io/docling-project/docling-serve-cu128:latest
+    container_name: docling
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"
+    environment:
+      # Enable web UI for testing
+      - DOCLING_SERVE_ENABLE_UI=true
+      # CRITICAL: Required for picture description with external LLM APIs
+      - DOCLING_SERVE_ENABLE_REMOTE_SERVICES=true
+      # Maximum wait time for sync requests (seconds)
+      - DOCLING_SERVE_MAX_SYNC_WAIT=600
+      # Number of local engine workers
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+      # CPU thread configuration
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
+      # IMPORTANT: Keep at 1 to avoid "Task Not Found" errors
+      - UVICORN_WORKERS=1
+    # Resource limits
+    cpus: "${DOCLING_CPUS:-2.0}"
+    mem_limit: "${DOCLING_MEM_LIMIT:-8g}"
+    pids_limit: ${DOCLING_PIDS_LIMIT:-256}
+    # NVIDIA GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Security hardening
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - openwebui_network
+
   openwebui:
     image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}
     container_name: openwebui
@@ -173,6 +220,8 @@ services:
       jupyter:
         condition: service_healthy
       mcpo:
+        condition: service_healthy
+      docling:
         condition: service_healthy
     environment:
       # Authentication
@@ -233,6 +282,10 @@ services:
 
       # Code Execution / Interpreter (Jupyter-backed)
       - ENABLE_CODE_EXECUTION=${ENABLE_CODE_EXECUTION:-true}
+
+      # Docling for multimodal PDF extraction
+      - DOCLING_SERVER_URL=http://docling:5001
+      - DOCLING_API_KEY=${DOCLING_API_KEY:-}
       - CODE_EXECUTION_ENGINE=${CODE_EXECUTION_ENGINE:-jupyter}
       - CODE_EXECUTION_JUPYTER_URL=${CODE_EXECUTION_JUPYTER_URL:-http://jupyter:8889}
       - CODE_EXECUTION_JUPYTER_AUTH=${CODE_EXECUTION_JUPYTER_AUTH:-token}
@@ -263,6 +316,14 @@ services:
     cpus: "${OPENWEBUI_CPUS:-2.0}"
     mem_limit: "${OPENWEBUI_MEM_LIMIT:-4g}"
     pids_limit: ${OPENWEBUI_PIDS_LIMIT:-512}
+    # NVIDIA GPU support (requires nvidia-docker and CUDA image)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     # Security hardening
     cap_drop:
       - ALL
