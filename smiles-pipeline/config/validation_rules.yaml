@@ -1,0 +1,293 @@
+# Validation Rules Configuration
+# Last updated: 2026-02-25
+# Version: 1.0.0
+
+# =============================================================================
+# LEVEL 1: SYNTAX VALIDATION (Indigo Toolkit)
+# =============================================================================
+# Purpose: Ensure SMILES is parsable and chemically valid
+# Tool: Indigo (preserves stereochemistry better than RDKit)
+
+level_1_syntax:
+  enabled: true
+
+  # Hard rejection criteria
+  must_parse: true  # Indigo.loadSMILES() must succeed
+  no_wildcards: false  # Allow up to wildcard_threshold
+  not_placeholder: true  # Reject n/a, unknown, failed, etc.
+  valence_valid: true  # All atoms must satisfy valence rules
+
+  # Wildcard policy
+  wildcard_threshold: 2  # Allow 0-2 wildcards (R-groups ok)
+  wildcard_rejection_reason: "too_many_wildcards"
+
+  # Placeholder values to reject
+  placeholder_values:
+    - "n/a"
+    - "unknown"
+    - "failed"
+    - ""
+    - "none"
+    - "null"
+
+  # Canonicalization settings
+  canonicalize: true
+  preserve_stereochemistry: true  # Critical for natural products
+
+  # Output
+  return_canonical_smiles: true
+  return_indigo_errors: true
+
+# =============================================================================
+# LEVEL 2: CHEMICAL PLAUSIBILITY (RDKit + Indigo)
+# =============================================================================
+# Purpose: Filter extraction artifacts and garbage
+# Tool: RDKit for property computation
+
+level_2_chemical:
+  enabled: true
+
+  # Molecular weight thresholds (Daltons)
+  molecular_weight:
+    min: 100  # Reject extraction fragments
+    max: 1000  # Reject combined structures
+    warn_min: 150  # Flag small molecules for review
+    warn_max: 800  # Flag large natural products
+    rejection_reason_low: "mw_too_low"
+    rejection_reason_high: "mw_too_high"
+
+  # Atom count thresholds (heavy atoms only)
+  atom_count:
+    min: 5  # Exclude tiny fragments
+    max: 200  # Exclude OCSR errors
+    rejection_reason_low: "too_few_atoms"
+    rejection_reason_high: "too_many_atoms"
+
+  # Fragment thresholds (disconnected components)
+  fragments:
+    max: 5  # Allow salts, mixtures
+    warn_max: 3  # Flag for review
+    rejection_reason: "too_many_fragments"
+    warning_reason: "multiple_fragments"
+
+  # Garbage pattern detection
+  garbage_patterns:
+    carbon_only: true  # Reject C.C.C.C patterns
+    single_element_only: true  # Reject O.O.O, N.N.N, etc.
+    repetitive_garbage: true  # Reject C(=O)(=O)(=O)...
+
+  # Ring system validation
+  ring_systems:
+    min_rings: 0  # Allow acyclic
+    max_rings: 10  # Reject fused polycyclic errors
+    warn_max_rings: 7  # Flag for review
+
+  # Bond validation
+  bonds:
+    allow_radicals: false  # Reject radicals (likely OCSR errors)
+    allow_isotopes: true  # Natural products may have isotopes
+    max_bond_order: 3  # Triple bonds ok
+
+  # Charge validation
+  charge:
+    allow_charged: true  # Salts, zwitterions ok
+    max_absolute_charge: 3  # Reject highly charged species
+
+# =============================================================================
+# LEVEL 3: DOMAIN VALIDATION (Ethnopharmacology-Specific)
+# =============================================================================
+# Purpose: Ensure molecules match expected natural product profiles
+# Context: Sceletium tortuosum alkaloid research
+
+level_3_domain:
+  enabled: true
+
+  # Compound classification
+  classification:
+    require_nitrogen_for_alkaloids: true  # All alkaloids contain N
+    nitrogen_min_count: 1
+    nitrogen_rejection_reason: "no_nitrogen_not_alkaloid"
+
+  # Sceletium alkaloid profile
+  sceletium_alkaloids:
+    # Expected molecular weight range for mesembrine-type alkaloids
+    expected_mw_range:
+      min: 250
+      max: 400
+
+    # Methoxy groups are hallmark of Sceletium alkaloids
+    methoxy_groups:
+      require_presence: true  # 3,4-dimethoxy pattern
+      min_count: 1
+      typical_count: 2-3
+      smarts_pattern: "COc"  # Methoxy SMARTS
+
+    # Ring system expectations
+    ring_count:
+      min: 2  # Fused ring systems
+      max: 5
+      typical: 3-4
+
+    # Stereochemistry expectations
+    stereochemistry:
+      require_presence: false  # OCSR often loses this, flag instead
+      flag_if_missing: true  # Natural products are single enantiomers
+      warning_reason: "stereochemistry_missing_natural_product"
+
+    # Chiral centers
+    chiral_centers:
+      expected_min: 1
+      expected_max: 5
+      typical: 2-3
+
+  # Scaffold matching
+  scaffold_matching:
+    enabled: true
+
+    # Match against known Sceletium scaffolds
+    known_scaffolds:
+      - name: "mesembrine_core"
+        smarts: "CN1CC[C@@H]2C1CC(=O)CC2"  # 3a-aryl-cis-octahydroindole
+        description: "Core mesembrine scaffold"
+
+      - name: "aryl_piperidine"
+        smarts: "CN1CCC(C1)"  # Basic N-methyl piperidine
+        description: "Common alkaloid motif"
+
+      - name: "dimethoxy_aryl"
+        smarts: "COc1ccc(cc1OC)"  # 3,4-dimethoxy pattern
+        description: "Sceletium hallmark"
+
+    # Minimum similarity threshold for scaffold match
+    similarity_threshold: 0.6  # Tanimoto (ECFP4)
+
+  # Gold standard comparison
+  gold_standard_comparison:
+    enabled: true
+    reference_file: gold_standards.json
+
+    # Similarity thresholds
+    exact_match_tolerance: 0.001  # For exact matches
+    similarity_threshold: 0.7  # Tanimoto for "similar to"
+    flag_similar: true  # Flag molecules similar to gold standards
+
+    # Expected matches
+    expected_minimum_matches: 5  # From full 129-paper run
+    known_alkaloids_count: 7
+
+# =============================================================================
+# CONFIDENCE SCORING
+# =============================================================================
+# Compute overall confidence score (0-100) based on validation results
+
+confidence_scoring:
+  enabled: true
+
+  # Base scores by validation level
+  base_scores:
+    level_1_syntax_pass: 30
+    level_2_chemical_pass: 30
+    level_3_domain_pass: 20
+
+  # Bonuses (additive, max total 100)
+  bonuses:
+    exact_gold_standard_match: 20
+    scaffold_match: 10
+    stereochemistry_present: 5
+    methoxy_groups_present: 5
+    mw_in_expected_range: 5
+
+  # Penalties (subtractive, min total 0)
+  penalties:
+    low_confidence_backend: -15  # Backend confidence <0.6
+    multiple_fragments: -10  # 2-5 fragments
+    borderline_mw: -5  # MW at edge of range
+    no_stereochemistry: -5  # For known chiral scaffold
+
+  # Thresholds
+  thresholds:
+    high_confidence: 70  # Ready for KB import
+    medium_confidence: 50  # Manual review queue
+    low_confidence: 30  # Reject or deep review
+
+  # Confidence to labels
+  labels:
+    high: "READY"
+    medium: "MANUAL_REVIEW"
+    low: "REJECT_OR_DEEP_REVIEW"
+
+# =============================================================================
+# REJECTION REASON TRACKING
+# =============================================================================
+# Categorize and track why molecules were rejected
+
+rejection_tracking:
+  enabled: true
+
+  # Categories
+  categories:
+    - syntax_error
+    - chemical_plausibility
+    - domain_mismatch
+    - low_confidence
+    - garbage_pattern
+
+  # Detailed reasons per category
+  reasons:
+    syntax_error:
+      - parse_failure
+      - valence_error
+      - too_many_wildcards
+      - placeholder_value
+
+    chemical_plausibility:
+      - mw_too_low
+      - mw_too_high
+      - too_few_atoms
+      - too_many_atoms
+      - too_many_fragments
+      - carbon_only_garbage
+
+    domain_mismatch:
+      - no_nitrogen
+      - no_methoxy_groups
+      - scaffold_mismatch
+      - mw_outside_alkaloid_range
+
+    low_confidence:
+      - backend_confidence_low
+      - validation_margin_borderline
+
+    garbage_pattern:
+      - repetitive_carbon
+      - single_element_only
+      - impossible_bonding
+
+# =============================================================================
+# MANUAL REVIEW QUEUE
+# =============================================================================
+# Molecules that need human expert chemist review
+
+manual_review_queue:
+  enabled: true
+
+  # Inclusion criteria
+  include_if:
+    - confidence_score_in_range: [50, 70]  # Medium confidence
+    - flagged_stereochemistry_missing: true
+    - novel_scaffold_detected: true  # Doesn't match known scaffolds
+    - multiple_fragments: [2, 5]  # May be salts/mixtures
+    - borderline_mw: [140, 160]  # Just above rejection threshold
+
+  # Output format
+  output_format:
+    include_validation_report: true
+    include_image_reference: true
+    include_backend_confidence: true
+    include_rejection_reasons: false  # These passed, just flagged
+
+  # Review interface
+  review_interface:
+    show_molecule_image: true
+    show_3d_structure: false  # Requires additional computation
+    show_similar_known: true  # Show closest gold standard match

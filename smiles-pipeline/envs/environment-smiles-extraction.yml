@@ -1,0 +1,46 @@
+name: smiles-extraction
+channels:
+  - conda-forge
+dependencies:
+  # Core Python
+  - python=3.11
+  - numpy<2
+
+  # Cheminformatics
+  - rdkit=2024.3
+
+  # Image processing
+  - pillow>=10
+  - opencv>=4.8.0,<4.13
+
+  # Build tools for pip packages
+  - setuptools
+  - wheel
+  - git
+
+  # Utilities
+  - tqdm>=4.67
+
+  # All ML frameworks and OCSR tools via pip (avoids conda libprotobuf conflicts)
+  - pip
+  - pip:
+      # PyTorch (CPU + CUDA support for MolScribe) - relax version
+      - torch
+      - torchvision
+      - torchaudio
+
+      # TensorFlow (for DECIMER)
+      - tensorflow>=2.15.0,<2.16.0
+
+      # Cheminformatics (via pip)
+      - epam-indigo>=1.40.0
+
+      # OCSR tools
+      - git+https://github.com/thomas0809/MolScribe.git  # Python 3.11 compatible
+      - decimer>=2.7.0
+
+      # Supporting libraries
+      - transformers
+      - opencv-python<4.13
+      - pystow>=0.5.0
+      - timm  # PyTorch image models (MolScribe dependency) - let pip resolve
