@@ -197,6 +197,14 @@ confidence_scoring:
     methoxy_groups_present: 5
     mw_in_expected_range: 5
 
+  # Requirements - molecules must meet at least one of these for high confidence
+  requirements:
+    require_positive_indicator: true  # Require at least one bonus indicator
+    positive_indicators:
+      - exact_gold_standard_match
+      - scaffold_match
+      - methoxy_groups_present
+
   # Penalties (subtractive, min total 0)
   penalties:
     low_confidence_backend: -15  # Backend confidence <0.6

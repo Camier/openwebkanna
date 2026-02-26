@@ -160,3 +160,17 @@ monitoring:
     - confidence_distribution
     - gpu_memory_usage
     - fallback_rate
+
+# Future-proofing: VLM (Vision Language Model) integration point
+# Currently not enabled;预留接口 for future multimodal OCSR improvement
+vlm:
+  enabled: false
+  priority: 99  # Last resort
+  version: "future"
+  license: "pending"
+  description: "Vision Language Model OCSR fallback - to be implemented"
+  use_when:
+    - all_backends_failed: true
+  performance:
+    estimated_f1: 0.75-0.85
+    average_inference_time_ms: 1000

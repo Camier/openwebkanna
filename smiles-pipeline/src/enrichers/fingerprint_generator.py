@@ -151,6 +151,43 @@ class FingerprintGenerator:
         else:
             raise ValueError(f"Unknown similarity method: {method}")
 
+    def tanimoto_similarity(self, fp1: list[float], fp2: list[float]) -> float:
+        """Calculate Tanimoto similarity between two float vectors."""
+        if not fp1 or not fp2:
+            raise ValueError("Fingerprints must not be empty")
+        if len(fp1) != len(fp2):
+            raise ValueError(f"Fingerprint dimensions must match: {len(fp1)} vs {len(fp2)}")
+
+        # Convert to RDKit ExplicitBitVect
+        from rdkit.DataStructs import CreateFromBinaryText
+        fp1_bit = CreateFromBinaryText(bytes(fp1))
+        fp2_bit = CreateFromBinaryText(bytes(fp2))
+        return DataStructs.TanimotoSimilarity(fp1_bit, fp2_bit)
+
+    def dice_similarity(self, fp1: list[float], fp2: list[float]) -> float:
+        """Calculate Dice similarity between two float vectors."""
+        if not fp1 or not fp2:
+            raise ValueError("Fingerprints must not be empty")
+        if len(fp1) != len(fp2):
+            raise ValueError(f"Fingerprint dimensions must match: {len(fp1)} vs {len(fp2)}")
+
+        from rdkit.DataStructs import CreateFromBinaryText
+        fp1_bit = CreateFromBinaryText(bytes(fp1))
+        fp2_bit = CreateFromBinaryText(bytes(fp2))
+        return DataStructs.DiceSimilarity(fp1_bit, fp2_bit)
+
+    def cosine_similarity(self, fp1: list[float], fp2: list[float]) -> float:
+        """Calculate Cosine similarity between two float vectors."""
+        if not fp1 or not fp2:
+            raise ValueError("Fingerprints must not be empty")
+        if len(fp1) != len(fp2):
+            raise ValueError(f"Fingerprint dimensions must match: {len(fp1)} vs {len(fp2)}")
+
+        from rdkit.DataStructs import CreateFromBinaryText
+        fp1_bit = CreateFromBinaryText(bytes(fp1))
+        fp2_bit = CreateFromBinaryText(bytes(fp2))
+        return DataStructs.CosineSimilarity(fp1_bit, fp2_bit)
+
     def find_similar_molecules(
         self,
         query_fp_hex: str,
@@ -200,6 +237,28 @@ class FingerprintGenerator:
 
         # Return top_k
         return results[:top_k]
+
+    def ecfp4(self, smiles: str) -> List[float]:
+        """Generate ECFP4 fingerprint as float vector (2048-dim)."""
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES: {smiles}")
+
+        fp = AllChem.GetMorganFingerprintAsBitVect(mol, self.ecfp_radius, nBits=self.ecfp_nbits)
+        arr = np.zeros((self.ecfp_nbits,), dtype=np.float32)
+        DataStructs.ConvertToNumpyArray(fp, arr)
+        return arr.tolist()
+
+    def maccs(self, smiles: str) -> List[float]:
+        """Generate MACCS keys fingerprint as float vector (167-dim)."""
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES: {smiles}")
+
+        fp = MACCSkeys.GenMACCSKeys(mol)
+        arr = np.zeros((167,), dtype=np.float32)
+        DataStructs.ConvertToNumpyArray(fp, arr)
+        return arr.tolist()
 
 
 def generate_fingerprints(
