@@ -50,7 +50,7 @@ class RAGFingerprintStorage:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Generate ECFP4 fingerprint and store in documents table.
+        Generate ECFP4 fingerprint and store in document_chunk table.
 
         Args:
             doc_id: Document ID in PostgreSQL
@@ -109,10 +109,10 @@ class RAGFingerprintStorage:
         self, documents: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Store fingerprints for multiple documents in a single transaction.
+        Store fingerprints for multiple document_chunk in a single transaction.
 
         Args:
-            documents: List of dicts with keys:
+            document_chunk: List of dicts with keys:
                 - doc_id (str): Document ID
                 - smiles (str): SMILES string
                 - properties (dict, optional): Molecule properties
@@ -122,11 +122,11 @@ class RAGFingerprintStorage:
             Summary with success/failure counts
 
         Example:
-            documents = [
+            document_chunk = [
                 {"doc_id": "doc_001", "smiles": "CN1CC...", "properties": {...}},
                 {"doc_id": "doc_002", "smiles": "CCO...", "properties": {...}},
             ]
-            result = storage.store_fingerprints_bulk(documents)
+            result = storage.store_fingerprints_bulk(document_chunk)
         """
         success_count = 0
         failure_count = 0
@@ -160,7 +160,7 @@ class RAGFingerprintStorage:
                             # Update
                             cur.execute(
                                 """
-                                UPDATE documents
+                                UPDATE document_chunk
                                 SET molecule_fingerprint = %s::vector,
                                     molecule_smiles = %s,
                                     molecule_metadata = %s::jsonb
@@ -210,7 +210,7 @@ class RAGFingerprintStorage:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE documents
+                    UPDATE document_chunk
                     SET molecule_fingerprint = %s::vector,
                         molecule_smiles = %s,
                         molecule_metadata = %s::jsonb
@@ -245,12 +245,12 @@ class RAGFingerprintStorage:
                     SELECT
                         id,
                         molecule_smiles,
-                        1 - (molecule_fingerprint <-> %s::vector) as similarity,
+                        1 - (molecule_fingerprint::halfvec <-> %s::halfvec) as similarity,
                         metadata->>'title' as title,
                         molecule_metadata
-                    FROM documents
+                    FROM document_chunk
                     WHERE molecule_fingerprint IS NOT NULL
-                      AND 1 - (molecule_fingerprint <-> %s::vector) >= %s
+                      AND 1 - (molecule_fingerprint::halfvec <-> %s::halfvec) >= %s
                     ORDER BY similarity DESC
                     LIMIT %s
                 """,
@@ -286,7 +286,7 @@ class RAGFingerprintStorage:
                 cur.execute(
                     """
                     SELECT molecule_fingerprint
-                    FROM documents
+                    FROM document_chunk
                     WHERE id = %s AND molecule_fingerprint IS NOT NULL
                 """,
                     (doc_id,),
@@ -308,13 +308,13 @@ class RAGFingerprintStorage:
         """
         with psycopg2.connect(self.db_url) as conn:
             with conn.cursor() as cur:
-                # Count documents with fingerprints
+                # Count document_chunk with fingerprints
                 cur.execute("""
                     SELECT
                         COUNT(*) as total_docs,
                         COUNT(molecule_fingerprint) as docs_with_fps,
                         COUNT(DISTINCT molecule_smiles) as unique_smiles
-                    FROM documents
+                    FROM document_chunk
                 """)
 
                 row = cur.fetchone()
@@ -349,7 +349,7 @@ def process_extraction_results(
     storage = RAGFingerprintStorage(db_url)
 
     # Flatten to document list
-    documents = []
+    document_chunk = []
     for result in extraction_results:
         paper_id = result.get("paper_id")
         molecules = result.get("molecules", [])
@@ -371,7 +371,7 @@ def process_extraction_results(
                 "validation": mol.get("validation"),
             }
 
-            documents.append(
+            document_chunk.append(
                 {
                     "doc_id": paper_id,
                     "smiles": smiles,
@@ -382,8 +382,8 @@ def process_extraction_results(
 
     # Store in batches
     all_results = []
-    for i in range(0, len(documents), batch_size):
-        batch = documents[i : i + batch_size]
+    for i in range(0, len(document_chunk), batch_size):
+        batch = document_chunk[i : i + batch_size]
         result = storage.store_fingerprints_bulk(batch)
         all_results.append(result)
 
@@ -392,7 +392,7 @@ def process_extraction_results(
     total_failed = sum(r.get("failed", 0) for r in all_results)
 
     return {
-        "total_processed": len(documents),
+        "total_processed": len(document_chunk),
         "succeeded": total_success,
         "failed": total_failed,
         "batches": len(all_results),

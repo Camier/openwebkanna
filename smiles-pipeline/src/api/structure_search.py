@@ -146,12 +146,12 @@ async def search_similar_structures(request: StructureSearchRequest):
             SELECT
                 id,
                 molecule_smiles,
-                1 - (molecule_fingerprint <-> %s::vector) as similarity,
+                1 - (molecule_fingerprint::halfvec <-> %s::halfvec) as similarity,
                 metadata->>'title' as title,
                 molecule_metadata
-            FROM documents
+            FROM document_chunk
             WHERE molecule_fingerprint IS NOT NULL
-              AND 1 - (molecule_fingerprint <-> %s::vector) >= %s
+              AND 1 - (molecule_fingerprint::halfvec <-> %s::halfvec) >= %s
             ORDER BY similarity DESC
             LIMIT %s
         """,
@@ -210,7 +210,7 @@ async def get_molecule(doc_id: str):
                 molecule_smiles,
                 metadata->>'title' as title,
                 molecule_metadata
-            FROM documents
+            FROM document_chunk
             WHERE id = %s AND molecule_smiles IS NOT NULL
         """,
             (doc_id,),
@@ -247,7 +247,7 @@ async def get_statistics():
     """
     Get fingerprint database statistics.
 
-    Returns counts of molecules, documents, and coverage metrics.
+    Returns counts of molecules, document_chunk, and coverage metrics.
     """
     try:
         conn = psycopg2.connect(DATABASE_URL)
@@ -260,7 +260,7 @@ async def get_statistics():
                 COUNT(molecule_fingerprint) as docs_with_fps,
                 COUNT(DISTINCT molecule_smiles) as unique_smiles,
                 COUNT(DISTINCT id) as unique_documents
-            FROM documents
+            FROM document_chunk
         """
         )
 
@@ -312,11 +312,11 @@ async def batch_search(
                     SELECT
                         id,
                         molecule_smiles,
-                        1 - (molecule_fingerprint <-> %s::vector) as similarity,
+                        1 - (molecule_fingerprint::halfvec <-> %s::halfvec) as similarity,
                         metadata->>'title' as title
-                    FROM documents
+                    FROM document_chunk
                     WHERE molecule_fingerprint IS NOT NULL
-                      AND 1 - (molecule_fingerprint <-> %s::vector) >= %s
+                      AND 1 - (molecule_fingerprint::halfvec <-> %s::halfvec) >= %s
                     ORDER BY similarity DESC
                     LIMIT %s
                 """,
