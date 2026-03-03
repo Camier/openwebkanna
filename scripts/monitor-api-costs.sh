@@ -84,6 +84,8 @@ show_summary() {
 
 # shellcheck disable=SC2120
 estimate_costs() {
+    local usd="$"
+
     echo "=== API Cost Estimation ==="
     echo ""
     echo "Based on typical thesis research patterns:"
@@ -94,9 +96,9 @@ estimate_costs() {
     echo "  - Heavy analysis (200+ queries): ~$5.00-15.00"
     echo ""
     echo "Monthly estimates (30 days):"
-    echo '  - Light: ~$15-60'
-    echo '  - Medium: ~$60-150'
-    echo '  - Heavy: ~$150-450'
+    echo "  - Light: ~${usd}15-60"
+    echo "  - Medium: ~${usd}60-150"
+    echo "  - Heavy: ~${usd}150-450"
     echo ""
     echo "Cost optimization strategies:"
     echo "  ✓ Local embeddings: $0 (sentence-transformers)"
