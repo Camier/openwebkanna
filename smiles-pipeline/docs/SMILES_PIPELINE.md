@@ -59,7 +59,8 @@ OPENWEBUI_URL=http://localhost:3010 ARGS='--keep-id <kb-id> --apply' mise run sm
 Production recommendation in this repository:
 
 1. Keep a **text KB embedding model** in `RAG_EMBEDDING_MODEL` (never image captioning models).
-2. Keep a **dedicated SMILES fingerprint channel** (`ECFP4` + `MACCS`).
+2. Keep a **dedicated SMILES fingerprint channel** (`ECFP4` as stable default).
+   - Keep `MACCS` as deferred/optional until DB/index parity and retrieval eval confirm no regressions.
 3. Optionally add a **molecular embedding channel** (for example `MoLFormer`/`ChemBERTa`) as an additive third signal.
 4. Fuse channels with **Reciprocal Rank Fusion (RRF)**:
    - `text_dense`
