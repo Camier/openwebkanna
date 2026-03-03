@@ -383,6 +383,9 @@ handle_web_search_probe_failure() {
     fi
 
     print_info "$message"
+    if echo "$message" | grep -qi "container web search probe"; then
+        print_info "Hint: host SearXNG may be bound to 127.0.0.1 only. Expose it to Docker (0.0.0.0) or route via a container service."
+    fi
     print_info "Continuing because BASELINE_REQUIRE_WEB_SEARCH=false"
     test_pass
     return 0
@@ -499,7 +502,30 @@ test_web_search_container_baseline() {
     probe_url="${searx_url//\{query\}/openwebui%20baseline}"
 
     local raw
-    raw="$(docker exec openwebui sh -lc "curl -sS -m 20 -w '\nHTTP_CODE:%{http_code}\n' \"$probe_url\" 2>/dev/null || true" 2>/dev/null || true)"
+    if docker exec openwebui sh -lc "command -v python3 >/dev/null 2>&1"; then
+        raw="$(docker exec openwebui python3 -c '
+import sys
+import urllib.error
+import urllib.request
+
+url = sys.argv[1]
+try:
+    with urllib.request.urlopen(url, timeout=20) as resp:
+        body = resp.read().decode("utf-8", "replace")
+        sys.stdout.write(body)
+        sys.stdout.write(f"\\nHTTP_CODE:{resp.getcode()}\\n")
+except urllib.error.HTTPError as exc:
+    body = exc.read().decode("utf-8", "replace")
+    sys.stdout.write(body)
+    sys.stdout.write(f"\\nHTTP_CODE:{exc.code}\\n")
+except Exception:
+    sys.stdout.write("\\nHTTP_CODE:000\\n")
+' "$probe_url" 2>/dev/null || true)"
+    elif docker exec openwebui sh -lc "command -v curl >/dev/null 2>&1"; then
+        raw="$(docker exec openwebui sh -lc "curl -sS -m 20 -w '\nHTTP_CODE:%{http_code}\n' \"$probe_url\" 2>/dev/null || true" 2>/dev/null || true)"
+    else
+        raw="$(docker exec openwebui sh -lc "wget -q -O - \"$probe_url\" 2>/dev/null; code=\$?; [ \$code -eq 0 ] && printf '\nHTTP_CODE:200\n' || printf '\nHTTP_CODE:000\n'" 2>/dev/null || true)"
+    fi
 
     if [ -z "$raw" ]; then
         handle_web_search_probe_failure "Empty response from OpenWebUI container web search probe"

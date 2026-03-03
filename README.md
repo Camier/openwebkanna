@@ -124,6 +124,12 @@ Use this baseline workflow before enabling advanced features:
 ./test-api.sh --baseline
 ```
 
+If your provider matrix is volatile, pin a known-good model for baseline chat checks:
+
+```bash
+OPENWEBUI_TEST_MODEL="openrouter/openai/gpt-5-mini" ./test-api.sh --baseline
+```
+
 `--baseline` keeps tests reproducible and quick by validating health, models, retrieval, and web-search wiring without running heavier full regression flows.
 
 If local SearXNG is temporarily unavailable, baseline checks continue by default.

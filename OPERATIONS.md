@@ -25,7 +25,7 @@ cp .env.example .env
 ./status.sh
 
 # 5. Open browser
-#    http://localhost:3000
+#    http://localhost:${WEBUI_PORT:-3000}
 ```
 
 ### Daily Operations
@@ -38,6 +38,8 @@ cp .env.example .env
 #### Check Status
 ```bash
 ./status.sh
+./check-smiles-structure-api.sh
+# Optional legacy sidecar check (only if CLIPROXYAPI_ENABLED=true):
 ./check-cliproxyapi.sh
 ```
 
@@ -52,6 +54,7 @@ docker compose logs --tail=100 openwebui
 #### Restart Services
 ```bash
 docker compose restart openwebui
+# Optional legacy sidecar restart (only if CLIPROXYAPI_ENABLED=true):
 ./restart-cliproxyapi.sh
 ```
 

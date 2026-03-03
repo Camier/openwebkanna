@@ -56,9 +56,16 @@ Baseline validation (fast checks):
 ```bash
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
+./check-smiles-structure-api.sh
 ```
 
 If you enable web search, `test-rag.sh --baseline` probes SearXNG from both the host and the OpenWebUI container.
+
+If `/api/models` is healthy but one chat model is flaky, pin a known-good model for API baseline:
+
+```bash
+OPENWEBUI_TEST_MODEL="openrouter/openai/gpt-5-mini" ./test-api.sh --baseline
+```
 
 If you want to align your pinned image to the latest upstream tag:
 

@@ -2,7 +2,7 @@
 
 ###############################################################################
 # Empty Directory Cleanup
-# Identifies empty directories (excluding .git, archive, data/milvus, and prod_max)
+# Identifies empty directories while excluding runtime/system directories.
 # These are typically runtime artifacts that should not be tracked in git.
 ###############################################################################
 
@@ -11,7 +11,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-source "${SCRIPT_DIR}/lib/init.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../lib/init.sh"
 load_env_defaults
 
 DRY_RUN=false
@@ -30,6 +31,7 @@ Description:
 
   Excluded from cleanup:
   - .git/ (git metadata)
+  - .venvs/, .conda/ (local environment directories)
   - archive/ (deprecated but kept for reference)
   - data/milvus/ (runtime state)
   - prod_max/ and prod_max_multimodal/ (processing outputs)
@@ -72,15 +74,17 @@ fi
 print_header "Empty Directory Cleanup"
 
 # Directories to always exclude
-export EXCLUDE_PATTERN="\.git|archive|data/milvus|prod_max|prod_max_multimodal|logs|backups|certs|data/pdfs|data/extractions|data/corpus|jupyter|cliproxyapi|searxng|thesis-exports"
+export EXCLUDE_PATTERN="\.git|\.venvs|\.conda|archive|data/milvus|prod_max|prod_max_multimodal|logs|backups|certs|data/pdfs|data/extractions|data/corpus|jupyter|cliproxyapi|searxng|thesis-exports"
 
 print_step "Finding empty directories..."
-print_info "Excluded: .git, archive, data/milvus, prod_max*, logs, backups, certs, runtime dirs"
+print_info "Excluded: .git, .venvs/.conda, archive, data/milvus, prod_max*, logs, backups, certs, runtime dirs"
 print_info ""
 
 # Find empty directories, excluding special dirs
 empty_dirs=$(find . -type d -empty \
     ! -path "./.git*" \
+    ! -path "./.venvs*" \
+    ! -path "./.conda*" \
     ! -path "./archive*" \
     ! -path "./data/milvus*" \
     ! -path "./prod_max*" \

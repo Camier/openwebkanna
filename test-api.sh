@@ -60,6 +60,7 @@ OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
+OPENWEBUI_TEST_MODEL="${OPENWEBUI_TEST_MODEL:-}"
 VERBOSE="${VERBOSE:-false}"
 OUTPUT_DIR="/tmp/openwebui_api_tests_$(date +%Y%m%d_%H%M%S)"
 TEST_MODE="full"
@@ -74,6 +75,7 @@ TESTS_TOTAL=0
 declare -a CREATED_FILES=()
 declare -a CREATED_KNOWLEDGE_BASES=()
 SELECTED_MODEL=""
+MODELS_RESPONSE=""
 
 ###############################################################################
 # Helper Functions
@@ -361,12 +363,21 @@ test_models_list() {
 
     local response
     response=$(make_request "GET" "/api/models" "" "" 2>&1)
+    MODELS_RESPONSE="$response"
     save_response "models_list" "$response"
 
     if has_non_empty_models_array "$response"; then
         local model_count
         model_count=$(echo "$response" | jq '.data | length' 2>/dev/null || echo "0")
         SELECTED_MODEL=$(echo "$response" | jq -r '.data[0].id // empty' 2>/dev/null || true)
+        if [ -n "$OPENWEBUI_TEST_MODEL" ]; then
+            if echo "$response" | jq -e --arg model "$OPENWEBUI_TEST_MODEL" '.data[]?.id == $model' >/dev/null 2>&1; then
+                SELECTED_MODEL="$OPENWEBUI_TEST_MODEL"
+                print_info "Using OPENWEBUI_TEST_MODEL=$OPENWEBUI_TEST_MODEL"
+            else
+                print_warning "OPENWEBUI_TEST_MODEL not present in /api/models: $OPENWEBUI_TEST_MODEL"
+            fi
+        fi
         print_success "Found $model_count models"
         test_pass
         return 0
@@ -582,27 +593,57 @@ test_knowledge_add_file() {
 test_chat_completion_simple() {
     test_start "Chat Completion (Simple)"
 
-    local chat_model="${SELECTED_MODEL:-openai-codex}"
-    local data='{
-        "model": "'"$chat_model"'",
-        "messages": [
-            {
-                "role": "user",
-                "content": "Hello, how are you?"
-            }
-        ],
-        "temperature": 0.7,
-        "max_tokens": 100
-    }'
+    choose_chat_fallback_model() {
+        local current_model="$1"
+        echo "$MODELS_RESPONSE" | jq -r --arg current "$current_model" '
+            .data[]?.id
+            | select(type == "string" and length > 0)
+            | select(. != $current)
+            | select((contains("*") | not))
+            | select((startswith("ollama-cloud/") | not))
+        ' 2>/dev/null | head -n 1
+    }
 
-    local response
-    response=$(make_request "POST" "/api/chat/completions" "$data" "" 2>&1)
+    run_chat_completion_once() {
+        local model="$1"
+        local payload response_local
+        payload='{
+            "model": "'"$model"'",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Hello, how are you?"
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 100
+        }'
+        response_local=$(make_request "POST" "/api/chat/completions" "$payload" "" 2>&1)
+        printf "%s" "$response_local"
+    }
+
+    local chat_model="${SELECTED_MODEL:-openai-codex}"
+    local response fallback_model
+    response="$(run_chat_completion_once "$chat_model")"
+
+    if ! echo "$response" | grep -q "choices"; then
+        fallback_model="$(choose_chat_fallback_model "$chat_model")"
+        if [ -n "$fallback_model" ]; then
+            print_warning "Primary model failed ($chat_model). Retrying with fallback: $fallback_model"
+            response="$(run_chat_completion_once "$fallback_model")"
+            if echo "$response" | grep -q "choices"; then
+                chat_model="$fallback_model"
+                SELECTED_MODEL="$fallback_model"
+            fi
+        fi
+    fi
+
     save_response "chat_completion_simple" "$response"
 
     if echo "$response" | grep -q "choices"; then
         local reply
         reply=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
-        print_success "Got response: $(echo "$reply" | head -c 50)..."
+        print_success "Got response from model $chat_model: $(echo "$reply" | head -c 50)..."
         test_pass
         return 0
     else
