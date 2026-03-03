@@ -107,6 +107,7 @@ if command -v micromamba >/dev/null 2>&1; then
         exit 1
     fi
 elif command -v conda >/dev/null 2>&1; then
+    # shellcheck disable=SC1091
     source "$(conda info --base)"/etc/profile.d/conda.sh
     if ! conda env list | awk '{print $1}' | grep -qx "smiles-extraction"; then
         echo "ERROR: conda env 'smiles-extraction' not found."

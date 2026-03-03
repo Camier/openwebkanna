@@ -490,6 +490,7 @@ test_tools_endpoints() {
         if [ -n "$expected_specs" ]; then
             start_test "Tool specs match expected public functions (${tool_id})"
             missing=""
+            expected_specs_count="$(printf "%s\n" "$expected_specs" | tr ' ' '\n' | sed '/^$/d' | wc -l | tr -d ' ')"
             for fn in $expected_specs; do
                 if ! jq -e --arg fn "$fn" '[.specs[]?.name // empty] | index($fn) != null' "$details_file" >/dev/null 2>&1; then
                     missing="${missing}${missing:+,}${fn}"
@@ -500,7 +501,7 @@ test_tools_endpoints() {
                 fail_test "Missing expected function(s): ${missing} (actual: ${spec_names})"
             else
                 # Ensure no unexpected extra functions exist.
-                if [ "$(jq -r '.specs | length' "$details_file" 2>/dev/null || echo 0)" -ne "$(printf "%s\n" $expected_specs | wc -l | tr -d ' ')" ]; then
+                if [ "$(jq -r '.specs | length' "$details_file" 2>/dev/null || echo 0)" -ne "$expected_specs_count" ]; then
                     spec_names="$(jq -r '.specs[]?.name // empty' "$details_file" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
                     fail_test "Unexpected extra spec(s) present (actual: ${spec_names})"
                 else

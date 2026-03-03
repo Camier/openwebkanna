@@ -15,6 +15,7 @@
 _PRINT_UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source color definitions
+# shellcheck disable=SC1091
 source "${_PRINT_UTILS_DIR}/colors.sh"
 
 # Print a fancy bordered header

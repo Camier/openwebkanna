@@ -35,10 +35,15 @@ cd "${OPENWEBUI_DIR}"
 if [[ -x ./backup-openwebui-db.sh ]]; then
     ./backup-openwebui-db.sh
     # Copy latest backup to thesis directory
-    LATEST_BACKUP=$(ls -t backups/webui.db.backup_* 2>/dev/null | head -1)
+    LATEST_BACKUP=$(
+        find backups -maxdepth 1 -type f -name 'webui.db.backup_*' -printf '%T@ %p\n' 2>/dev/null |
+            sort -nr |
+            head -1 |
+            cut -d' ' -f2-
+    )
     if [[ -n ${LATEST_BACKUP} ]]; then
         cp "${LATEST_BACKUP}" "${THESIS_BACKUP_DIR}/"
-        echo "  ✓ Database backed up: $(basename ${LATEST_BACKUP})"
+        echo "  ✓ Database backed up: $(basename "${LATEST_BACKUP}")"
     fi
 else
     echo "  ✗ backup-openwebui-db.sh not found or not executable"
@@ -56,7 +61,7 @@ fi
 # 3. Configuration Backup
 echo "[3/4] Backing up configuration..."
 tar czf "${THESIS_BACKUP_DIR}/config-${DATE}.tar.gz" \
-    -C "${OPENWEBUP_DIR}" \
+    -C "${OPENWEBUI_DIR}" \
     .env cliproxyapi/config.yaml docker-compose.yml 2>/dev/null ||
     echo "  ! Some config files may be missing"
 
@@ -71,7 +76,10 @@ echo ""
 echo "=== Backup Complete ==="
 echo "Backup location: ${THESIS_BACKUP_DIR}"
 echo "Recent backups:"
-ls -lh "${THESIS_BACKUP_DIR}" | tail -5
+find "${THESIS_BACKUP_DIR}" -maxdepth 1 -type f \
+    -printf '%TY-%Tm-%Td %TH:%TM %9s %f\n' 2>/dev/null |
+    sort |
+    tail -5
 echo ""
 echo "Next steps:"
 echo "  1. Copy backups to external storage (USB, cloud)"

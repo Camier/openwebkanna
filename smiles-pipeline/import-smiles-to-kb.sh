@@ -13,7 +13,7 @@ if [ ! -f "$LIB_INIT_PATH" ]; then
         "${SCRIPT_DIR}/lib/init.sh" "${REPO_ROOT}/lib/init.sh" >&2
     exit 1
 fi
-# shellcheck source=../lib/init.sh
+# shellcheck disable=SC1090,SC1091
 source "$LIB_INIT_PATH"
 load_env_defaults
 cd "$SCRIPT_DIR"

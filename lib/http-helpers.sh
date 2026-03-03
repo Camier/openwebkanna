@@ -40,7 +40,7 @@ wait_for_service() {
 
     print_step "Waiting for $service_name to be ready..."
 
-    while [ $attempt -le $max_attempts ]; do
+    while [ "$attempt" -le "$max_attempts" ]; do
         if curl -s -f "$url" &>/dev/null; then
             print_success "$service_name is ready!"
             return 0

@@ -132,7 +132,7 @@ export_to_csv() {
     # Extract and format log data
     docker compose -f "${PROJECT_ROOT}/docker-compose.yml" logs cliproxyapi 2>/dev/null |
         grep -E "model=.*tokens=" |
-        while read line; do
+        while IFS= read -r line; do
             # Parse log line and extract metrics
             # This is a simplified example - adjust based on actual log format
             timestamp=$(echo "${line}" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' || echo "unknown")

@@ -34,12 +34,19 @@
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source libraries in dependency order
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/colors.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/validation.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/print-utils.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/env-loader.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/docker-helpers.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/cliproxyapi-helpers.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/http-helpers.sh"
 
 # Unset temporary variable

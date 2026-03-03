@@ -26,14 +26,17 @@ LIB_DIR="${PROJECT_ROOT}/lib"
 
 # Source shared libraries if they exist
 if [[ -f "${LIB_DIR}/colors.sh" ]]; then
+    # shellcheck disable=SC1091
     source "${LIB_DIR}/colors.sh"
 fi
 
 if [[ -f "${LIB_DIR}/print-utils.sh" ]]; then
+    # shellcheck disable=SC1091
     source "${LIB_DIR}/print-utils.sh"
 fi
 
 if [[ -f "${LIB_DIR}/docker-helpers.sh" ]]; then
+    # shellcheck disable=SC1091
     source "${LIB_DIR}/docker-helpers.sh"
 fi
 

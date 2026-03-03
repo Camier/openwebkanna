@@ -122,7 +122,7 @@ fi
 
 # Confirm removal
 print_warning "This will remove $count empty directorie(s)"
-read -p "Continue? [y/N] " confirm
+read -r -p "Continue? [y/N] " confirm
 
 if [[ ! $confirm =~ ^[Yy]$ ]]; then
     print_info "Cancelled"
@@ -133,7 +133,7 @@ fi
 removed=0
 failed=0
 
-echo "$empty_dirs" | while read -r dir; do
+while IFS= read -r dir; do
     if rmdir "$dir" 2>/dev/null; then
         print_success "Removed: $dir"
         removed=$((removed + 1))
@@ -141,12 +141,12 @@ echo "$empty_dirs" | while read -r dir; do
         print_error "Failed to remove: $dir"
         failed=$((failed + 1))
     fi
-done
+done <<<"$empty_dirs"
 
 print_info ""
 print_info "Removed: $removed, Failed: $failed"
 
-if [ $failed -gt 0 ]; then
+if [ "$failed" -gt 0 ]; then
     print_warning "Some directories could not be removed (may have files or permission issues)"
 fi
 

@@ -289,7 +289,7 @@ resolve_routing_aliases() {
     local aliases=""
 
     if [ -n "$ROUTING_TEST_ALIASES" ]; then
-        printf "%s\n" $ROUTING_TEST_ALIASES
+        printf "%s\n" "$ROUTING_TEST_ALIASES" | tr ' ' '\n' | sed '/^$/d'
         return 0
     fi
 
@@ -548,7 +548,7 @@ main() {
         finalize
         exit 1
     fi
-    print_info "Routing aliases under test: $(printf "%s " $routing_aliases)"
+    print_info "Routing aliases under test: $(printf "%s" "$routing_aliases" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
     for alias in $routing_aliases; do
         if extract_model_ids "$cliproxy_models_file" | grep -Fxq "$alias"; then

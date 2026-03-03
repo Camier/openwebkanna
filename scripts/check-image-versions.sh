@@ -80,22 +80,6 @@ check_dependencies() {
     fi
 }
 
-# Extract image info from docker-compose.yml
-# Returns: image_name|tag_or_digest
-extract_image_from_compose() {
-    local service="$1"
-    local image_line
-
-    # Get the image line for the service (handles env var defaults)
-    image_line=$(grep -A 50 "^  ${service}:" "$DOCKER_COMPOSE_FILE" | grep -m 1 "image:" | sed 's/.*image:[[:space:]]*//')
-
-    if [[ -z $image_line ]]; then
-        return 1
-    fi
-
-    echo "$image_line"
-}
-
 # Parse image string into registry, repo, tag
 # Handles: registry/repo:tag, registry/repo@sha256:digest, repo:tag
 parse_image() {
@@ -457,15 +441,6 @@ check_image() {
 # Main function
 main() {
     check_dependencies
-
-    # Define images to check
-    # shellcheck disable=SC2034
-    declare -A IMAGES=(
-        ["openwebui"]='${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}'
-        ["cliproxyapi"]='${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}'
-        ["postgres"]="pgvector/pgvector:pg16"
-        ["jupyter"]='${JUPYTER_IMAGE:-jupyter/scipy-notebook:latest}'
-    )
 
     # Resolve env vars in image specs
     declare -A RESOLVED_IMAGES=()

@@ -194,9 +194,7 @@ stop_docker_compose() {
     fi
 
     print_info "Stopping Docker Compose..."
-    docker-compose down
-
-    if [ $? -eq 0 ]; then
+    if docker-compose down; then
         print_success "Docker Compose services stopped"
     else
         print_error "Failed to stop Docker Compose services"

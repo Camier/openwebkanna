@@ -26,13 +26,13 @@ if [ -f "${PID_FILE}" ]; then
     echo -e "${BLUE}PID file found: ${VLLM_PID}${NC}"
 
     # Check if process is running
-    if ps -p ${VLLM_PID} >/dev/null 2>&1; then
+    if ps -p "${VLLM_PID}" >/dev/null 2>&1; then
         echo -e "${GREEN}OK vLLM process is running (PID: ${VLLM_PID})${NC}"
         VLLM_RUNNING=true
 
         # Show process details
         echo -e "${BLUE}Process details:${NC}"
-        ps -p ${VLLM_PID} -o pid,ppid,cmd,etime,pcpu,pmem --no-headers | while read line; do
+        ps -p "${VLLM_PID}" -o pid,ppid,cmd,etime,pcpu,pmem --no-headers | while read -r line; do
             echo "  ${line}"
         done
     else

@@ -283,7 +283,9 @@ process_pdf_file() {
     fi
 
     if [ -n "$caption" ]; then
-        caption_file="$(mktemp /tmp/${filename}_caption_XXXX.txt)"
+        local caption_stub
+        caption_stub="$(basename "$filename" | tr -c '[:alnum:]_.-' '_')"
+        caption_file="$(mktemp "/tmp/${caption_stub}_caption_XXXX.txt")"
         echo "$caption" >"$caption_file"
         cap_resp=$(upload_pdf "$caption_file")
         cap_file_id=$(echo "$cap_resp" | jq -r '.id // .file_id // empty' 2>/dev/null || true)

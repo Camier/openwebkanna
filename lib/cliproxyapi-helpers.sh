@@ -242,7 +242,7 @@ ensure_cliproxyapi_config_api_key_alignment() {
 ###############################################################################
 resolved_expected_aliases() {
     if [ -n "${CLIPROXYAPI_EXPECT_ALIASES:-}" ]; then
-        printf "%s\n" $CLIPROXYAPI_EXPECT_ALIASES
+        printf "%s\n" "${CLIPROXYAPI_EXPECT_ALIASES}" | tr ' ' '\n' | sed '/^$/d'
         return 0
     fi
 
