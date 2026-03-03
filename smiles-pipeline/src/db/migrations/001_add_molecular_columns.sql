@@ -18,7 +18,7 @@ BEGIN;
 --   molecule_metadata: Additional molecule properties (MW, LogP, etc.)
 
 ALTER TABLE document_chunk
-ADD COLUMN IF NOT EXISTS molecule_fingerprint VECTOR(2048),
+ADD COLUMN IF NOT EXISTS molecule_fingerprint HALFVEC(2048),
 ADD COLUMN IF NOT EXISTS molecule_smiles TEXT,
 ADD COLUMN IF NOT EXISTS molecule_metadata JSONB;
 
@@ -30,7 +30,7 @@ ADD COLUMN IF NOT EXISTS molecule_metadata JSONB;
 -- For chemical fingerprints, this is typically acceptable (binary-like nature of ECFP4)
 
 CREATE INDEX IF NOT EXISTS document_chunk_mol_fp_idx
-ON document_chunk USING ivfflat ((molecule_fingerprint::halfvec) halfvec_cosine_ops)
+ON document_chunk USING ivfflat (molecule_fingerprint halfvec_cosine_ops)
 WITH (lists = 100);
 
 -- Add comments for documentation

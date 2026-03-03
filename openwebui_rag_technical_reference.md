@@ -163,8 +163,8 @@ services:
 
 | Parameter | Description | Default | Recommended |
 |-----------|-------------|---------|-------------|
-| `CHUNK_SIZE` | Size of each chunk | 1500 chars | 500-2000 tokens |
-| `CHUNK_OVERLAP` | Overlap between chunks | 150 chars | 10-20% of chunk size |
+| `CHUNK_SIZE` | Size of each chunk | 3000 chars | 500-2000 tokens |
+| `CHUNK_OVERLAP` | Overlap between chunks | 600 chars | 10-20% of chunk size |
 | `CHUNK_MIN_SIZE_TARGET` | Minimum chunk size | 0 | 50-60% of chunk size |
 
 **Chunking Best Practices:**
@@ -469,9 +469,9 @@ RAG_SYSTEM_CONTEXT=true
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `RAG_TOP_K` | Number of chunks to retrieve | 5 |
+| `RAG_TOP_K` | Number of chunks to retrieve | 15 |
 | `RAG_TOP_K_RERANKER` | Chunks after re-ranking | 5 |
-| `RAG_RELEVANCE_THRESHOLD` | Minimum relevance score | 0.0 |
+| `RAG_RELEVANCE_THRESHOLD` | Minimum relevance score | 0.3 |
 
 ---
 
@@ -814,10 +814,10 @@ def wait_for_processing(token, file_id, timeout=300):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `RAG_EMBEDDING_MODEL` | Embedding model name | `sentence-transformers/all-MiniLM-L6-v2` |
-| `RAG_TOP_K` | Number of chunks to retrieve | `5` |
+| `RAG_TOP_K` | Number of chunks to retrieve | `15` |
 | `RAG_SYSTEM_CONTEXT` | Inject context into system message | `true` |
-| `CHUNK_SIZE` | Document chunk size (characters) | `1500` |
-| `CHUNK_OVERLAP` | Chunk overlap (characters) | `150` |
+| `CHUNK_SIZE` | Document chunk size (characters) | `3000` |
+| `CHUNK_OVERLAP` | Chunk overlap (characters) | `600` |
 | `VECTOR_DB` | Vector database backend | `chroma` |
 
 ### Vector Database Variables

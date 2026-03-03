@@ -14,6 +14,7 @@ Operational procedures for running the SMILES extraction pipeline.
 | Extract from images (GPU) | `python scripts/extract_smiles_pipeline.py --input-dir data/extractions --gpu` |
 | Extract from images (CPU) | `python scripts/extract_smiles_pipeline.py --input-dir data/extractions --no-gpu` |
 | Test on 5 images | `python scripts/extract_smiles_pipeline.py --limit 5 --no-gpu` |
+| Runtime preflight | `python scripts/extract_smiles_pipeline.py --preflight` |
 | Import to KB | `./import-smiles-to-kb.sh --input-dir data/validated` |
 | Generate QA report | `python scripts/generate_qa_report.py --input-dir data/validated` |
 | View extraction stats | `cat data/validated/extraction_stats.json \| jq` |
@@ -88,13 +89,25 @@ micromamba run -n smiles-extraction python smiles-pipeline/scripts/extract_smile
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--input-dir` | Directory containing images | Required |
-| `--output-dir` | Output directory | `smiles-pipeline/data/validated` |
+| `--output-dir` | Output directory | Required |
 | `--gpu` | Use GPU acceleration | True |
 | `--no-gpu` | Force CPU mode | False |
 | `--limit` | Process only N images | All |
-| `--backend-order` | Backend priority | `molscribe,decimer` |
-| `--confidence-threshold` | Min confidence | 0.3 |
-| `--min-validation-score` | Min validation score | 70 |
+| `--config-dir` | Config directory containing YAML files | `smiles-pipeline/config` |
+| `--backends-config-file` | Override path to `backends.yaml` | `config-dir/backends.yaml` |
+| `--validation-rules-file` | Override path to `validation_rules.yaml` | `config-dir/validation_rules.yaml` |
+| `--backend-order` | Backend priority (overrides config order) | from `backends.yaml` (enabled + priority) |
+| `--confidence-threshold` | Min confidence (overrides config) | from `backends.yaml` fallback/backend thresholds |
+| `--min-validation-score` | Min validation score (overrides config) | from `validation_rules.yaml` high-confidence threshold |
+| `--gold-standards-file` | Path override for `gold_standards.json` | Auto-resolved |
+| `--preflight` | Run runtime dependency/config checks and exit | False |
+
+Note: `--input-dir` and `--output-dir` are required unless `--preflight` is used.
+
+Gold standards path resolution order:
+1. `--gold-standards-file`
+2. `SMILES_GOLD_STANDARDS_FILE`
+3. `smiles-pipeline/config/gold_standards.json`
 
 ### Procedure 2: Convert to Markdown for OpenWebUI
 
@@ -168,11 +181,14 @@ cat smiles-pipeline/data/validated/extraction_stats.json | jq '.errors[]'
 # 4. Check GPU availability
 micromamba run -n smiles-extraction python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 
-# 5. Run with verbose logging
-python smiles-pipeline/scripts/extract_smiles_pipeline.py \
+# 5. Run a small debug slice with explicit config files
+micromamba run -n smiles-extraction python smiles-pipeline/scripts/extract_smiles_pipeline.py \
   --input-dir data/extractions \
-  --verbose \
-  --log-file extraction.log
+  --output-dir /tmp/smiles_debug_run \
+  --limit 5 \
+  --no-gpu \
+  --backends-config-file smiles-pipeline/config/backends.yaml \
+  --validation-rules-file smiles-pipeline/config/validation_rules.yaml
 ```
 
 ---
@@ -201,14 +217,15 @@ python scripts/extract_figures_from_pdf.py paper.pdf --output images/
 **For large datasets (100+ images)**:
 
 ```bash
-# Process in batches of 100
-for batch in {0..9}; do
-  micromamba run -n smiles-extraction python smiles-pipeline/scripts/extract_smiles_pipeline.py \
-    --input-dir data/extractions \
-    --output-dir smiles-pipeline/data/validated/batch_${batch} \
-    --limit 100 \
-    --skip $((batch * 100))
-done
+# Process first 100 images
+micromamba run -n smiles-extraction python smiles-pipeline/scripts/extract_smiles_pipeline.py \
+  --input-dir data/extractions \
+  --output-dir smiles-pipeline/data/validated/batch_0 \
+  --limit 100 \
+  --gpu
+
+# Process additional slices by preparing temporary input subsets, then
+# rerun with a different output directory per slice.
 
 # Merge results
 cat smiles-pipeline/data/validated/batch_*/molecules.jsonl > smiles-pipeline/data/validated/merged_molecules.jsonl
@@ -253,6 +270,31 @@ level_3_domain:
   scaffold_similarity_min: 0.5  # Default: 0.7
 ```
 
+Confidence routing controls live in `config/validation_rules.yaml` under `confidence_scoring`:
+- `base_scores`: points for passing each validation level
+- `bonuses`: includes optional `cross_backend_agreement`
+- `penalties`: includes `low_confidence_backend`, `multiple_fragments`, `no_stereochemistry`, `borderline_mw`
+- `requirements`: enforce positive indicators before `high_confidence`
+- `thresholds` + `labels`: map scores to `READY` / `MANUAL_REVIEW` / `REJECT_OR_DEEP_REVIEW`
+
+Optional cross-backend agreement is configured in `config/backends.yaml`:
+```yaml
+routing:
+  consensus_check:
+    enabled: false
+    check_when_confidence_below: 0.7
+    check_always: false
+```
+
+Extraction acceptance and manual-review routing are also config-driven (`config/backends.yaml`):
+```yaml
+fallback:
+  min_confidence: 0.4            # Reject if below this and no cross-backend agreement
+  low_confidence_review:
+    enabled: true
+    threshold: 0.6               # Accepted but flagged for manual review
+```
+
 ---
 
 ## Example Sessions
@@ -272,12 +314,16 @@ time micromamba run -n smiles-extraction python smiles-pipeline/scripts/extract_
 # Step 2: Review stats
 cat smiles-pipeline/data/validated/extraction_stats.json | jq
 # {
+#   "run_id": "smiles_run_...",
 #   "images_processed": 1000,
 #   "extractions_successful": 987,
 #   "syntax_valid": 975,
 #   "chemically_valid": 892,
 #   "domain_valid": 456,
-#   "high_confidence": 423
+#   "high_confidence": 423,
+#   "low_extraction_confidence_rejected": 27,
+#   "manual_review_candidates": 140,
+#   "runtime_manifest": { ... }
 # }
 
 # Step 3: Generate report
@@ -372,6 +418,23 @@ smiles-pipeline/data/validated/
 ├── low_confidence.jsonl         # Below threshold (manual review)
 └── errors.log                   # Failed extractions
 ```
+
+`molecules.jsonl` now includes deterministic standardization identity fields:
+- `standardized_smiles`
+- `standard_inchi`
+- `standard_inchikey`
+- `standardization_policy_version`
+
+It also includes provenance/triage metadata:
+- `backend_runtime` and optional `agreement_reference_runtime`
+- `requires_manual_review` + `review_reasons`
+- `source.run_id` (matches `extraction_stats.json`)
+
+`extraction_stats.json` now includes run-level reproducibility fields:
+- `run_id`, `started_at_utc`, `completed_at_utc`
+- `effective_config` (resolved thresholds/backend order)
+- `runtime_manifest.dependencies` (Python, RDKit, Indigo, MolScribe, DECIMER)
+- `runtime_manifest.config_hashes` (SHA256 of loaded config files)
 
 ### Backup and archival
 

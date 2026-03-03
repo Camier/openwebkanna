@@ -24,7 +24,7 @@ jobs:
 
       - name: Shellcheck
         run: |
-          shellcheck -x -s bash -S warning *.sh lib/*.sh 2>&1 || true
+          shellcheck -x -s bash -S warning *.sh lib/*.sh
 
       - name: YAML lint check
         run: |
@@ -63,7 +63,7 @@ jobs:
       - name: Verify scripts
         run: |
           chmod +x verify-scripts.sh
-          ./verify-scripts.sh || true
+          ./verify-scripts.sh
 
       - name: Check set -e usage
         run: |

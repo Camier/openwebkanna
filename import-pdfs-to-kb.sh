@@ -247,7 +247,6 @@ process_pdf_file() {
 
     print_info "Uploading: $filename"
     response="$(upload_pdf "$pdf_path")"
-
     file_id="$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null || true)"
     if [ -z "$file_id" ]; then
         print_error "Upload failed for: $filename"
@@ -256,7 +255,6 @@ process_pdf_file() {
     fi
 
     print_success "Uploaded: $filename (file_id=$file_id)"
-
     print_info "Waiting for processing: $filename"
     if wait_for_processing "$file_id"; then
         print_success "Processed: $filename"
@@ -266,16 +264,45 @@ process_pdf_file() {
         return 1
     fi
 
+    # Generate caption using BLIP only for supported image file types.
+    local blip_script caption caption_file cap_resp cap_file_id file_ext
+    blip_script="${SCRIPT_DIR}/scripts/blip_caption.py"
+    file_ext="${filename##*.}"
+    file_ext="$(echo "$file_ext" | tr '[:upper:]' '[:lower:]')"
+    caption=""
+
+    if [ -f "$blip_script" ]; then
+        case "$file_ext" in
+            png | jpg | jpeg | webp | bmp | gif)
+                caption="$(python3 "$blip_script" "$pdf_path" 2>/dev/null || true)"
+                ;;
+            *)
+                print_info "Skipping BLIP caption for unsupported file type: $filename"
+                ;;
+        esac
+    fi
+
+    if [ -n "$caption" ]; then
+        caption_file="$(mktemp /tmp/${filename}_caption_XXXX.txt)"
+        echo "$caption" >"$caption_file"
+        cap_resp=$(upload_pdf "$caption_file")
+        cap_file_id=$(echo "$cap_resp" | jq -r '.id // .file_id // empty' 2>/dev/null || true)
+        if [ -n "$cap_file_id" ]; then
+            attach_file_to_kb "$kb_id" "$cap_file_id" >/dev/null 2>&1 || true
+        fi
+        rm -f "$caption_file"
+    fi
+
     print_info "Attaching to Knowledge Base: $filename"
     if attach_file_to_kb "$kb_id" "$file_id"; then
         print_success "Attached: $filename"
         write_result_file "$result_file" 1 1 1 0
         return 0
+    else
+        print_error "Attach failed: $filename"
+        write_result_file "$result_file" 1 1 0 1
+        return 1
     fi
-
-    print_error "Attach failed: $filename"
-    write_result_file "$result_file" 1 1 0 1
-    return 1
 }
 
 accumulate_result_file() {

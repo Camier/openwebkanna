@@ -47,6 +47,17 @@ start_docker_compose() {
     fi
 
     docker_compose up -d
+
+    # CLIProxyAPI is a legacy sidecar behind an explicit flag/profile.
+    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
+        print_step "CLIPROXYAPI enabled; starting legacy sidecar profile"
+        docker_compose --profile legacy-cliproxy up -d cliproxyapi
+    else
+        print_info "CLIPROXYAPI disabled; ensuring legacy sidecar is not running"
+        docker_compose --profile legacy-cliproxy stop cliproxyapi >/dev/null 2>&1 || true
+        docker_compose --profile legacy-cliproxy rm -f -s cliproxyapi >/dev/null 2>&1 || true
+    fi
+
     print_success "Docker Compose services started"
 }
 

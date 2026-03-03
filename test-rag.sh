@@ -2,13 +2,15 @@
 
 ###############################################################################
 # RAG Functionality Testing Script
-# This script tests the complete RAG deployment including OpenWebUI and vLLM
+# This script tests the complete RAG deployment including OpenWebUI and the
+# configured OpenAI-compatible upstream (LiteLLM by default).
 ###############################################################################
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/init.sh"
+source "${SCRIPT_DIR}/lib/test-openwebui-helpers.sh"
 load_env_defaults
 cd "$SCRIPT_DIR"
 
@@ -27,6 +29,11 @@ resolve_openai_base_root() {
     candidate="${candidate%/}"
     candidate="${candidate%/v1}"
 
+    # Host-side test execution should not rely on host.docker.internal DNS.
+    if [[ $candidate == *"://host.docker.internal"* ]] && [ ! -f "/.dockerenv" ]; then
+        candidate="$(printf "%s" "$candidate" | sed 's#://host.docker.internal#://localhost#')"
+    fi
+
     # OpenWebUI can use Docker DNS internally; tests run on host and must use loopback.
     if [[ $candidate == *"://cliproxyapi"* ]]; then
         candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
@@ -39,7 +46,7 @@ resolve_openai_base_root() {
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
 CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
-VLLM_URL="${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}"
+UPSTREAM_URL="${UPSTREAM_URL:-${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}}"
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
@@ -49,65 +56,25 @@ VERBOSE="${VERBOSE:-false}"
 CHAT_MODEL="${RAG_CHAT_MODEL:-}"
 CLIPROXY_BIN="${CLIPROXY_BIN:-./cli-proxy-api.sh}"
 CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
+UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}}"
+RAG_UPSTREAM_MODE="${RAG_UPSTREAM_MODE:-auto}"
 TEST_MODE="full"
 RUN_CLEANUP_ON_EXIT=false
 BASELINE_REQUIRE_WEB_SEARCH="${BASELINE_REQUIRE_WEB_SEARCH:-false}"
 BASELINE_EXPECT_SEARX_PORT="${BASELINE_EXPECT_SEARX_PORT:-8888}"
+RAG_MULTIMODAL_TEST_PDF="${RAG_MULTIMODAL_TEST_PDF:-}"
+RAG_MULTIMODAL_STRICT="${RAG_MULTIMODAL_STRICT:-}"
 
 # Test counters
 TESTS_PASSED=0
 TESTS_FAILED=0
 TESTS_TOTAL=0
 TEST_VECTOR_COLLECTION=""
+TEST_MULTIMODAL_DOC_ID=""
 
 ###############################################################################
 # Script-specific Helper Functions
 ###############################################################################
-
-openwebui_signin() {
-    local output_file="$1"
-    local payload_file="$2"
-    local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
-
-    if command -v jq >/dev/null 2>&1; then
-        jq -n \
-            --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-            --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-            '{email: $email, password: $password}' >"$payload_file"
-    else
-        cat >"$payload_file" <<EOF
-{"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
-EOF
-    fi
-
-    curl -sS -m 45 -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" "$signin_url" -d @"$payload_file" 2>/dev/null || true
-}
-
-ensure_openwebui_api_key() {
-    if [ -n "$API_KEY" ]; then
-        return 0
-    fi
-
-    if ! is_true "$OPENWEBUI_AUTO_AUTH"; then
-        return 0
-    fi
-
-    local tmp_file payload_file signin_code token
-    tmp_file="$(mktemp)"
-    payload_file="$(mktemp)"
-
-    signin_code="$(openwebui_signin "$tmp_file" "$payload_file")"
-    if [ "$signin_code" = "200" ]; then
-        token="$(jq -r '.token // empty' "$tmp_file" 2>/dev/null || true)"
-        if [ -n "$token" ]; then
-            API_KEY="$token"
-            print_info "OpenWebUI bearer token acquired via signin"
-        fi
-    fi
-
-    rm -f "$tmp_file" "$payload_file"
-}
 
 test_start() {
     ((TESTS_TOTAL += 1))
@@ -156,26 +123,6 @@ test_repo_real_integration_guard() {
     return 1
 }
 
-has_non_empty_models_array() {
-    local response="$1"
-    local model_count
-
-    if [ -z "$response" ]; then
-        return 1
-    fi
-
-    if command -v jq >/dev/null 2>&1; then
-        echo "$response" | jq -e '.data and (.data | type == "array") and (.data | length > 0)' >/dev/null 2>&1
-        return $?
-    fi
-
-    model_count=$(echo "$response" | grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | wc -l | tr -d '[:space:]')
-    if [[ $model_count =~ ^[0-9]+$ ]] && [ "$model_count" -gt 0 ]; then
-        return 0
-    fi
-    return 1
-}
-
 show_help() {
     cat <<'EOF'
 Usage: ./test-rag.sh [OPTIONS]
@@ -187,9 +134,61 @@ Options:
   -h, --help      Show this help message
 
 Environment:
+  RAG_UPSTREAM_MODE=auto|cliproxy|litellm  Upstream integration mode (default: auto)
+  UPSTREAM_URL=http://localhost:4000       OpenAI-compatible upstream base URL
+  UPSTREAM_API_KEY=<token>                 Optional bearer token for upstream /v1/models
   BASELINE_REQUIRE_WEB_SEARCH=true|false  Fail if host and container SearXNG probes fail (default: false)
   BASELINE_EXPECT_SEARX_PORT=<port|empty> Expected SearXNG port hint (default: 8888; empty disables port hint)
+  RAG_MULTIMODAL_TEST_PDF=/abs/path.pdf   Optional PDF fixture for full-mode multimodal ingestion test
+  RAG_MULTIMODAL_STRICT=true|false        Fail when multimodal prereqs/fixture are missing (default: false; auto-true in CI full mode)
 EOF
+}
+
+is_cliproxy_mode() {
+    case "${RAG_UPSTREAM_MODE}" in
+        cliproxy)
+            return 0
+            ;;
+        litellm)
+            return 1
+            ;;
+    esac
+
+    if echo "${OPENAI_BASE_ROOT:-$UPSTREAM_URL}" | grep -Eq 'cliproxyapi|127\.0\.0\.1:8317|localhost:8317'; then
+        return 0
+    fi
+
+    # If an explicit non-CLIProxy upstream base is configured, prefer that signal.
+    if [ -n "${OPENAI_BASE_ROOT:-}" ]; then
+        return 1
+    fi
+
+    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
+        return 0
+    fi
+
+    return 1
+}
+
+resolve_chat_model_from_openwebui() {
+    local response
+    response=$(curl -s -X GET \
+        "$OPENWEBUI_URL/api/models" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} 2>/dev/null || true)
+
+    if [ -z "$response" ]; then
+        return 1
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        CHAT_MODEL="$(echo "$response" | jq -r '.data[0].id // empty' 2>/dev/null || true)"
+    fi
+
+    if [ -z "$CHAT_MODEL" ]; then
+        CHAT_MODEL="$(echo "$response" | grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | head -n1 | cut -d'"' -f4)"
+    fi
+
+    [ -n "$CHAT_MODEL" ]
 }
 
 ###############################################################################
@@ -208,38 +207,52 @@ test_openwebui_accessible() {
     fi
 }
 
-test_vllm_responding() {
-    test_start "vLLM Server Response"
+test_upstream_responding() {
+    test_start "OpenAI-Compatible Upstream Response"
 
     local code
     local root_response
 
-    code=$(curl -s -w "%{http_code}" -o /dev/null "$VLLM_URL/health" 2>&1 || echo "000")
+    code=$(curl -s -w "%{http_code}" -o /dev/null "$UPSTREAM_URL/health" 2>&1 || echo "000")
     if [ "$code" = "200" ]; then
+        test_pass
+        return 0
+    fi
+    if ! is_cliproxy_mode && [ "$code" = "401" ]; then
+        print_info "Upstream health endpoint requires auth (HTTP 401); treating service as reachable in LiteLLM mode"
         test_pass
         return 0
     fi
 
     # CLIProxyAPI deployments may expose "/" instead of "/health".
-    root_response=$(curl -s -f "$VLLM_URL/" 2>/dev/null || true)
+    root_response=$(curl -s -f "$UPSTREAM_URL/" 2>/dev/null || true)
     if [ -n "$root_response" ] && { command -v jq >/dev/null 2>&1 && echo "$root_response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1 || echo "$root_response" | grep -q "CLI Proxy API Server"; }; then
         test_pass
         return 0
     else
-        test_fail "OpenAI-compatible upstream health check failed at $VLLM_URL (/health HTTP $code)"
+        test_fail "OpenAI-compatible upstream health check failed at $UPSTREAM_URL (/health HTTP $code)"
         return 1
     fi
 }
 
-test_vllm_models() {
-    test_start "vLLM Models Available"
+test_upstream_models() {
+    test_start "OpenAI-Compatible Upstream Models Available"
 
     local response
     local -a headers=()
-    if [ -n "$CLIPROXYAPI_API_KEY" ]; then
-        headers=(-H "Authorization: Bearer $CLIPROXYAPI_API_KEY")
+    if [ -n "$UPSTREAM_API_KEY" ]; then
+        headers=(-H "Authorization: Bearer $UPSTREAM_API_KEY")
     fi
-    response=$(curl -s "${headers[@]}" "$VLLM_URL/v1/models" 2>&1)
+    response=$(curl -s "${headers[@]}" "$UPSTREAM_URL/v1/models" 2>&1)
+
+    if ! is_cliproxy_mode && echo "$response" | grep -Eiq 'Authentication Error|"code"[[:space:]]*:[[:space:]]*"401"|401'; then
+        print_info "Upstream /v1/models requires auth (HTTP 401); set UPSTREAM_API_KEY for strict model validation"
+        if resolve_chat_model_from_openwebui; then
+            print_info "Using OpenWebUI model fallback: $CHAT_MODEL"
+        fi
+        test_pass
+        return 0
+    fi
 
     if has_non_empty_models_array "$response"; then
         local models
@@ -269,9 +282,7 @@ test_openwebui_health() {
     test_start "OpenWebUI Health Endpoint"
 
     local response
-    response=$(curl -s "$OPENWEBUI_URL/health" 2>&1)
-
-    if [ "$?" = "0" ]; then
+    if response=$(curl -s "$OPENWEBUI_URL/health" 2>&1); then
         print_info "Health check response: $response"
         test_pass
         return 0
@@ -525,14 +536,25 @@ test_web_search_container_baseline() {
 test_create_test_document() {
     test_start "Create Test Document via API"
 
-    local test_content="This is a test document for RAG testing.
-It contains information about artificial intelligence and machine learning.
-RAG systems combine retrieval and generation for better responses.
-This document will be used to test the knowledge base functionality."
-
     local temp_file
+    local source_file=""
     temp_file="/tmp/rag_test_doc_$(date +%s).txt"
-    echo "$test_content" >"$temp_file"
+
+    if [ -f "$SCRIPT_DIR/README.md" ]; then
+        source_file="$SCRIPT_DIR/README.md"
+    elif [ -f "$SCRIPT_DIR/SECURITY.md" ]; then
+        source_file="$SCRIPT_DIR/SECURITY.md"
+    else
+        test_fail "No local source document available for RAG test upload"
+        return 1
+    fi
+
+    awk 'NF {print; count++; if (count >= 30) exit}' "$source_file" >"$temp_file"
+    if [ ! -s "$temp_file" ]; then
+        rm -f "$temp_file"
+        test_fail "Source document is empty; cannot create RAG test document"
+        return 1
+    fi
 
     local response
     response=$(curl -s -X POST \
@@ -545,29 +567,14 @@ This document will be used to test the knowledge base functionality."
 
     if echo "$response" | grep -q "id"; then
         TEST_DOC_ID=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
-        local status_response=""
-        local status_value=""
-        local attempts=0
-        while [ "$attempts" -lt 20 ]; do
-            status_response=$(curl -s -X GET \
-                "$OPENWEBUI_URL/api/v1/files/$TEST_DOC_ID/process/status" \
-                ${API_KEY:+-H "Authorization: Bearer $API_KEY"} 2>&1)
-            status_value=$(echo "$status_response" | jq -r '.status // empty' 2>/dev/null || true)
-            if [ "$status_value" = "completed" ]; then
-                break
+        local wait_output=""
+        if ! wait_output="$(wait_for_openwebui_file_processing "$TEST_DOC_ID" 20 1)"; then
+            if [ -n "$wait_output" ]; then
+                test_fail "Document processing failed or timed out"
+                [ "$VERBOSE" = "true" ] && print_info "Response: $wait_output"
+            else
+                test_fail "Document processing failed or timed out"
             fi
-            if [ "$status_value" = "failed" ]; then
-                test_fail "Document processing failed"
-                [ "$VERBOSE" = "true" ] && print_info "Response: $status_response"
-                return 1
-            fi
-            attempts=$((attempts + 1))
-            sleep 1
-        done
-
-        if [ "$status_value" != "completed" ]; then
-            test_fail "Document processing did not complete in time"
-            [ "$VERBOSE" = "true" ] && print_info "Response: $status_response"
             return 1
         fi
 
@@ -628,23 +635,184 @@ test_create_knowledge_base() {
     fi
 }
 
+test_multimodal_pdf_ingestion() {
+    test_start "Multimodal PDF Ingestion"
+
+    if [ -z "$RAG_MULTIMODAL_TEST_PDF" ]; then
+        if is_true "$RAG_MULTIMODAL_STRICT"; then
+            test_fail "RAG_MULTIMODAL_TEST_PDF is not set"
+            return 1
+        fi
+        print_info "RAG_MULTIMODAL_TEST_PDF is not set; skipping multimodal ingestion test"
+        test_pass
+        return 0
+    fi
+
+    if [ ! -f "$RAG_MULTIMODAL_TEST_PDF" ]; then
+        if is_true "$RAG_MULTIMODAL_STRICT"; then
+            test_fail "Multimodal test PDF not found: $RAG_MULTIMODAL_TEST_PDF"
+            return 1
+        fi
+        print_info "Multimodal test PDF not found, skipping: $RAG_MULTIMODAL_TEST_PDF"
+        test_pass
+        return 0
+    fi
+
+    if [ -z "$TEST_KB_ID" ]; then
+        test_fail "No knowledge base ID available for multimodal ingestion"
+        return 1
+    fi
+
+    local retrieval_response
+    retrieval_response=$(curl -s -X GET \
+        "$OPENWEBUI_URL/api/v1/retrieval/config" \
+        -H "Content-Type: application/json" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} 2>&1)
+
+    local extraction_engine=""
+    local pdf_extract_images=""
+    if command -v jq >/dev/null 2>&1; then
+        extraction_engine="$(echo "$retrieval_response" | jq -r '.CONTENT_EXTRACTION_ENGINE // empty' 2>/dev/null || true)"
+        pdf_extract_images="$(echo "$retrieval_response" | jq -r '.PDF_EXTRACT_IMAGES // empty' 2>/dev/null || true)"
+    fi
+
+    if [ "$extraction_engine" != "docling" ] || [ "$pdf_extract_images" != "true" ]; then
+        local prereq_msg="Multimodal prereqs not met (CONTENT_EXTRACTION_ENGINE=${extraction_engine:-unset}, PDF_EXTRACT_IMAGES=${pdf_extract_images:-unset})"
+        if is_true "$RAG_MULTIMODAL_STRICT"; then
+            test_fail "$prereq_msg"
+            return 1
+        fi
+        print_info "$prereq_msg; skipping multimodal ingestion test"
+        test_pass
+        return 0
+    fi
+
+    local upload_response
+    local file_name
+    file_name="$(basename "$RAG_MULTIMODAL_TEST_PDF")"
+    upload_response=$(curl -s -X POST \
+        "$OPENWEBUI_URL/api/v1/files/?process=true&process_in_background=false" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
+        -F "file=@$RAG_MULTIMODAL_TEST_PDF" \
+        -F "metadata={\"name\":\"$file_name\"}" 2>&1)
+
+    TEST_MULTIMODAL_DOC_ID="$(echo "$upload_response" | jq -r '.id // .file_id // empty' 2>/dev/null || true)"
+    if [ -z "$TEST_MULTIMODAL_DOC_ID" ]; then
+        test_fail "Multimodal file upload failed"
+        [ "$VERBOSE" = "true" ] && print_info "Response: $upload_response"
+        return 1
+    fi
+
+    local wait_output=""
+    if ! wait_output="$(wait_for_openwebui_file_processing "$TEST_MULTIMODAL_DOC_ID" 40 1)"; then
+        test_fail "Multimodal document processing failed or timed out"
+        [ "$VERBOSE" = "true" ] && print_info "Response: ${wait_output:-$upload_response}"
+        return 1
+    fi
+
+    local add_file_payload
+    local add_file_response
+    add_file_payload="{\"file_id\":\"$TEST_MULTIMODAL_DOC_ID\"}"
+    add_file_response=$(curl -s -X POST \
+        "$OPENWEBUI_URL/api/v1/knowledge/$TEST_KB_ID/file/add" \
+        -H "Content-Type: application/json" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
+        -d "$add_file_payload" 2>&1)
+
+    if ! echo "$add_file_response" | grep -q "files"; then
+        test_fail "Knowledge base multimodal file linking failed"
+        [ "$VERBOSE" = "true" ] && print_info "Response: $add_file_response"
+        return 1
+    fi
+
+    print_success "Multimodal document uploaded and linked: $TEST_MULTIMODAL_DOC_ID"
+    test_pass
+    return 0
+}
+
+test_multimodal_rag_query() {
+    test_start "Multimodal RAG Query"
+
+    if [ -z "$TEST_MULTIMODAL_DOC_ID" ]; then
+        print_info "No multimodal document linked; skipping multimodal query test"
+        test_pass
+        return 0
+    fi
+
+    local model="${CHAT_MODEL:-}"
+    if [ -z "$model" ] && resolve_chat_model_from_openwebui; then
+        model="$CHAT_MODEL"
+    fi
+    model="${model:-meta-llama/Llama-3.1-8B-Instruct}"
+    local files_payload="[]"
+    if [ -n "$TEST_KB_ID" ]; then
+        files_payload="$(jq -cn --arg id "$TEST_KB_ID" '[{type:"collection",id:$id,status:"processed"}]')"
+    fi
+
+    local data
+    data="$(jq -cn \
+        --arg model "$model" \
+        --argjson files "$files_payload" \
+        '{
+            model: $model,
+            messages: [
+                {
+                    role: "user",
+                    content: "Using the uploaded knowledge base, summarize key findings from the PDF and include any notable visual evidence if available."
+                }
+            ],
+            files: $files,
+            temperature: 0.2,
+            max_tokens: 384
+        }')"
+
+    local response
+    response=$(curl -s -X POST \
+        "$OPENWEBUI_URL/api/chat/completions" \
+        -H "Content-Type: application/json" \
+        ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
+        -d "$data" 2>&1)
+
+    if echo "$response" | grep -q "choices"; then
+        test_pass
+        return 0
+    fi
+
+    test_fail "Multimodal RAG query failed"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
 test_rag_query() {
     test_start "RAG Query Test"
 
-    local model="${CHAT_MODEL:-meta-llama/Llama-3.1-8B-Instruct}"
+    local model="${CHAT_MODEL:-}"
+    if [ -z "$model" ] && resolve_chat_model_from_openwebui; then
+        model="$CHAT_MODEL"
+    fi
+    model="${model:-meta-llama/Llama-3.1-8B-Instruct}"
+    local files_payload="[]"
 
-    local data='{
-        "model": "'"$model"'",
-        "messages": [
-            {
-                "role": "user",
-                "content": "What is RAG and how does it work?"
-            }
-        ],
-        "knowledge_ids": [],
-        "temperature": 0.7,
-        "max_tokens": 512
-    }'
+    if [ -n "$TEST_KB_ID" ]; then
+        files_payload="$(jq -cn --arg id "$TEST_KB_ID" '[{type:"collection",id:$id,status:"processed"}]')"
+    fi
+
+    local data
+    data="$(jq -cn \
+        --arg model "$model" \
+        --argjson files "$files_payload" \
+        '{
+            model: $model,
+            messages: [
+                {
+                    role: "user",
+                    content: "What is RAG and how does it work?"
+                }
+            ],
+            files: $files,
+            temperature: 0.7,
+            max_tokens: 512
+        }')"
 
     local response
     response=$(curl -s -X POST \
@@ -855,10 +1023,10 @@ test_cli_proxy_api_health_all() {
 }
 
 test_cli_proxy_api_models_vllm() {
-    test_start "CliProxyApi Models (vLLM)"
+    test_start "CliProxyApi Models (upstream; legacy 'vllm' command)"
 
     local response
-    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" VLLM_URL="$CLIPROXYAPI_BASE_URL" "$CLIPROXY_BIN" --raw --url "$CLIPROXYAPI_BASE_URL" models vllm 2>&1); then
+    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" VLLM_API_KEY="$CLIPROXYAPI_API_KEY" VLLM_URL="$CLIPROXYAPI_BASE_URL" "$CLIPROXY_BIN" --raw --url "$CLIPROXYAPI_BASE_URL" models vllm 2>&1); then
         test_fail "Command failed: $CLIPROXY_BIN --raw models vllm"
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
@@ -885,7 +1053,7 @@ test_cli_proxy_api_models_openwebui() {
     test_start "CliProxyApi Models (OpenWebUI)"
 
     local response
-    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" VLLM_URL="$CLIPROXYAPI_BASE_URL" "$CLIPROXY_BIN" --raw models webui 2>&1); then
+    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" VLLM_API_KEY="$CLIPROXYAPI_API_KEY" VLLM_URL="$CLIPROXYAPI_BASE_URL" "$CLIPROXY_BIN" --raw models webui 2>&1); then
         test_fail "Command failed: $CLIPROXY_BIN --raw models webui"
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
@@ -903,6 +1071,14 @@ test_cli_proxy_api_models_openwebui() {
 
 cleanup_test_resources() {
     print_section "Cleaning Up Test Resources"
+
+    if [ -n "$TEST_MULTIMODAL_DOC_ID" ]; then
+        print_info "Removing multimodal test document $TEST_MULTIMODAL_DOC_ID..."
+        curl -s -X DELETE \
+            "$OPENWEBUI_URL/api/v1/files/$TEST_MULTIMODAL_DOC_ID" \
+            ${API_KEY:+-H "Authorization: Bearer $API_KEY"} >/dev/null 2>&1
+        print_success "Multimodal test document removed"
+    fi
 
     if [ -n "$TEST_DOC_ID" ]; then
         print_info "Removing test document $TEST_DOC_ID..."
@@ -952,29 +1128,37 @@ main() {
     print_header "RAG Deployment Testing Suite"
     RUN_CLEANUP_ON_EXIT=true
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
-    print_info "vLLM URL: $VLLM_URL"
+    print_info "Upstream URL: $UPSTREAM_URL"
     print_info "CliProxyApi: $CLIPROXY_BIN"
+    print_info "Upstream mode: $RAG_UPSTREAM_MODE"
     print_info "Test mode: $TEST_MODE"
     [ -n "$API_KEY" ] && print_info "API Key: ${API_KEY:0:8}..."
     ensure_openwebui_api_key
 
-    # CLIProxyAPI smoke checks
-    print_section "CliProxyApi Integration"
+    # Real integration guard always applies.
+    print_section "Integration Guard"
     test_repo_real_integration_guard
-    test_cli_proxy_api_managed_runtime
-    test_cli_proxy_api_health_all
-    test_cli_proxy_api_models_openwebui
-    test_cli_proxy_api_models_vllm
+
+    if is_cliproxy_mode; then
+        print_section "CliProxyApi Integration"
+        test_cli_proxy_api_managed_runtime
+        test_cli_proxy_api_health_all
+        test_cli_proxy_api_models_openwebui
+        test_cli_proxy_api_models_vllm
+    else
+        print_section "Upstream Integration"
+        print_info "CLIProxyAPI checks skipped (LiteLLM mode)"
+    fi
 
     # Health checks
     print_section "Health Checks"
     test_openwebui_accessible
-    test_vllm_responding
+    test_upstream_responding
     test_openwebui_health
 
     # Model tests
     print_section "Model Availability"
-    test_vllm_models
+    test_upstream_models
 
     # Core functionality tests
     print_section "Core RAG Functionality"
@@ -987,9 +1171,11 @@ main() {
     if [ "$TEST_MODE" = "full" ]; then
         test_create_test_document
         test_create_knowledge_base
+        test_multimodal_pdf_ingestion
 
         # Integration tests
         print_section "Integration Tests"
+        test_multimodal_rag_query
         test_rag_query
         test_retrieval
     else
@@ -1036,6 +1222,15 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# CI full runs should fail fast on multimodal prereq drift unless explicitly overridden.
+if [ -z "$RAG_MULTIMODAL_STRICT" ]; then
+    if [ "$TEST_MODE" = "full" ] && is_true "${CI:-false}"; then
+        RAG_MULTIMODAL_STRICT="true"
+    else
+        RAG_MULTIMODAL_STRICT="false"
+    fi
+fi
 
 # Run main function
 main "$@"

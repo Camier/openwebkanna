@@ -3,6 +3,25 @@
 # Version: 1.0.0
 
 # =============================================================================
+# IMAGE PREFILTER (Pre-OCSR Gate)
+# =============================================================================
+# Purpose: Skip obvious non-chemical figures before expensive OCSR fallback.
+
+image_prefilter:
+  enabled: true
+  min_width: 200
+  min_height: 150
+  max_aspect_ratio: 5.0
+  dark_threshold: 48
+  min_dark_pixel_ratio: 0.003
+  max_dark_pixel_ratio: 0.35
+  edge_threshold: 32
+  min_edge_pixel_ratio: 0.005
+  max_edge_pixel_ratio: 0.45
+  min_entropy: 0.2
+  max_entropy: 7.8
+
+# =============================================================================
 # LEVEL 1: SYNTAX VALIDATION (Indigo Toolkit)
 # =============================================================================
 # Purpose: Ensure SMILES is parsable and chemically valid
@@ -33,6 +52,18 @@ level_1_syntax:
   # Canonicalization settings
   canonicalize: true
   preserve_stereochemistry: true  # Critical for natural products
+
+  # Indigo runtime policy
+  # timeout_ms=0 means no hard timeout; set >0 to enforce parser timeout.
+  runtime_options:
+    timeout_ms: 0
+    reset_options_each_call: false
+
+  # Optional raw Indigo setOption map for advanced tuning.
+  # Example:
+  # set_options:
+  #   ignore-stereochemistry-errors: true
+  set_options: {}
 
   # Output
   return_canonical_smiles: true
@@ -192,7 +223,9 @@ confidence_scoring:
   # Bonuses (additive, max total 100)
   bonuses:
     exact_gold_standard_match: 20
+    similar_gold_standard_match: 10
     scaffold_match: 10
+    cross_backend_agreement: 5
     stereochemistry_present: 5
     methoxy_groups_present: 5
     mw_in_expected_range: 5
@@ -211,6 +244,10 @@ confidence_scoring:
     multiple_fragments: -10  # 2-5 fragments
     borderline_mw: -5  # MW at edge of range
     no_stereochemistry: -5  # For known chiral scaffold
+    wildcards_present: -5
+
+  # Margin around the expected MW window considered borderline.
+  borderline_mw_margin: 10.0
 
   # Thresholds
   thresholds:

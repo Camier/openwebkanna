@@ -53,10 +53,10 @@
 
 ### PR 1: Archive vLLM Scripts (High Priority)
 
-**Rationale:** vLLM is deprecated in favor of CLIProxyAPI. Scripts already in `archive/` but need to:
+**Rationale:** vLLM remains an optional fallback and is de-emphasized in favor of LiteLLM-first operations. Scripts already in `archive/` but need to:
 1. Remove active references from working scripts
 2. Document deprecation clearly
-3. Update README to reflect CLIProxyAPI-first
+3. Update README to reflect LiteLLM-first
 
 **Changes:**
 ```
@@ -73,7 +73,7 @@ Files moved:
 
 **Behavior preserved:**
 - vLLM still functional if manually enabled
-- Scripts don't break, just skip vLLM when CLIProxyAPI is active
+- Scripts don't break, just keep vLLM optional and non-default
 
 ---
 
@@ -147,45 +147,35 @@ mv prod_max_multimodal/ data/processing/prod_max_multimodal/
 
 ### PR 4: Configuration Consolidation (Medium Priority)
 
-**Rationale:** `.env.example` shows LiteLLM as primary (lines 87-98) but repo uses CLIProxyAPI. Create confusion.
+**Rationale:** Keep `.env.example` and docs consistently LiteLLM-first, with CLIProxyAPI explicitly marked legacy/optional.
 
 **Changes:**
 ```bash
-# .env.example - Reorder sections
-# Move CLIProxyAPI section BEFORE LiteLLM
-# Add deprecation warning to LiteLLM section
+# .env.example - Keep section order aligned with runtime defaults
+# Keep LiteLLM section as primary OpenAI-compatible upstream
+# Keep CLIProxyAPI section as legacy/optional sidecar
 
-# Current order (lines ~87-124):
+# Current order (target):
 # 1. Authentication
 # 2. Jupyter
 # 3. Ollama
-# 4. LiteLLM Proxy ← should move down
-# 5. CLIProxyAPI ← should move up
+# 4. LiteLLM Proxy (PRIMARY)
+# 5. CLIProxyAPI (LEGACY OPTIONAL SIDECAR)
 # 6. MCPO
 # 7. RAG
-
-# New order:
-# 1. Authentication
-# 2. Jupyter
-# 3. Ollama
-# 4. CLIProxyAPI (PRIMARY) ← moved up
-# 5. MCPO
-# 6. RAG
-# 7. LiteLLM Proxy (DEPRECATED) ← moved down with warning
-# 8. Advanced Settings
 ```
 
-**Add deprecation notice:**
+**Add legacy-sidecar notice:**
 ```bash
-# .env.example - line 86 (before LiteLLM section)
+# .env.example - before CLIProxyAPI section
 # ==============================================================================
-# DEPRECATED: LiteLLM Proxy
+# LEGACY OPTIONAL: CLIProxyAPI Sidecar
 # ==============================================================================
-# LiteLLM was the original upstream proxy. CLIProxyAPI now handles OAuth routing.
-# Keep these settings only if you run LiteLLM alongside CLIProxyAPI.
-# For CLIProxyAPI-only deployments, these are ignored.
+# LiteLLM is the reference upstream in this repository.
+# CLIProxyAPI remains available only for legacy OAuth alias workflows.
+# Keep these settings disabled unless you explicitly enable sidecar routing.
 #
-# Migration: Set OPENAI_API_BASE_URL=http://cliproxyapi:8317/v1 instead
+# Migration: keep OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 # ==============================================================================
 ```
 
@@ -218,6 +208,7 @@ cat > OPERATIONS.md << 'EOF'
 ### Check Status
 ```bash
 ./status.sh
+# Optional legacy sidecar check:
 ./check-cliproxyapi.sh
 ```
 
@@ -231,6 +222,7 @@ docker compose logs -f       # Follow mode
 ### Restart Services
 ```bash
 docker compose restart openwebui
+# Optional legacy sidecar restart:
 ./restart-cliproxyapi.sh
 ```
 

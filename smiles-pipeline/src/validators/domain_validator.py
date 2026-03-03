@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs, Descriptors
 import json
+import os
 from pathlib import Path
 
 
@@ -26,25 +27,88 @@ class DomainValidator:
     3. Gold standard authenticated alkaloids
     """
 
-    def __init__(self, gold_standards_file: str = None):
+    def __init__(
+        self,
+        gold_standards_file: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ):
         """
         Initialize domain validator.
 
         Args:
             gold_standards_file: Path to gold_standards.json
         """
-        self.gold_standards = self._load_gold_standards(gold_standards_file)
+        self.config = config or {}
+        self.gold_standards_path = self._resolve_gold_standards_path(
+            gold_standards_file
+        )
+        self.gold_standards = self._load_gold_standards(self.gold_standards_path)
+        self._domain_thresholds = self._build_domain_thresholds()
 
-    def _load_gold_standards(self, filepath: str) -> List[Dict[str, Any]]:
+    def _build_domain_thresholds(self) -> Dict[str, Any]:
+        """Build domain thresholds from config with stable defaults."""
+        classification = self.config.get("classification", {})
+        sceletium_cfg = self.config.get("sceletium_alkaloids", {})
+        mw_cfg = sceletium_cfg.get("expected_mw_range", {})
+        methoxy_cfg = sceletium_cfg.get("methoxy_groups", {})
+        comparison_cfg = self.config.get("gold_standard_comparison", {})
+        return {
+            "nitrogen_min_count": classification.get("nitrogen_min_count", 1),
+            "nitrogen_rejection_reason": classification.get(
+                "nitrogen_rejection_reason", "no_nitrogen_not_alkaloid"
+            ),
+            "require_nitrogen_for_alkaloids": classification.get(
+                "require_nitrogen_for_alkaloids", True
+            ),
+            "mw_min": mw_cfg.get("min", 250),
+            "mw_max": mw_cfg.get("max", 400),
+            "methoxy_require_presence": methoxy_cfg.get("require_presence", False),
+            "methoxy_min_count": methoxy_cfg.get("min_count", 2),
+            "similarity_threshold": comparison_cfg.get("similarity_threshold", 0.7),
+        }
+
+    def _resolve_gold_standards_path(self, filepath: Optional[str]) -> Path:
+        """
+        Resolve gold standard file location with explicit precedence.
+
+        Precedence:
+        1. Explicit constructor argument
+        2. SMILES_GOLD_STANDARDS_FILE environment variable
+        3. Canonical repo path (smiles-pipeline/config/gold_standards.json)
+        4. Compatibility fallbacks
+        """
+        if filepath:
+            return Path(filepath).expanduser()
+
+        env_path = os.getenv("SMILES_GOLD_STANDARDS_FILE")
+        if env_path:
+            return Path(env_path).expanduser()
+
+        current_file = Path(__file__).resolve()
+        candidates = [
+            # Canonical path in this repository layout
+            current_file.parents[2] / "config" / "gold_standards.json",
+            # Backward-compatible fallback used in earlier drafts
+            current_file.parent.parent / "config" / "gold_standards.json",
+            # CWD-based fallbacks for direct script execution contexts
+            Path.cwd() / "smiles-pipeline" / "config" / "gold_standards.json",
+            Path.cwd() / "config" / "gold_standards.json",
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        # Fall back to canonical path even when missing, so errors reference one SSOT.
+        return candidates[0]
+
+    def _load_gold_standards(self, filepath: Path) -> List[Dict[str, Any]]:
         """Load gold standard reference molecules."""
-        if filepath is None:
-            filepath = Path(__file__).parent.parent / "config" / "gold_standards.json"
-
         try:
             with open(filepath) as f:
                 data = json.load(f)
                 return data.get("gold_standards", [])
-        except FileNotFoundError:
+        except (FileNotFoundError, json.JSONDecodeError):
             return []
 
     def validate(self, smiles: str, canonical_smiles: str = None) -> Dict[str, Any]:
@@ -64,6 +128,7 @@ class DomainValidator:
             "warnings": [],
             "gold_standard_matches": [],
             "matches_sceletium_scaffold": False,
+            "rejection_reason": None,
         }
 
         mol = Chem.MolFromSmiles(canonical_smiles or smiles)
@@ -74,6 +139,10 @@ class DomainValidator:
         # Check alkaloid requirements
         alkaloid_result = self._check_alkaloid(mol)
         result["compound_class"] = alkaloid_result["compound_class"]
+        if not alkaloid_result.get("is_alkaloid", True):
+            result["is_valid"] = False
+            result["rejection_reason"] = alkaloid_result.get("rejection_reason")
+            return result
 
         # Check Sceletium-specific features
         sceletium_result = self._check_sceletium_features(mol)
@@ -82,6 +151,7 @@ class DomainValidator:
             "matches_sceletium_scaffold"
         ]
         result["methoxy_count"] = sceletium_result["methoxy_count"]
+        result["mw_in_range"] = sceletium_result.get("mw_in_range", False)
 
         # Compare to gold standards
         matches = self._compare_to_gold_standards(mol)
@@ -99,10 +169,16 @@ class DomainValidator:
 
         nitrogen_count = sum(1 for atom in mol.GetAtoms() if atom.GetSymbol() == "N")
 
-        if nitrogen_count == 0:
+        if (
+            self._domain_thresholds.get("require_nitrogen_for_alkaloids", True)
+            and nitrogen_count < int(self._domain_thresholds["nitrogen_min_count"])
+        ):
             result["compound_class"] = "non_alkaloid"
             result["is_alkaloid"] = False
-            result["nitrogen_count"] = 0
+            result["nitrogen_count"] = nitrogen_count
+            result["rejection_reason"] = self._domain_thresholds.get(
+                "nitrogen_rejection_reason", "no_nitrogen_not_alkaloid"
+            )
         else:
             result["compound_class"] = "alkaloid"
             result["is_alkaloid"] = True
@@ -132,14 +208,17 @@ class DomainValidator:
             matches = mol.GetSubstructMatches(methoxy_pattern)
             result["methoxy_count"] = len(matches)
 
-            if len(matches) == 0:
+            if (
+                self._domain_thresholds["methoxy_require_presence"]
+                and len(matches) < int(self._domain_thresholds["methoxy_min_count"])
+            ):
                 result["warnings"].append("no_methoxy_groups")
-            elif len(matches) >= 2:
+            if len(matches) >= int(self._domain_thresholds["methoxy_min_count"]):
                 result["matches_sceletium_scaffold"] = True
 
         # Check MW range for mesembrine-type
         mw = Descriptors.MolWt(mol)
-        if 250 <= mw <= 400:
+        if self._domain_thresholds["mw_min"] <= mw <= self._domain_thresholds["mw_max"]:
             result["mw_in_range"] = True
         else:
             result["mw_in_range"] = False
@@ -168,7 +247,7 @@ class DomainValidator:
 
             similarity = DataStructs.TanimotoSimilarity(mol_fp, ref_fp)
 
-            if similarity >= 0.7:  # Threshold for "similar"
+            if similarity >= float(self._domain_thresholds["similarity_threshold"]):
                 results.append(
                     {
                         "id": ref["id"],
@@ -220,7 +299,10 @@ class DomainValidator:
 
 
 def validate_ethnopharmacology_domain(
-    smiles: str, canonical_smiles: str = None
+    smiles: str,
+    canonical_smiles: str = None,
+    gold_standards_file: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Convenience function for quick domain validation.
@@ -228,11 +310,15 @@ def validate_ethnopharmacology_domain(
     Args:
         smiles: SMILES string
         canonical_smiles: Pre-computed canonical SMILES
+        gold_standards_file: Optional path override for gold standards file
 
     Returns:
         Validation result dictionary
     """
-    validator = DomainValidator()
+    validator = DomainValidator(
+        gold_standards_file=gold_standards_file,
+        config=config,
+    )
     return validator.validate(smiles, canonical_smiles)
 
 

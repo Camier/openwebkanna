@@ -14,7 +14,6 @@ from typing import Dict, Any, List, Optional, Tuple
 from rdkit import Chem
 from rdkit.Chem import AllChem, MACCSkeys
 from rdkit import DataStructs
-import numpy as np
 
 
 class FingerprintGenerator:
@@ -40,7 +39,7 @@ class FingerprintGenerator:
             ecfp_radius: ECFP radius (2 = ECFP4, 3 = ECFP6)
             ecfp_nbits: Number of bits for ECFP
         """
-        self.fingerprint_types = fingerprint_types or ["ecfp4", "macces"]
+        self.fingerprint_types = fingerprint_types or ["ecfp4", "maccs"]
         self.ecfp_radius = ecfp_radius
         self.ecfp_nbits = ecfp_nbits
 
@@ -81,9 +80,9 @@ class FingerprintGenerator:
                     "radius": self.ecfp_radius,
                 }
 
-            elif fp_type.lower() == "macces":
+            elif fp_type.lower() in ("maccs", "macces"):
                 fp = self._generate_maccs(mol)
-                result["fingerprints"]["macces"] = {
+                result["fingerprints"]["maccs"] = {
                     "hex": self._fp_to_hex(fp),
                     "nbits": 167,  # MACCS is fixed at 167 bits (1-based)
                 }
@@ -105,9 +104,7 @@ class FingerprintGenerator:
 
     def _fp_to_hex(self, fp) -> str:
         """Convert RDKit fingerprint to hex string for storage."""
-        arr = np.zeros((1,), dtype=np.uint8)
-        DataStructs.ConvertToNumpyArray(fp, arr)
-        return arr.tobytes().hex()
+        return DataStructs.BitVectToBinaryText(fp).hex()
 
     def _hex_to_fp(
         self,
@@ -116,9 +113,7 @@ class FingerprintGenerator:
     ) -> "DataStructs.ExplicitBitVect":
         """Convert hex string back to RDKit fingerprint."""
         byte_data = bytes.fromhex(hex_str)
-        fp = DataStructs.ExplicitBitVect(nbits)
-        DataStructs.SetBitVectFromBinary(fp, byte_data)
-        return fp
+        return DataStructs.CreateFromBinaryText(byte_data)
 
     def calculate_similarity(
         self,
@@ -158,10 +153,8 @@ class FingerprintGenerator:
         if len(fp1) != len(fp2):
             raise ValueError(f"Fingerprint dimensions must match: {len(fp1)} vs {len(fp2)}")
 
-        # Convert to RDKit ExplicitBitVect
-        from rdkit.DataStructs import CreateFromBinaryText
-        fp1_bit = CreateFromBinaryText(bytes(fp1))
-        fp2_bit = CreateFromBinaryText(bytes(fp2))
+        fp1_bit = self._vector_to_bitvect(fp1)
+        fp2_bit = self._vector_to_bitvect(fp2)
         return DataStructs.TanimotoSimilarity(fp1_bit, fp2_bit)
 
     def dice_similarity(self, fp1: list[float], fp2: list[float]) -> float:
@@ -171,9 +164,8 @@ class FingerprintGenerator:
         if len(fp1) != len(fp2):
             raise ValueError(f"Fingerprint dimensions must match: {len(fp1)} vs {len(fp2)}")
 
-        from rdkit.DataStructs import CreateFromBinaryText
-        fp1_bit = CreateFromBinaryText(bytes(fp1))
-        fp2_bit = CreateFromBinaryText(bytes(fp2))
+        fp1_bit = self._vector_to_bitvect(fp1)
+        fp2_bit = self._vector_to_bitvect(fp2)
         return DataStructs.DiceSimilarity(fp1_bit, fp2_bit)
 
     def cosine_similarity(self, fp1: list[float], fp2: list[float]) -> float:
@@ -183,9 +175,8 @@ class FingerprintGenerator:
         if len(fp1) != len(fp2):
             raise ValueError(f"Fingerprint dimensions must match: {len(fp1)} vs {len(fp2)}")
 
-        from rdkit.DataStructs import CreateFromBinaryText
-        fp1_bit = CreateFromBinaryText(bytes(fp1))
-        fp2_bit = CreateFromBinaryText(bytes(fp2))
+        fp1_bit = self._vector_to_bitvect(fp1)
+        fp2_bit = self._vector_to_bitvect(fp2)
         return DataStructs.CosineSimilarity(fp1_bit, fp2_bit)
 
     def find_similar_molecules(
@@ -245,9 +236,7 @@ class FingerprintGenerator:
             raise ValueError(f"Invalid SMILES: {smiles}")
 
         fp = AllChem.GetMorganFingerprintAsBitVect(mol, self.ecfp_radius, nBits=self.ecfp_nbits)
-        arr = np.zeros((self.ecfp_nbits,), dtype=np.float32)
-        DataStructs.ConvertToNumpyArray(fp, arr)
-        return arr.tolist()
+        return [float(int(bit)) for bit in fp.ToBitString()]
 
     def maccs(self, smiles: str) -> List[float]:
         """Generate MACCS keys fingerprint as float vector (167-dim)."""
@@ -256,9 +245,12 @@ class FingerprintGenerator:
             raise ValueError(f"Invalid SMILES: {smiles}")
 
         fp = MACCSkeys.GenMACCSKeys(mol)
-        arr = np.zeros((167,), dtype=np.float32)
-        DataStructs.ConvertToNumpyArray(fp, arr)
-        return arr.tolist()
+        return [float(int(bit)) for bit in fp.ToBitString()]
+
+    def _vector_to_bitvect(self, fp: List[float]):
+        """Convert float/binary vector into RDKit ExplicitBitVect."""
+        bit_str = "".join("1" if float(bit) >= 0.5 else "0" for bit in fp)
+        return DataStructs.CreateFromBitString(bit_str)
 
 
 def generate_fingerprints(

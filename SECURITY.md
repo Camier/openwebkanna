@@ -1,6 +1,6 @@
 # Security Documentation
 
-Last updated: 2026-02-18 (UTC)
+Last updated: 2026-02-27 (UTC)
 
 ## Security Policy
 
@@ -78,10 +78,38 @@ When reporting, please provide:
 2. **HIGH**: Security review within 7 days
 3. **MEDIUM/LOW**: Document and schedule
 
+### CRITICAL Triage Label SOP
+
+This repository uses the `triaged` issue label for CRITICAL vulnerability governance in CI.
+
+When CRITICAL findings are detected:
+1. Ensure the automated security issue exists (label set includes `security`, `vulnerability`, `automated`).
+2. Perform initial risk assessment within 24 hours:
+   - Confirm affected image/component
+   - Check exploitability in our deployment context
+   - Identify patch, mitigation, or temporary acceptance path
+3. Add the `triaged` label only after the assessment is documented in the issue body/comments.
+
+Allowed reasons to apply `triaged`:
+- Patch identified and scheduled (with target date)
+- Mitigation applied and verified
+- Temporary risk acceptance approved with expiry date and owner
+
+When to remove `triaged`:
+- The issue has no owner, no target date, or no active mitigation
+- New scan evidence changes severity/scope and reassessment is required
+- Expiry date for temporary acceptance is reached
+
+Definition of done for CRITICAL issue closure:
+- Vulnerability remediated or explicitly accepted with documented approval
+- Validation scan rerun and linked in issue
+- Operational notes updated if behavior/process changed
+
 ## Update History
 
 | Date | Component | Action | Result |
 |------|-----------|--------|--------|
+| 2026-02-27 | SECURITY.md | Added CRITICAL triage label SOP | CI triage policy documented |
 | 2026-02-18 | CLIProxyAPI | v6.2.38 -> v6.8.18 | Resolved 2 CRITICAL CVEs |
 | 2026-02-18 | Jupyter | Updated to latest | Security hardening |
 | 2026-02-18 | SECURITY.md | Created | Baseline documentation |

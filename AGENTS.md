@@ -47,7 +47,7 @@ Deploy and manage a complete RAG (Retrieval-Augmented Generation) system for aca
 ```
 openwebui/
 ├── *.sh                         # 40+ operational scripts (deploy, test, manage)
-├── docker-compose.yml           # Container definitions (5 services)
+├── docker-compose.yml           # Container definitions (5 default + 1 legacy profile service)
 ├── docker-compose.rg.yml        # Alternative compose configuration
 ├── .env / .env.example          # Configuration (NEVER commit .env)
 ├── Dockerfile.openwebui-rg      # Custom OpenWebUI image build
@@ -119,16 +119,16 @@ Primary configuration file. Key variables:
 |----------|---------|---------|
 | `WEBUI_PORT` | `3000` | Web interface port |
 | `WEBUI_SECRET_KEY` | (required) | Session signing key (>=32 bytes) |
-| `OPENAI_API_BASE_URL` | `http://cliproxyapi:8317/v1` | CLIProxyAPI connection (Docker DNS) |
-| `OPENAI_API_KEY` | (required) | API key for CLIProxyAPI |
-| `CLIPROXYAPI_ENABLED` | `true` | Enable CLIProxyAPI |
+| `OPENAI_API_BASE_URL` | `http://host.docker.internal:4000/v1` | LiteLLM connection (host-gateway bridge) |
+| `OPENAI_API_KEY` | (required) | LiteLLM master key |
+| `CLIPROXYAPI_ENABLED` | `false` | Enable optional CLIProxyAPI sidecar |
 | `CLIPROXYAPI_DOCKER_MANAGED` | `true` | Docker-managed CLIProxyAPI |
 | `CLIPROXYAPI_IMAGE` | `eceasy/cli-proxy-api:v6.8.18` | CLIProxyAPI image |
 | `OPENWEBUI_IMAGE` | `ghcr.io/open-webui/open-webui:v0.8.3` | OpenWebUI image |
 | `RAG_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model |
-| `RAG_TOP_K` | `5` | Chunks to retrieve |
-| `CHUNK_SIZE` | `1500` | Text chunk size (chars) |
-| `CHUNK_OVERLAP` | `150` | Overlap between chunks |
+| `RAG_TOP_K` | `15` | Chunks to retrieve |
+| `CHUNK_SIZE` | `3000` | Text chunk size (chars) |
+| `CHUNK_OVERLAP` | `600` | Overlap between chunks |
 | `VECTOR_DB` | `chroma` | Vector store (chroma/pgvector) |
 | `PGVECTOR_DB_URL` | (auto) | PostgreSQL connection string |
 | `JUPYTER_TOKEN` | (required) | Jupyter authentication token |
@@ -136,13 +136,13 @@ Primary configuration file. Key variables:
 | `ENABLE_WEB_SEARCH` | `false` | Enable web search via SearXNG |
 
 ### `docker-compose.yml`
-Defines 5 services:
+Defines 6 services (5 started by default; `cliproxyapi` is profile-gated legacy sidecar):
 1. **postgres**: PostgreSQL 16 with pgvector extension
 2. **jupyter**: Jupyter notebook for code execution
-3. **cliproxyapi**: CLIProxyAPI OAuth proxy
-4. **mcpo**: MCP-to-OpenAPI proxy (v0.0.19)
-
+3. **mcpo**: MCP-to-OpenAPI proxy (v0.0.19)
+4. **docling**: Docling multimodal extraction service
 5. **openwebui**: OpenWebUI web interface
+6. **cliproxyapi**: CLIProxyAPI OAuth proxy (legacy profile `legacy-cliproxy`)
 ### `cliproxyapi/config.yaml`
 CLIProxyAPI configuration. Contains:
 - Server settings (host, port, TLS)
@@ -168,8 +168,10 @@ cp .env.example .env
 
 # 3. Check status
 ./status.sh
-./check-cliproxyapi.sh
 ```
+
+# Optional legacy sidecar check (only if CLIPROXYAPI_ENABLED=true)
+./check-cliproxyapi.sh
 
 ### Service Management
 
@@ -214,10 +216,12 @@ docker compose down          # Stop and remove containers
 ./test-rag.sh                           # End-to-end RAG flow test
 ./test-rag.sh --baseline                # Fast baseline RAG checks
 
-./test-cliproxyapi-oauth.sh             # OAuth alias validation
-./test-openwebui-cliproxy-routing.sh    # OpenWebUI-to-CLIProxyAPI E2E routing
 ./test-openwebui-tools-endpoints.sh     # Tool endpoint validation
 ./test-openwebui-tools-invocation.sh    # Tool execution verification
+
+# Optional legacy sidecar tests (only if CLIPROXYAPI_ENABLED=true)
+./test-cliproxyapi-oauth.sh             # OAuth alias validation
+./test-openwebui-cliproxy-routing.sh    # OpenWebUI-to-CLIProxyAPI E2E routing
 ```
 
 ### Baseline Validation Workflow
@@ -389,7 +393,8 @@ bash -n *.sh                    # Syntax check
 Check with: `lsof -nP -iTCP:PORT -sTCP:LISTEN`
 
 ### Docker DNS
-OpenWebUI must use `http://cliproxyapi:8317/v1` (Docker DNS), NOT `host.docker.internal`. Both containers must be on the same Docker network (`openwebui_network`).
+Default upstream is LiteLLM via `http://host.docker.internal:4000/v1`.
+If you intentionally enable CLIProxyAPI sidecar routing, use `http://cliproxyapi:8317/v1` and keep both containers on `openwebui_network`.
 
 ### OAuth Credentials
 CLIProxyAPI requires valid OAuth auth state in `cliproxyapi/auth/`. Manual OAuth setup is expected. If missing, run:

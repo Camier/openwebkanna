@@ -1,8 +1,9 @@
-# Troubleshooting: OpenWebUI + CLIProxyAPI (Auth, Models, RAG/Vector DB)
+# Troubleshooting: OpenWebUI + LiteLLM (Auth, Models, RAG/Vector DB)
 
 This repository runs:
 - OpenWebUI in Docker (`openwebui`)
-- CLIProxyAPI in Docker (`cliproxyapi`) as the OpenAI-compatible upstream
+- LiteLLM as the primary OpenAI-compatible upstream
+- Optional legacy CLIProxyAPI sidecar (`cliproxyapi`)
 - Optional host services (vLLM, SearXNG, PostgreSQL/pgvector)
 
 When something looks "gone" in the UI (models, settings), the most common root cause is auth/session drift, not data loss.
@@ -16,13 +17,22 @@ docker compose ps
 curl -fsS http://127.0.0.1:${WEBUI_PORT:-3000}/health >/dev/null && echo "openwebui health ok"
 ```
 
-2. CLIProxyAPI models reachable from host:
+2. LiteLLM models endpoint reachable from host (`200` or `401` are acceptable reachability signals):
 ```bash
-./check-cliproxyapi.sh
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  -H "Authorization: Bearer ${OPENAI_API_KEY:-}" \
+  "http://127.0.0.1:4000/v1/models"
 ```
 
-3. OpenWebUI can route to CLIProxyAPI (end-to-end):
+3. OpenWebUI baseline API route checks:
 ```bash
+./test-api.sh --baseline
+./test-rag.sh --baseline
+```
+
+Optional legacy sidecar route checks (only if `CLIPROXYAPI_ENABLED=true`):
+```bash
+./check-cliproxyapi.sh
 ./test-openwebui-cliproxy-routing.sh
 ```
 

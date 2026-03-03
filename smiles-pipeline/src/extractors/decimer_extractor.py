@@ -12,13 +12,14 @@ References:
 
 from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
+import re
 import numpy as np
 from PIL import Image
 
 
 class DECIMERExtractor:
     """
-    DECIMER 2.2-based optical chemical structure recognition.
+    DECIMER 2.x-based optical chemical structure recognition.
 
     Provides fallback extraction with ~91% F1 accuracy.
     Includes segmentation and classification components.
@@ -26,7 +27,7 @@ class DECIMERExtractor:
 
     def __init__(
         self,
-        model_version: str = "2.2",
+        model_version: str = "2.7",
         device: str = "cuda",
         confidence_threshold: float = 0.5,
         batch_size: int = 16,
@@ -36,7 +37,7 @@ class DECIMERExtractor:
         Initialize DECIMER extractor.
 
         Args:
-            model_version: DECIMER version ("2.2" supported)
+            model_version: DECIMER version metadata (2.7+ recommended)
             device: "cuda" or "cpu"
             confidence_threshold: Minimum confidence to accept
             batch_size: Batch size for inference (smaller than MolScribe)
@@ -65,10 +66,17 @@ class DECIMERExtractor:
 
     def load_models(self):
         """Load DECIMER model components."""
-        from decimer import predict_smiles
+        # DECIMER package naming/API differs by release line:
+        # - modern wheels: `DECIMER.predict_SMILES`
+        # - some older docs: `decimer.predict_smiles`
+        try:
+            from DECIMER import predict_SMILES  # type: ignore
 
-        # DECIMER 2.2 uses unified pipeline
-        self.predictor = predict_smiles
+            self.predictor = predict_SMILES
+        except Exception:
+            from decimer import predict_smiles  # type: ignore
+
+            self.predictor = predict_smiles
         self._loaded = True
 
     def is_loaded(self) -> bool:
@@ -107,6 +115,7 @@ class DECIMERExtractor:
                 return result
 
         try:
+            temp_image_path: Optional[str] = None
             # Load image if path
             if isinstance(image, (str, Path)):
                 image_path = str(image)
@@ -117,30 +126,73 @@ class DECIMERExtractor:
                 temp_img = Image.fromarray(image)
                 with NamedTemporaryFile(suffix=".png", delete=False) as f:
                     temp_img.save(f.name)
-                    image_path = f.name
+                    temp_image_path = f.name
+                    image_path = temp_image_path
             else:
                 # PIL Image
                 from tempfile import NamedTemporaryFile
 
                 with NamedTemporaryFile(suffix=".png", delete=False) as f:
                     image.save(f.name)
-                    image_path = f.name
+                    temp_image_path = f.name
+                    image_path = temp_image_path
+
+            predictor = self.predictor
+            if predictor is None:
+                result["error"] = "model_not_loaded"
+                return result
 
             # Run prediction
-            smiles = self.predictor(image_path)
+            prediction = predictor(image_path)
+            smiles, predictor_confidence = self._extract_smiles_and_confidence(
+                prediction
+            )
 
             if smiles:
                 result["smiles"] = smiles
                 result["success"] = True
-                # DECIMER doesn't provide confidence, estimate from structure
-                result["confidence"] = self._estimate_confidence(smiles)
+
+                # Keep DECIMER-reported confidence when available; otherwise use heuristics.
+                if predictor_confidence is None:
+                    result["confidence"] = self._estimate_confidence(smiles)
+                else:
+                    result["confidence"] = predictor_confidence
             else:
                 result["error"] = "no_structure_detected"
 
         except Exception as e:
             result["error"] = f"extraction_failed: {str(e)}"
+        finally:
+            if temp_image_path:
+                try:
+                    Path(temp_image_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
 
         return result
+
+    def _extract_smiles_and_confidence(self, prediction):
+        """Extract smiles and optional confidence from predictor output."""
+        smiles = None
+        confidence = None
+
+        if isinstance(prediction, str):
+            smiles = prediction
+        elif isinstance(prediction, dict):
+            smiles = prediction.get("smiles") or prediction.get("smiles_predicted")
+            confidence = prediction.get("confidence")
+        elif isinstance(prediction, (tuple, list)) and len(prediction) >= 2:
+            smiles = prediction[0]
+            if isinstance(prediction[1], (int, float)):
+                confidence = float(prediction[1])
+
+        if not isinstance(smiles, str):
+            smiles = None
+
+        if confidence is not None and not isinstance(confidence, (int, float)):
+            confidence = None
+
+        return smiles, confidence
 
     def _estimate_confidence(self, smiles: str) -> float:
         """
@@ -153,8 +205,12 @@ class DECIMERExtractor:
         """
         score = 0.5  # Base confidence
 
-        # Ring presence
-        if ">" in smiles or "1" in smiles:
+        # Reaction SMILES (contains '>') should not get ring-confidence boosts
+        # from numeric tokens that may appear around reactant/product sections.
+        is_reaction_smiles = ">" in smiles
+
+        # Ring presence (single-digit and %nn ring closures)
+        if not is_reaction_smiles and re.search(r"%\d{2}|[1-9]", smiles):
             score += 0.15
 
         # Stereochemistry
@@ -192,7 +248,7 @@ class DECIMERExtractor:
             "batch_size": self.batch_size,
             "loaded": self.is_loaded(),
             "license": "CC-BY-4.0",
-            "attribution": "DECIMER 2.2 by Kohulan Rajan et al. (Nature Communications 2023)",
+            "attribution": "DECIMER 2.x by Kohulan Rajan et al. (Nature Communications 2023)",
             "accuracy": {
                 "single_molecule_f1": 0.91,
                 "stereochemistry": 0.80,
@@ -242,6 +298,6 @@ if __name__ == "__main__":
 
     # Print attribution
     print("\n" + "=" * 60)
-    print("DECIMER 2.2 by Kohulan Rajan et al.")
+    print("DECIMER 2.x by Kohulan Rajan et al.")
     print("Nature Communications 2023")
     print("License: CC BY 4.0")

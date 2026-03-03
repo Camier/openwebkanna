@@ -1,12 +1,12 @@
-# OpenWebUI + CLIProxyAPI RAG Notes
+# OpenWebUI + LiteLLM RAG Notes
 
-Last updated: 2026-02-12 (UTC)
+Last updated: 2026-03-03 (UTC)
 
 ## Current architecture
 
 - OpenWebUI runs in Docker.
-- CLIProxyAPI runs in Docker.
-- OpenWebUI calls CLIProxyAPI via `http://cliproxyapi:8317/v1`.
+- LiteLLM is the reference upstream (`http://host.docker.internal:4000/v1`).
+- CLIProxyAPI is optional/deprecated as a primary upstream.
 - vLLM is optional fallback only.
 
 ## Critical commands
@@ -14,9 +14,8 @@ Last updated: 2026-02-12 (UTC)
 ```bash
 ./deploy.sh --no-logs
 ./status.sh
-./check-cliproxyapi.sh
-./test-openwebui-cliproxy-routing.sh
-./test-cliproxyapi-oauth.sh
+./test-rag.sh --baseline
+./test-api.sh --baseline
 ```
 
 ## OAuth aliases
@@ -28,6 +27,6 @@ Expected aliases exposed by `/v1/models`:
 
 ## Guardrails
 
-- Keep deployments CLIProxyAPI-first.
-- Avoid starting vLLM when CLIProxyAPI is healthy.
+- Keep deployments LiteLLM-first.
+- Keep CLIProxyAPI disabled unless a legacy sidecar workflow is required.
 - Use real integration checks (no mocks or bypass modes).

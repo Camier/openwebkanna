@@ -11,6 +11,8 @@
 #   - Output: smiles-pipeline/data/validated/
 
 set -e
+set -u
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
@@ -18,23 +20,23 @@ cd "$SCRIPT_DIR/.."
 # Default values
 INPUT_DIR="data/extractions"
 OUTPUT_DIR="smiles-pipeline/data/validated"
-LIMIT=""
-GPU_FLAG=""
+LIMIT_ARGS=()
+GPU_ARGS=()
 BACKEND_ORDER="molscribe,decimer"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --limit)
-            LIMIT="--limit $2"
+            LIMIT_ARGS=(--limit "$2")
             shift 2
             ;;
         --gpu)
-            GPU_FLAG="--gpu"
+            GPU_ARGS=(--gpu)
             shift
             ;;
         --no-gpu)
-            GPU_FLAG="--no-gpu"
+            GPU_ARGS=(--no-gpu)
             shift
             ;;
         --input-dir)
@@ -71,31 +73,54 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if conda environment exists
-if ! conda env list | grep -q "smiles-extraction"; then
-    echo "Creating conda environment..."
-    conda env create -f smiles-pipeline/envs/environment-smiles-extraction.yml
-fi
-
-# Activate environment
-source "$(conda info --base)"/etc/profile.d/conda.sh
-conda activate smiles-extraction
-
 # Run pipeline
 echo "Starting SMILES extraction pipeline..."
 echo "Input: $INPUT_DIR"
 echo "Output: $OUTPUT_DIR"
 echo "Backends: $BACKEND_ORDER"
-[ -n "$GPU_FLAG" ] && echo "GPU: enabled"
-[ -n "$LIMIT" ] && echo "Limit: $LIMIT"
+[ ${#GPU_ARGS[@]} -gt 0 ] && echo "GPU flag: ${GPU_ARGS[*]}"
+[ ${#LIMIT_ARGS[@]} -gt 0 ] && echo "Limit: ${LIMIT_ARGS[1]}"
 echo ""
 
-python smiles-pipeline/scripts/extract_smiles_pipeline.py \
-    --input-dir "$INPUT_DIR" \
-    --output-dir "$OUTPUT_DIR" \
-    --backend-order "$BACKEND_ORDER" \
-    $GPU_FLAG \
-    $LIMIT
+PY_CMD=(
+    python
+    smiles-pipeline/scripts/extract_smiles_pipeline.py
+    --input-dir "$INPUT_DIR"
+    --output-dir "$OUTPUT_DIR"
+    --backend-order "$BACKEND_ORDER"
+)
+if [ ${#GPU_ARGS[@]} -gt 0 ]; then
+    PY_CMD+=("${GPU_ARGS[@]}")
+fi
+if [ ${#LIMIT_ARGS[@]} -gt 0 ]; then
+    PY_CMD+=("${LIMIT_ARGS[@]}")
+fi
+
+# Guard runtime so extraction always runs in the dedicated smiles-extraction environment.
+if command -v micromamba >/dev/null 2>&1; then
+    if micromamba env list | awk '{print $1}' | grep -qx "smiles-extraction"; then
+        micromamba run -n smiles-extraction "${PY_CMD[@]}"
+    else
+        echo "ERROR: micromamba env 'smiles-extraction' not found."
+        echo "Create it with:"
+        echo "  micromamba env create -f smiles-pipeline/envs/environment-smiles-extraction.yml --yes"
+        exit 1
+    fi
+elif command -v conda >/dev/null 2>&1; then
+    source "$(conda info --base)"/etc/profile.d/conda.sh
+    if ! conda env list | awk '{print $1}' | grep -qx "smiles-extraction"; then
+        echo "ERROR: conda env 'smiles-extraction' not found."
+        echo "Create it with:"
+        echo "  conda env create -f smiles-pipeline/envs/environment-smiles-extraction.yml"
+        exit 1
+    fi
+    conda activate smiles-extraction
+    "${PY_CMD[@]}"
+else
+    echo "ERROR: Neither micromamba nor conda is available."
+    echo "Install micromamba (recommended) or conda, then create smiles-extraction env."
+    exit 1
+fi
 
 # Show results
 echo ""
@@ -107,8 +132,8 @@ if [ -f "$OUTPUT_DIR/molecules.jsonl" ]; then
     echo ""
     echo "Next steps:"
     echo "  1. Review: head -n 5 $OUTPUT_DIR/molecules.jsonl | jq"
-    echo "  2. Convert to KB: python smiles-pipeline/scripts/jsonl_to_markdown.py --input $OUTPUT_DIR/molecules.jsonl"
-    echo "  3. Import: ./smiles-pipeline/import-smiles-to-kb.sh --input-dir $OUTPUT_DIR"
+    echo "  2. Review manual queue: head -n 5 $OUTPUT_DIR/molecules_manual_review.jsonl | jq"
+    echo "  3. Import READY set: ./smiles-pipeline/import-smiles-to-kb.sh --source-root $OUTPUT_DIR --find-min-depth 1 --find-max-depth 1 --file-name molecules_high_confidence.jsonl"
 else
     echo "No molecules extracted. Check logs for errors."
 fi

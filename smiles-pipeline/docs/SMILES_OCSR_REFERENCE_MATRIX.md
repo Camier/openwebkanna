@@ -17,10 +17,10 @@ This matrix captures source-backed implementation references for image-to-SMILES
 
 ## Recommended default posture
 
-1. Keep `molscribe,decimer,vlm` backend order for production extraction.
+1. Keep `molscribe,decimer` backend order for production extraction.
 2. Continue RDKit canonicalization and strict high-confidence filtering before KB ingestion.
 3. Keep Indigo as optional interoperability support (format conversion/search adjunct), not a replacement for OCSR extraction backends.
-4. Run MolSight as an offline benchmark track only, then promote if it improves valid/high-confidence yield on local papers.
+4. Run MolSight/VLM as an offline benchmark track only, then promote only after runtime support is implemented and benchmark wins are reproduced locally.
 
 ## Validation references
 

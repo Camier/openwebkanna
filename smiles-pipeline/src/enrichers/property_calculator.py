@@ -99,7 +99,7 @@ class PropertyCalculator:
             "num_aliphatic_rings": self._count_aliphatic_rings(mol),
             # Structural features
             "fraction_sp3_carbons": rdMolDescriptors.CalcFractionCSP3(mol),
-            "num_stereocenters": rdMolDescriptors.CalcNumStereoCenters(mol),
+            "num_stereocenters": self._calc_num_stereocenters(mol),
             "num_double_bonds": self._count_double_bonds(mol),
             "num_triple_bonds": self._count_triple_bonds(mol),
             # Size/shape
@@ -193,6 +193,26 @@ class PropertyCalculator:
         return sum(
             1 for bond in mol.GetBonds() if bond.GetBondType() == Chem.BondType.DOUBLE
         )
+
+    def _calc_num_stereocenters(self, mol: Chem.Mol) -> int:
+        """
+        Count stereocenters with RDKit-version compatibility.
+
+        RDKit versions expose different helper names over time.
+        """
+        if hasattr(rdMolDescriptors, "CalcNumStereoCenters"):
+            return int(rdMolDescriptors.CalcNumStereoCenters(mol))
+        if hasattr(rdMolDescriptors, "CalcNumAtomStereoCenters"):
+            return int(rdMolDescriptors.CalcNumAtomStereoCenters(mol))
+        try:
+            centers = Chem.FindMolChiralCenters(
+                mol,
+                includeUnassigned=True,
+                useLegacyImplementation=False,
+            )
+            return len(centers)
+        except Exception:
+            return 0
 
     def _count_triple_bonds(self, mol: Chem.Mol) -> int:
         """Count triple bonds."""

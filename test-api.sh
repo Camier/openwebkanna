@@ -9,6 +9,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/init.sh"
+source "${SCRIPT_DIR}/lib/test-openwebui-helpers.sh"
 load_env_defaults
 cd "$SCRIPT_DIR"
 
@@ -25,17 +26,34 @@ resolve_openai_base_root() {
 
     candidate="${candidate%/}"
     candidate="${candidate%/v1}"
+    if [[ $candidate == *"://host.docker.internal"* ]] && [ ! -f "/.dockerenv" ]; then
+        candidate="$(printf "%s" "$candidate" | sed 's#://host.docker.internal#://localhost#')"
+    fi
     if [[ $candidate == *"://cliproxyapi"* ]]; then
         candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
     fi
     printf "%s" "$candidate"
 }
 
+should_run_cliproxy_smoke() {
+    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
+        return 0
+    fi
+
+    case "${OPENAI_BASE_ROOT:-${UPSTREAM_URL:-${VLLM_URL:-}}}" in
+        *cliproxyapi* | *127.0.0.1:8317* | *localhost:8317*)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
 CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
-VLLM_URL="${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}"
+UPSTREAM_URL="${UPSTREAM_URL:-${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}}"
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
 CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
@@ -63,50 +81,6 @@ SELECTED_MODEL=""
 
 print_endpoint() {
     echo -e "${CYAN}>> $1${NC}"
-}
-
-openwebui_signin() {
-    local output_file="$1"
-    local payload_file="$2"
-    local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
-
-    if command -v jq >/dev/null 2>&1; then
-        jq -n \
-            --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-            --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-            '{email: $email, password: $password}' >"$payload_file"
-    else
-        cat >"$payload_file" <<EOF
-{"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
-EOF
-    fi
-
-    curl -sS -m 45 -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" "$signin_url" -d @"$payload_file" 2>/dev/null || true
-}
-
-ensure_openwebui_api_key() {
-    if [ -n "$API_KEY" ]; then
-        return 0
-    fi
-    if ! is_true "$OPENWEBUI_AUTO_AUTH"; then
-        return 0
-    fi
-
-    local tmp_file payload_file signin_code token
-    tmp_file="$(mktemp)"
-    payload_file="$(mktemp)"
-
-    signin_code="$(openwebui_signin "$tmp_file" "$payload_file")"
-    if [ "$signin_code" = "200" ]; then
-        token="$(jq -r '.token // empty' "$tmp_file" 2>/dev/null || true)"
-        if [ -n "$token" ]; then
-            API_KEY="$token"
-            print_info "OpenWebUI bearer token acquired via signin"
-        fi
-    fi
-
-    rm -f "$tmp_file" "$payload_file"
 }
 
 test_start() {
@@ -139,26 +113,6 @@ save_response() {
         print_info "Response saved to $OUTPUT_DIR/${test_name}.json"
     fi
     return 0
-}
-
-has_non_empty_models_array() {
-    local response="$1"
-    local model_count
-
-    if [ -z "$response" ]; then
-        return 1
-    fi
-
-    if command -v jq >/dev/null 2>&1; then
-        echo "$response" | jq -e '.data and (.data | type == "array") and (.data | length > 0)' >/dev/null 2>&1
-        return $?
-    fi
-
-    model_count=$(echo "$response" | grep -Eo '"id"[[:space:]]*:[[:space:]]*"[^"]+"' | wc -l | tr -d '[:space:]')
-    if [[ $model_count =~ ^[0-9]+$ ]] && [ "$model_count" -gt 0 ]; then
-        return 0
-    fi
-    return 1
 }
 
 make_request() {
@@ -307,6 +261,7 @@ test_cli_proxy_api_smoke() {
     local response
     local cliproxy_base="${CLIPROXYAPI_BASE_URL%/}"
     local -a cliproxy_headers=()
+    local wrapper_upstream_api_key="${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}"
 
     if [ -n "$CLIPROXYAPI_API_KEY" ]; then
         cliproxy_headers=(-H "Authorization: Bearer $CLIPROXYAPI_API_KEY")
@@ -326,7 +281,7 @@ test_cli_proxy_api_smoke() {
     fi
 
     test_start "CliProxyApi Managed Health Check"
-    if response=$(CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false ./check-cliproxyapi.sh 2>&1); then
+    if response=$(CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false CLIPROXYAPI_API_KEY="$wrapper_upstream_api_key" ./check-cliproxyapi.sh 2>&1); then
         save_response "cliproxyapi_managed_health" "$response"
         if echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
             test_fail "check-cliproxyapi.sh reported disabled lifecycle; real runtime check did not run"
@@ -384,8 +339,8 @@ test_cli_proxy_api_smoke() {
         test_fail "Command failed: ./cli-proxy-api.sh --help"
     fi
 
-    test_start "CliProxyApi Wrapper URL Override (models vllm)"
-    if response=$(./cli-proxy-api.sh --raw --url "$cliproxy_base" models vllm 2>&1); then
+    test_start "CliProxyApi Wrapper URL Override (models upstream via legacy 'vllm' command)"
+    if response=$(VLLM_API_KEY="$wrapper_upstream_api_key" ./cli-proxy-api.sh --raw --url "$cliproxy_base" models vllm 2>&1); then
         save_response "cli_proxy_api_models_vllm_override" "$response"
         if has_non_empty_models_array "$response"; then
             test_pass
@@ -876,7 +831,7 @@ main() {
     RUN_CLEANUP_ON_EXIT=true
     ensure_openwebui_api_key
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
-    print_info "vLLM URL: $VLLM_URL"
+    print_info "Upstream URL: $UPSTREAM_URL"
     print_info "Test mode: $TEST_MODE"
     if [ -n "$API_KEY" ]; then
         print_info "API Key: ${API_KEY:0:8}..."
@@ -893,8 +848,13 @@ main() {
     test_api_key_validation
 
     # CliProxyApi Smoke
-    print_section "CliProxyApi Smoke"
-    test_cli_proxy_api_smoke
+    if should_run_cliproxy_smoke; then
+        print_section "CliProxyApi Smoke"
+        test_cli_proxy_api_smoke
+    else
+        print_section "CliProxyApi Smoke"
+        print_info "Skipping CLIProxyAPI smoke checks (LiteLLM/non-CLIProxy primary mode)"
+    fi
 
     # Models
     print_section "Models API"

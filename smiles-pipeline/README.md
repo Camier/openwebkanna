@@ -17,7 +17,7 @@ Production-grade molecular structure extraction from chemical structure images, 
 
 ## Overview
 
-This pipeline extracts SMILES (molecular structures) from academic PDFs using state-of-the-art OCSR (Optical Chemical Structure Recognition) tools, validates them through a 3-layer quality gate, and enriches them with physicochemical properties for RAG-based retrieval in OpenWebUI.
+This pipeline extracts SMILES (molecular structures) from academic PDFs using state-of-the-art OCSR (Optical Chemical Structure Recognition) tools, standardizes structures with RDKit MolStandardize, validates them through a 3-layer quality gate, and enriches them with physicochemical properties for RAG-based retrieval in OpenWebUI.
 
 ### Quick Start
 
@@ -65,6 +65,7 @@ micromamba run -n smiles-extraction python smiles-pipeline/scripts/extract_smile
 | **OCSR Extraction** | MolScribe | PyTorch + Swin Transformer | ✅ Working |
 | | DECIMER 2.7 | TensorFlow + ViT | ✅ Working |
 | **Level 1 Validation** | Indigo Validator | Indigo Toolkit | ✅ Working |
+| **Standardization** | Standardization Validator | RDKit MolStandardize | ✅ Working |
 | **Level 2 Validation** | Chemical Validator | RDKit | ✅ Working |
 | **Level 3 Validation** | Domain Validator | RDKit + Gold Standards | ✅ Working |
 | **Enrichment** | Property Calculator | RDKit | ✅ Working |
@@ -151,6 +152,13 @@ level_3_domain:
   min_sceletium_similarity: 0.7
 ```
 
+### Gold Standards Path
+
+Domain validation resolves `gold_standards.json` in this precedence order:
+1. `--gold-standards-file` CLI flag
+2. `SMILES_GOLD_STANDARDS_FILE` environment variable
+3. Default repository path: `smiles-pipeline/config/gold_standards.json`
+
 ### GPU Configuration
 
 ```bash
@@ -190,10 +198,18 @@ OpenWebUI Knowledge Base
   "id": "mol_000001",
   "smiles": "CN1CC[C@]2([C@@H]1CC(=O)CC2)C3=CC(=C(C=C3)OC)OC",
   "canonical_smiles": "CN1CC[C@]2([C@@H]1CC(=O)CC2)C3=CC(=C(C=C3)OC)OC",
+  "standardized_smiles": "CN1CC[C@]2([C@@H]1CC(=O)CC2)c1ccc(OC)c(OC)c1",
+  "standard_inchi": "InChI=1S/C17H23NO3/...",
+  "standard_inchikey": "ABCDEF...-...-...",
+  "standardization_policy_version": "rdkit_molstandardize_v1",
   "backend_used": "molscribe",
   "extraction_confidence": 0.92,
   "validation": {
     "level_1_syntax": {"is_valid": true, "wildcard_count": 0},
+    "standardization": {
+      "success": true,
+      "policy_version": "rdkit_molstandardize_v1"
+    },
     "level_2_chemical": {"is_valid": true, "properties": {...}},
     "level_3_domain": {"is_valid": true, "compound_class": "alkaloid"}
   },

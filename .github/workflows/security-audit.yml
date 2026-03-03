@@ -329,3 +329,53 @@ jobs:
             echo "### No vulnerabilities found" >> $GITHUB_STEP_SUMMARY
             echo "All scanned images are free of HIGH and CRITICAL vulnerabilities." >> $GITHUB_STEP_SUMMARY
           fi
+
+  enforce-critical-triage:
+    name: Enforce CRITICAL Triage
+    runs-on: ubuntu-latest
+    needs: [trivy-scan, create-issue]
+    if: always()
+    permissions:
+      issues: read
+    steps:
+      - name: Download all JSON artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trivy-json-*
+          path: trivy-results
+          merge-multiple: true
+
+      - name: Fail when CRITICAL findings are untriaged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          total_critical=0
+
+          for json_file in trivy-results/*.json; do
+            if [ -f "$json_file" ]; then
+              critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo "0")
+              total_critical=$((total_critical + critical))
+            fi
+          done
+
+          echo "Total CRITICAL findings: ${total_critical}"
+
+          if [ "$total_critical" -eq 0 ]; then
+            echo "No CRITICAL findings. Triage gate passed."
+            exit 0
+          fi
+
+          triaged_count=$(gh issue list \
+            --label "security,vulnerability,automated,triaged" \
+            --state open \
+            --json number \
+            --jq 'length' 2>/dev/null || echo "0")
+
+          if [ "$triaged_count" -gt 0 ]; then
+            echo "Found ${triaged_count} open triaged security issue(s). Triage gate passed."
+            exit 0
+          fi
+
+          echo "CRITICAL findings detected but no open issue labeled 'triaged'."
+          echo "Add the 'triaged' label to the automated security issue after risk assessment."
+          exit 1

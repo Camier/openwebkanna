@@ -16,7 +16,7 @@ Validation checks:
 4. Canonicalization with stereochemistry preservation
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from indigo import Indigo, IndigoException
 
 
@@ -29,7 +29,7 @@ class IndigoValidator:
     """
 
     # Placeholder values that indicate extraction failures
-    PLACEHOLDER_VALUES = frozenset(
+    DEFAULT_PLACEHOLDER_VALUES = frozenset(
         [
             "n/a",
             "na",
@@ -45,11 +45,61 @@ class IndigoValidator:
     )
 
     # Maximum allowed wildcards for non-R-group papers
-    MAX_WILDCARDS = 2
+    DEFAULT_MAX_WILDCARDS = 2
 
-    def __init__(self):
-        """Initialize Indigo context."""
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize Indigo context and optional syntax policy."""
+        config = config or {}
         self.indigo = Indigo()
+        self.runtime_options = config.get("runtime_options", {})
+        self.extra_set_options = config.get("set_options", {})
+        self.reset_options_each_call = bool(
+            self.runtime_options.get("reset_options_each_call", False)
+        )
+        self.max_wildcards = config.get(
+            "wildcard_threshold",
+            self.DEFAULT_MAX_WILDCARDS,
+        )
+        placeholders = config.get("placeholder_values", list(self.DEFAULT_PLACEHOLDER_VALUES))
+        self.placeholder_values = frozenset(str(v).lower().strip() for v in placeholders)
+        self._runtime_option_errors = []
+        self._apply_runtime_options()
+
+    def _set_indigo_option(self, option_name: str, option_value: Any) -> Optional[str]:
+        """Safely apply a single Indigo option and return optional error string."""
+        try:
+            if isinstance(option_value, bool):
+                self.indigo.setOption(option_name, option_value)
+            elif isinstance(option_value, int):
+                self.indigo.setOption(option_name, option_value)
+            elif isinstance(option_value, float):
+                self.indigo.setOption(option_name, option_value)
+            elif isinstance(option_value, str):
+                self.indigo.setOption(option_name, option_value)
+            else:
+                self.indigo.setOption(option_name, str(option_value))
+            return None
+        except Exception as exc:
+            return f"{option_name}: {exc}"
+
+    def _apply_runtime_options(self) -> None:
+        """Apply configured Indigo runtime options (best-effort, non-fatal)."""
+        self._runtime_option_errors = []
+
+        timeout_ms = self.runtime_options.get("timeout_ms")
+        if timeout_ms is not None:
+            err = self._set_indigo_option("timeout", int(timeout_ms))
+            if err:
+                self._runtime_option_errors.append(err)
+
+        # Optional raw Indigo setOption map for advanced runtime tuning.
+        if isinstance(self.extra_set_options, dict):
+            for option_name, option_value in self.extra_set_options.items():
+                if not option_name:
+                    continue
+                err = self._set_indigo_option(str(option_name), option_value)
+                if err:
+                    self._runtime_option_errors.append(err)
 
     def validate_syntax(self, smiles: str) -> Dict[str, Any]:
         """
@@ -83,6 +133,8 @@ class IndigoValidator:
 
         # Attempt to parse and canonicalize
         try:
+            if self.reset_options_each_call:
+                self._apply_runtime_options()
             mol = self.indigo.loadMolecule(smiles)
 
             # Count wildcards
@@ -90,7 +142,7 @@ class IndigoValidator:
             result["wildcard_count"] = wildcard_count
 
             # Reject excessive wildcards (unless R-group paper)
-            if wildcard_count > self.MAX_WILDCARDS:
+            if wildcard_count > self.max_wildcards:
                 result["error"] = "too_many_wildcards"
                 return result
 
@@ -100,6 +152,8 @@ class IndigoValidator:
 
             # Get molecular formula for downstream validation
             result["molecular_formula"] = self._get_formula(mol)
+            if self._runtime_option_errors:
+                result["runtime_option_warnings"] = list(self._runtime_option_errors)
 
             # Additional valence check
             if not self._check_valence(mol):
@@ -117,7 +171,7 @@ class IndigoValidator:
 
     def _is_placeholder(self, smiles: str) -> bool:
         """Check if SMILES is a placeholder value."""
-        return smiles.lower().strip() in self.PLACEHOLDER_VALUES
+        return smiles.lower().strip() in self.placeholder_values
 
     def _count_wildcards(self, mol) -> int:
         """Count wildcard atoms (*) in molecule."""
@@ -158,6 +212,8 @@ class IndigoValidator:
             Canonical SMILES or None if parsing fails
         """
         try:
+            if self.reset_options_each_call:
+                self._apply_runtime_options()
             mol = self.indigo.loadMolecule(smiles)
             return mol.canonicalSmiles()
         except Exception:
@@ -176,6 +232,8 @@ class IndigoValidator:
             CML string or None if conversion fails
         """
         try:
+            if self.reset_options_each_call:
+                self._apply_runtime_options()
             mol = self.indigo.loadMolecule(smiles)
             return mol.cml()
         except Exception:
@@ -192,6 +250,8 @@ class IndigoValidator:
             InChI string or None if conversion fails
         """
         try:
+            if self.reset_options_each_call:
+                self._apply_runtime_options()
             mol = self.indigo.loadMolecule(smiles)
             return mol.inchi()
         except Exception:
@@ -208,6 +268,8 @@ class IndigoValidator:
             InChIKey string or None if conversion fails
         """
         try:
+            if self.reset_options_each_call:
+                self._apply_runtime_options()
             mol = self.indigo.loadMolecule(smiles)
             return mol.inchiKey()
         except Exception:
@@ -231,6 +293,8 @@ class IndigoValidator:
         }
 
         try:
+            if self.reset_options_each_call:
+                self._apply_runtime_options()
             mol = self.indigo.loadMolecule(smiles)
 
             # Count chiral centers
@@ -259,6 +323,17 @@ class IndigoValidator:
             pass
 
         return result
+
+    def get_runtime_policy(self) -> Dict[str, Any]:
+        """Return active runtime policy and option application warnings."""
+        return {
+            "timeout_ms": self.runtime_options.get("timeout_ms"),
+            "reset_options_each_call": self.reset_options_each_call,
+            "set_options": dict(self.extra_set_options)
+            if isinstance(self.extra_set_options, dict)
+            else {},
+            "option_errors": list(self._runtime_option_errors),
+        }
 
 
 def validate_smiles_syntax(smiles: str) -> Dict[str, Any]:

@@ -41,13 +41,18 @@ Thumbs.db
 .opencode/
 .plugin-config/
 .state/
+.blender-toolkit/
+.deepeval/
 
 # Python cache
 __pycache__/
 *.pyc
-
-# Large/local research data (keep repo lightweight)
-data/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+.venvs/
+.tmpdocs_*/
 
 # Large/local research data (keep repo lightweight)
 data/

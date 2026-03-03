@@ -35,11 +35,11 @@ molscribe:
     multi_structure_f1: 0.68
     average_inference_time_ms: 150-300
 
-# Fallback backend: DECIMER 2.2 (CC BY 4.0, 91% F1 accuracy)
+# Fallback backend: DECIMER 2.7+ (CC BY 4.0, 91% F1 accuracy)
 decimer:
   enabled: true
   priority: 2
-  version: 2.2
+  version: 2.7
   license: CC-BY-4.0  # Requires attribution in outputs
 
   # Model configuration
@@ -77,54 +77,32 @@ decimer:
     average_inference_time_ms: 200-500
 
   # Attribution requirement
-  attribution: "DECIMER 2.2 by Kohulan Rajan et al. (Nature Communications 2023)"
-
-# CPU-only fallback: MolVec (Apache 2.0, 72% F1 accuracy)
-molvec:
-  enabled: true
-  priority: 3
-  version: 0.9.7
-  license: Apache-2.0
-
-  # Device (CPU only)
-  device: cpu
-
-  # Inference settings
-  max_image_size: 1024
-
-  # Performance
-  inference_timeout: 10  # Very fast
-  retry_on_failure: false
-
-  # Use cases
-  use_when:
-    - gpu_unavailable: true
-    - multi_structure_images: true  # Best among all tools for this
-    - batch_processing: true  # Fast CPU processing
-
-  # Accuracy benchmarks
-  benchmarks:
-    single_molecule_f1: 0.72
-    multi_structure_f1: 0.66
-    average_inference_time_ms: 50
+  attribution: "DECIMER 2.x by Kohulan Rajan et al. (Nature Communications 2023)"
 
 # Routing strategy
 routing:
   # Default strategy: try backends in priority order
   strategy: priority_fallback
 
+  # Optional consensus check: compare primary output against one additional backend.
+  # Disabled by default to keep baseline throughput unchanged.
+  consensus_check:
+    enabled: false
+    check_when_confidence_below: 0.7
+    check_always: false
+
   # Image type routing overrides
   by_image_type:
     single_molecule:
-      backends: [molscribe, decimer, molvec]
+      backends: [molscribe, decimer]
       confidence_boost: 0.1  # Boost confidence for ideal images
 
     reaction:
-      backends: [decimer, molscribe, molvec]  # DECIMER better for reactions
+      backends: [decimer, molscribe]  # DECIMER better for reactions
       confidence_boost: 0.0
 
     multi_structure:
-      backends: [molvec, decimer, molscribe]  # MolVec best for this
+      backends: [decimer, molscribe]  # Supported backend fallback order
       segment_first: true  # Segment before OCSR
 
     non_chemical:
@@ -160,17 +138,3 @@ monitoring:
     - confidence_distribution
     - gpu_memory_usage
     - fallback_rate
-
-# Future-proofing: VLM (Vision Language Model) integration point
-# Currently not enabled;预留接口 for future multimodal OCSR improvement
-vlm:
-  enabled: false
-  priority: 99  # Last resort
-  version: "future"
-  license: "pending"
-  description: "Vision Language Model OCSR fallback - to be implemented"
-  use_when:
-    - all_backends_failed: true
-  performance:
-    estimated_f1: 0.75-0.85
-    average_inference_time_ms: 1000

@@ -3,20 +3,31 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/lib/init.sh"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LIB_INIT_PATH="${SCRIPT_DIR}/lib/init.sh"
+if [ ! -f "$LIB_INIT_PATH" ]; then
+    LIB_INIT_PATH="${REPO_ROOT}/lib/init.sh"
+fi
+if [ ! -f "$LIB_INIT_PATH" ]; then
+    printf '[ERROR] Missing required shell library at %s or %s\n' \
+        "${SCRIPT_DIR}/lib/init.sh" "${REPO_ROOT}/lib/init.sh" >&2
+    exit 1
+fi
+# shellcheck source=../lib/init.sh
+source "$LIB_INIT_PATH"
 load_env_defaults
 cd "$SCRIPT_DIR"
 
 OPENWEBUI_URL_DEFAULT="http://localhost:${WEBUI_PORT:-3000}"
 OPENWEBUI_URL="${OPENWEBUI_URL:-$OPENWEBUI_URL_DEFAULT}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
-OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
-OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
+OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-}"
+OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
 
-SOURCE_ROOT="${SOURCE_ROOT:-/LAB/@thesis/openwebui/prod_max}"
+SOURCE_ROOT="${SOURCE_ROOT:-${REPO_ROOT}/data/extractions}"
 FILE_NAME="${FILE_NAME:-molecules_high_confidence.jsonl}"
 KB_NAME="${KB_NAME:-Molecular SMILES High Confidence}"
 KB_DESCRIPTION="${KB_DESCRIPTION:-High-confidence molecular extractions for retrieval}"
@@ -28,9 +39,16 @@ PROCESS_POLL_SECONDS="${PROCESS_POLL_SECONDS:-3}"
 CONVERT_MARKDOWN="${CONVERT_MARKDOWN:-false}"
 MARKDOWN_FILE_NAME="${MARKDOWN_FILE_NAME:-molecules_high_confidence.md}"
 MARKDOWN_TITLE="${MARKDOWN_TITLE:-SMILES High Confidence Molecules}"
-MARKDOWN_SCRIPT="${MARKDOWN_SCRIPT:-$SCRIPT_DIR/scripts/jsonl_to_markdown_smiles.py}"
+DEFAULT_MARKDOWN_SCRIPT="$SCRIPT_DIR/archive/legacy-v1/jsonl_to_markdown_smiles.py"
+if [ -f "$SCRIPT_DIR/scripts/jsonl_to_markdown_smiles.py" ]; then
+    DEFAULT_MARKDOWN_SCRIPT="$SCRIPT_DIR/scripts/jsonl_to_markdown_smiles.py"
+fi
+MARKDOWN_SCRIPT="${MARKDOWN_SCRIPT:-$DEFAULT_MARKDOWN_SCRIPT}"
 FIND_MIN_DEPTH="${FIND_MIN_DEPTH:-2}"
 FIND_MAX_DEPTH="${FIND_MAX_DEPTH:-2}"
+API_MAX_RETRIES="${API_MAX_RETRIES:-4}"
+API_RETRY_INITIAL_DELAY_SECONDS="${API_RETRY_INITIAL_DELAY_SECONDS:-1}"
+API_RETRY_MAX_DELAY_SECONDS="${API_RETRY_MAX_DELAY_SECONDS:-8}"
 
 SHOW_HELP=false
 
@@ -39,7 +57,7 @@ show_help() {
 Usage: ./import-smiles-to-kb.sh [OPTIONS]
 
 Options:
-  --source-root PATH      Root directory containing per-paper folders (default: /LAB/@thesis/openwebui/prod_max)
+  --source-root PATH      Root directory containing per-paper folders (default: <repo>/data/extractions)
   --file-name NAME        Artifact filename in each paper dir (default: molecules_high_confidence.jsonl)
   --paper-filter TEXT     Keep only paper directories containing TEXT
   --limit N               Process at most N files (0 = no limit)
@@ -59,7 +77,21 @@ Options:
 Auth:
   - Uses OPENWEBUI_API_KEY if set.
   - Else signs in using OPENWEBUI_SIGNIN_EMAIL / OPENWEBUI_SIGNIN_PASSWORD.
+Retry:
+  - API_MAX_RETRIES (default: 4)
+  - API_RETRY_INITIAL_DELAY_SECONDS (default: 1)
+  - API_RETRY_MAX_DELAY_SECONDS (default: 8)
 EOF
+}
+
+next_retry_delay() {
+    local current_delay="$1"
+    local max_delay="$2"
+    local next_delay=$((current_delay * 2))
+    if [ "$next_delay" -gt "$max_delay" ]; then
+        next_delay="$max_delay"
+    fi
+    echo "$next_delay"
 }
 
 is_uuid() {
@@ -109,10 +141,30 @@ openwebui_signin() {
     local output_file="$2"
     local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
 
-    curl -sS -m 30 \
-        -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" \
-        "$signin_url" -d @"$payload_file" 2>/dev/null || true
+    local attempt=1
+    local delay="$API_RETRY_INITIAL_DELAY_SECONDS"
+    local status_code=""
+    while [ "$attempt" -le "$API_MAX_RETRIES" ]; do
+        local rc=0
+        status_code="$(curl -sS -m 30 \
+            -H "Content-Type: application/json" \
+            -o "$output_file" -w "%{http_code}" \
+            "$signin_url" -d @"$payload_file")" || rc=$?
+        if [ "$rc" -eq 0 ] && echo "$status_code" | rg -q '^[0-9]{3}$'; then
+            echo "$status_code"
+            return 0
+        fi
+        if [ "$attempt" -ge "$API_MAX_RETRIES" ]; then
+            break
+        fi
+        print_warning "Signin attempt ${attempt}/${API_MAX_RETRIES} failed; retrying in ${delay}s"
+        sleep "$delay"
+        delay="$(next_retry_delay "$delay" "$API_RETRY_MAX_DELAY_SECONDS")"
+        attempt=$((attempt + 1))
+    done
+
+    echo "$status_code"
+    return 1
 }
 
 ensure_api_key() {
@@ -125,6 +177,11 @@ ensure_api_key() {
         exit 1
     fi
 
+    if [ -z "$OPENWEBUI_SIGNIN_EMAIL" ] || [ -z "$OPENWEBUI_SIGNIN_PASSWORD" ]; then
+        print_error "OPENWEBUI_SIGNIN_EMAIL and OPENWEBUI_SIGNIN_PASSWORD are required when OPENWEBUI_AUTO_AUTH=true"
+        exit 1
+    fi
+
     local tmp_out payload_file signin_code token
     tmp_out="$(mktemp)"
     payload_file="$(mktemp)"
@@ -133,7 +190,11 @@ ensure_api_key() {
 {"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
 EOF
 
-    signin_code="$(openwebui_signin "$payload_file" "$tmp_out")"
+    if ! signin_code="$(openwebui_signin "$payload_file" "$tmp_out")"; then
+        print_error "Signin request failed after retries"
+        rm -f "$tmp_out" "$payload_file"
+        exit 1
+    fi
     if [ "$signin_code" != "200" ]; then
         print_error "Signin failed (HTTP $signin_code)"
         rm -f "$tmp_out" "$payload_file"
@@ -153,20 +214,78 @@ EOF
 
 api_get() {
     local path="$1"
-    curl -sS -m 45 -H "Authorization: Bearer $API_KEY" "${OPENWEBUI_URL%/}${path}"
+    local attempt=1
+    local delay="$API_RETRY_INITIAL_DELAY_SECONDS"
+    local response=""
+    local out_file status_code
+    out_file="$(mktemp)"
+
+    while [ "$attempt" -le "$API_MAX_RETRIES" ]; do
+        local rc=0
+        status_code="$(curl -sS -m 45 \
+            -H "Authorization: Bearer $API_KEY" \
+            -o "$out_file" -w "%{http_code}" \
+            "${OPENWEBUI_URL%/}${path}")" || rc=$?
+        if [ "$rc" -eq 0 ] && echo "$status_code" | rg -q '^[0-9]{3}$'; then
+            response="$(cat "$out_file" 2>/dev/null || true)"
+            if [ "$status_code" -ge 200 ] && [ "$status_code" -lt 300 ]; then
+                rm -f "$out_file"
+                echo "$response"
+                return 0
+            fi
+            if [ "$status_code" -eq 429 ] || [ "$status_code" -ge 500 ]; then
+                :
+            else
+                print_error "GET ${path} failed (HTTP $status_code)"
+                rm -f "$out_file"
+                return 1
+            fi
+        fi
+        if [ "$attempt" -ge "$API_MAX_RETRIES" ]; then
+            break
+        fi
+        print_warning "GET ${path} attempt ${attempt}/${API_MAX_RETRIES} failed; retrying in ${delay}s"
+        sleep "$delay"
+        delay="$(next_retry_delay "$delay" "$API_RETRY_MAX_DELAY_SECONDS")"
+        attempt=$((attempt + 1))
+    done
+
+    rm -f "$out_file"
+    return 1
 }
 
 api_post_json_with_status() {
     local path="$1"
     local json="$2"
     local out_file="$3"
-    curl -sS -m 45 \
-        -H "Authorization: Bearer $API_KEY" \
-        -H "Content-Type: application/json" \
-        -X POST \
-        -d "$json" \
-        -o "$out_file" -w "%{http_code}" \
-        "${OPENWEBUI_URL%/}${path}" 2>/dev/null || true
+    local attempt=1
+    local delay="$API_RETRY_INITIAL_DELAY_SECONDS"
+    local status_code=""
+
+    while [ "$attempt" -le "$API_MAX_RETRIES" ]; do
+        local rc=0
+        status_code="$(curl -sS -m 45 \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "$json" \
+            -o "$out_file" -w "%{http_code}" \
+            "${OPENWEBUI_URL%/}${path}")" || rc=$?
+        if [ "$rc" -eq 0 ] && echo "$status_code" | rg -q '^[0-9]{3}$'; then
+            echo "$status_code"
+            return 0
+        fi
+        if [ "$attempt" -ge "$API_MAX_RETRIES" ]; then
+            break
+        fi
+        print_warning "POST ${path} attempt ${attempt}/${API_MAX_RETRIES} failed; retrying in ${delay}s"
+        sleep "$delay"
+        delay="$(next_retry_delay "$delay" "$API_RETRY_MAX_DELAY_SECONDS")"
+        attempt=$((attempt + 1))
+    done
+
+    echo "$status_code"
+    return 1
 }
 
 find_or_create_kb() {
@@ -237,27 +356,70 @@ upload_file() {
     local filename
     filename="$(basename "$file_path")"
 
-    curl -sS -m 300 -X POST \
-        "${OPENWEBUI_URL%/}/api/v1/files/?process=true&process_in_background=false" \
-        -H "Authorization: Bearer $API_KEY" \
-        -F "file=@$file_path" \
-        -F "metadata={\"name\":\"$filename\"}" 2>/dev/null || true
+    local attempt=1
+    local delay="$API_RETRY_INITIAL_DELAY_SECONDS"
+    local response=""
+    local out_file status_code
+    out_file="$(mktemp)"
+
+    while [ "$attempt" -le "$API_MAX_RETRIES" ]; do
+        local rc=0
+        status_code="$(curl -sS -m 300 -X POST \
+            "${OPENWEBUI_URL%/}/api/v1/files/?process=true&process_in_background=false" \
+            -H "Authorization: Bearer $API_KEY" \
+            -o "$out_file" -w "%{http_code}" \
+            -F "file=@$file_path" \
+            -F "metadata={\"name\":\"$filename\"}")" || rc=$?
+        if [ "$rc" -eq 0 ] && echo "$status_code" | rg -q '^[0-9]{3}$'; then
+            response="$(cat "$out_file" 2>/dev/null || true)"
+            if [ "$status_code" -ge 200 ] && [ "$status_code" -lt 300 ]; then
+                rm -f "$out_file"
+                echo "$response"
+                return 0
+            fi
+            if [ "$status_code" -eq 429 ] || [ "$status_code" -ge 500 ]; then
+                :
+            else
+                print_error "Upload failed for ${filename} (HTTP $status_code)"
+                rm -f "$out_file"
+                return 1
+            fi
+        fi
+        if [ "$attempt" -ge "$API_MAX_RETRIES" ]; then
+            break
+        fi
+        print_warning "Upload attempt ${attempt}/${API_MAX_RETRIES} failed for $filename; retrying in ${delay}s"
+        sleep "$delay"
+        delay="$(next_retry_delay "$delay" "$API_RETRY_MAX_DELAY_SECONDS")"
+        attempt=$((attempt + 1))
+    done
+
+    rm -f "$out_file"
+    return 1
 }
 
 wait_for_processing() {
     local file_id="$1"
     local deadline=$((SECONDS + PROCESS_TIMEOUT_SECONDS))
+    local sleep_seconds="$PROCESS_POLL_SECONDS"
+    local last_status=""
     while [ $SECONDS -lt $deadline ]; do
         local resp status
-        resp="$(api_get "/api/v1/files/$file_id/process/status" 2>/dev/null || true)"
+        resp="$(api_get "/api/v1/files/$file_id/process/status" || true)"
         status="$(echo "$resp" | jq -r '.status // empty' 2>/dev/null || true)"
+        if [ -n "$status" ] && [ "$status" != "$last_status" ]; then
+            print_info "Processing status for $file_id: $status"
+            last_status="$status"
+        fi
         if [ "$status" = "completed" ]; then
             return 0
         fi
         if [ "$status" = "failed" ]; then
+            print_error "Processing API reported failure for $file_id"
             return 1
         fi
-        sleep "$PROCESS_POLL_SECONDS"
+        sleep "$sleep_seconds"
+        sleep_seconds="$(next_retry_delay "$sleep_seconds" 30)"
     done
     return 1
 }
@@ -419,7 +581,7 @@ main() {
     print_info "Knowledge Base: $KB_NAME"
     print_info "Convert markdown: $CONVERT_MARKDOWN"
 
-    if ! curl -sS -m 10 -f -o /dev/null "${OPENWEBUI_URL%/}/health" 2>/dev/null; then
+    if ! curl -sS -m 10 -f -o /dev/null "${OPENWEBUI_URL%/}/health"; then
         print_error "OpenWebUI health check failed at ${OPENWEBUI_URL%/}/health"
         exit 1
     fi
@@ -453,7 +615,7 @@ main() {
         exit 0
     fi
 
-    local total=0 uploaded=0 processed=0 attached=0 failed=0
+    local total=0 uploaded=0 processed=0 attached=0 failed=0 skipped_empty=0
     local artifact upload_artifact response file_id tmp_upload_dir
     tmp_upload_dir="$(mktemp -d)"
     trap 'rm -rf "$tmp_upload_dir"' EXIT
@@ -469,12 +631,28 @@ main() {
             continue
         fi
 
+        if [ ! -s "$upload_artifact" ]; then
+            fallback_manual_artifact="$(dirname "$artifact")/molecules_manual_review.jsonl"
+            if [ "$(basename "$artifact")" = "molecules_high_confidence.jsonl" ] && [ -s "$fallback_manual_artifact" ]; then
+                print_warning "READY artifact is empty; falling back to manual-review artifact"
+                upload_artifact="$fallback_manual_artifact"
+            else
+                skipped_empty=$((skipped_empty + 1))
+                print_warning "Skipping empty artifact: $upload_artifact"
+                continue
+            fi
+        fi
+
         print_step "[$total] Uploading $(basename "$upload_artifact")"
         response="$(upload_file "$upload_artifact")"
         file_id="$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null || true)"
         if [ -z "$file_id" ]; then
             failed=$((failed + 1))
-            print_error "Upload failed: $upload_artifact"
+            if [ -n "$response" ]; then
+                print_error "Upload failed: $upload_artifact :: $(echo "$response" | head -c 240)"
+            else
+                print_error "Upload failed: $upload_artifact"
+            fi
             continue
         fi
         uploaded=$((uploaded + 1))
@@ -501,6 +679,7 @@ main() {
     print_info "Uploaded: $uploaded"
     print_info "Processed: $processed"
     print_info "Attached: $attached"
+    print_info "Skipped empty: $skipped_empty"
     print_info "Failed: $failed"
     print_info "KB: $KB_NAME ($kb_id)"
 

@@ -40,6 +40,9 @@ TUNE_CHUNK_OVERLAP="${TUNE_CHUNK_OVERLAP:-200}"
 TUNE_CHUNK_MIN_SIZE_TARGET="${TUNE_CHUNK_MIN_SIZE_TARGET:-900}"
 TUNE_ALLOWED_EXTENSIONS="${TUNE_ALLOWED_EXTENSIONS:-pdf,txt,md}"
 TUNE_EMBEDDING_BATCH_SIZE="${TUNE_EMBEDDING_BATCH_SIZE:-4}"
+TUNE_EMBEDDING_MODEL="${TUNE_EMBEDDING_MODEL:-${RAG_EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}}"
+TUNE_CONTENT_EXTRACTION_ENGINE="${TUNE_CONTENT_EXTRACTION_ENGINE:-${CONTENT_EXTRACTION_ENGINE:-docling}}"
+TUNE_PDF_EXTRACT_IMAGES="${TUNE_PDF_EXTRACT_IMAGES:-${PDF_EXTRACT_IMAGES:-true}}"
 
 SHOW_HELP=false
 
@@ -60,6 +63,9 @@ Tuning knobs (env overrides):
   TUNE_CHUNK_MIN_SIZE_TARGET
   TUNE_ALLOWED_EXTENSIONS   Comma-separated, e.g. "pdf,txt,md"
   TUNE_EMBEDDING_BATCH_SIZE
+  TUNE_EMBEDDING_MODEL      Defaults to RAG_EMBEDDING_MODEL or all-MiniLM fallback
+  TUNE_CONTENT_EXTRACTION_ENGINE  Defaults to CONTENT_EXTRACTION_ENGINE or docling
+  TUNE_PDF_EXTRACT_IMAGES         true|false (defaults to PDF_EXTRACT_IMAGES or true)
 
 Auth:
   - Set OPENWEBUI_API_KEY (recommended) or API_KEY to an admin Bearer token.
@@ -122,8 +128,12 @@ snapshot_configs() {
 
 apply_tuning() {
     local allowed_json retrieval_payload embedding_payload out_file code response
+    local pdf_extract_images_json=false
 
     allowed_json="$(echo "$TUNE_ALLOWED_EXTENSIONS" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | rg -v '^$' | jq -R . | jq -s .)"
+    if is_true "$TUNE_PDF_EXTRACT_IMAGES"; then
+        pdf_extract_images_json=true
+    fi
 
     retrieval_payload="$(jq -cn \
         --argjson allowed "$allowed_json" \
@@ -131,11 +141,13 @@ apply_tuning() {
         --argjson chunk_size "$TUNE_CHUNK_SIZE" \
         --argjson chunk_overlap "$TUNE_CHUNK_OVERLAP" \
         --argjson chunk_min "$TUNE_CHUNK_MIN_SIZE_TARGET" \
-        '{TOP_K:$top_k,CHUNK_SIZE:$chunk_size,CHUNK_OVERLAP:$chunk_overlap,CHUNK_MIN_SIZE_TARGET:$chunk_min,ALLOWED_FILE_EXTENSIONS:$allowed}')"
+        --arg content_extraction_engine "$TUNE_CONTENT_EXTRACTION_ENGINE" \
+        --argjson pdf_extract_images "$pdf_extract_images_json" \
+        '{TOP_K:$top_k,CHUNK_SIZE:$chunk_size,CHUNK_OVERLAP:$chunk_overlap,CHUNK_MIN_SIZE_TARGET:$chunk_min,ALLOWED_FILE_EXTENSIONS:$allowed,CONTENT_EXTRACTION_ENGINE:$content_extraction_engine,PDF_EXTRACT_IMAGES:$pdf_extract_images}')"
 
     embedding_payload="$(jq -cn \
         --arg engine "" \
-        --arg model "sentence-transformers/all-MiniLM-L6-v2" \
+        --arg model "$TUNE_EMBEDDING_MODEL" \
         --argjson batch "$TUNE_EMBEDDING_BATCH_SIZE" \
         --argjson enable_async true \
         '{RAG_EMBEDDING_ENGINE:$engine,RAG_EMBEDDING_MODEL:$model,RAG_EMBEDDING_BATCH_SIZE:$batch,ENABLE_ASYNC_EMBEDDING:$enable_async}')"

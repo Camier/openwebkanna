@@ -22,11 +22,11 @@
 │                  │                                                      │
 │  VALIDATION LAYER                                                       │
 │  ─────────────────                                                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                    │
-│  │ Level 1     │→ │ Level 2     │→ │ Level 3     │                    │
-│  │ Syntax      │  │ Chemical    │  │ Domain      │                    │
-│  │ (Indigo)    │  │ (RDKit)     │  │ (Alkaloid)  │                    │
-│  └─────────────┘  └─────────────┘  └─────────────┘                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
+│  │ Level 1     │→ │ Standardize │→ │ Level 2     │→ │ Level 3     │   │
+│  │ Syntax      │  │ (RDKit      │  │ Chemical    │  │ Domain      │   │
+│  │ (Indigo)    │  │ MolStd)     │  │ (RDKit)     │  │ (Alkaloid)  │   │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
 │                                                                       │
 │  ENRICHMENT LAYER                                                       │
 │  ─────────────────                                                      │
@@ -160,6 +160,24 @@ result = validator.validate("CN1CC[C@]2(C1)C3=CC=CC=C3")
 # }
 ```
 
+#### Deterministic Standardization Stage (RDKit MolStandardize)
+
+**Purpose**: Produce a deterministic parent/tautomer/charge-normalized structure before Level 2 and Level 3 checks.
+
+**Policy sequence**:
+1. `Cleanup`
+2. `FragmentParent`
+3. `Uncharge`
+4. `CanonicalTautomer`
+
+**Implementation**: `src/validators/standardization_validator.py`
+
+**Output fields added to record**:
+- `standardized_smiles`
+- `standard_inchi`
+- `standard_inchikey`
+- `standardization_policy_version`
+
 #### Level 3: Domain Validation (Alkaloid Filter)
 
 **Purpose**: Ensure relevance to ethnopharmacological research
@@ -180,6 +198,11 @@ result = validator.validate("CN1CC[C@]2(C1)C3=CC=CC=C3")
 | Tortuosamine (L/D) | `CNCC[C@@]1(CCC2=C(C1)C=CC=N2)C3=...` | ≥0.7 |
 
 **Implementation**: `src/validators/domain_validator.py`
+
+**Gold standards file resolution (precedence)**:
+1. Explicit pipeline flag: `--gold-standards-file`
+2. Environment variable: `SMILES_GOLD_STANDARDS_FILE`
+3. Canonical repository path: `smiles-pipeline/config/gold_standards.json`
 
 ```python
 from validators.domain_validator import DomainValidator

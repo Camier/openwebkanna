@@ -1,11 +1,11 @@
-# OpenWebUI + CLIProxyAPI Deployment Prerequisites
+# OpenWebUI + LiteLLM Deployment Prerequisites
 
-Last verified: 2026-02-12 (UTC)
+Last verified: 2026-03-03 (UTC)
 
 This checklist reflects the current default deployment mode in this repo:
-- Docker-managed CLIProxyAPI
+- LiteLLM as primary OpenAI-compatible upstream
 - Docker-managed OpenWebUI
-- vLLM optional fallback only
+- CLIProxyAPI optional/deprecated sidecar only
 
 ## Required
 
@@ -35,13 +35,13 @@ cp .env.example .env
 rg -n "^OPENAI_API_BASE_URL=|^OPENAI_API_BASE_URLS=|^CLIPROXYAPI_DOCKER_MANAGED=|^CLIPROXYAPI_ENABLED=" .env
 ```
 
-Expected values for CLIProxyAPI-first mode:
-- `OPENAI_API_BASE_URL=http://cliproxyapi:8317/v1`
-- `OPENAI_API_BASE_URLS=http://cliproxyapi:8317/v1`
+Expected values for LiteLLM-first mode:
+- `OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1`
+- `OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1`
 - `CLIPROXYAPI_DOCKER_MANAGED=true`
-- `CLIPROXYAPI_ENABLED=true`
+- `CLIPROXYAPI_ENABLED=false`
 
-## OAuth prerequisites
+## Optional CLIProxyAPI OAuth prerequisites (legacy sidecar only)
 
 For aliases `openai-codex`, `qwen-cli`, `kimi-cli`:
 
@@ -69,18 +69,19 @@ lsof -nP -iTCP:8000 -sTCP:LISTEN || true
 
 ```bash
 docker compose config >/dev/null
-bash -n deploy.sh start-cliproxyapi.sh check-cliproxyapi.sh test-openwebui-cliproxy-routing.sh
+bash -n deploy.sh status.sh test-rag.sh test-api.sh
 ```
 
 ## Launch and validate
 
 ```bash
 ./deploy.sh --no-logs
-./check-cliproxyapi.sh
-./test-openwebui-cliproxy-routing.sh
+./status.sh
+./test-rag.sh --baseline
+./test-api.sh --baseline
 ```
 
 Passing criteria:
-- `cliproxyapi` healthy in `docker compose ps`
+- LiteLLM reachable at `http://localhost:4000/v1/models` (200 or 401 is acceptable reachability signal)
 - OpenWebUI reachable on `http://localhost:${WEBUI_PORT:-3000}`
-- Alias list and chat routing checks pass for all required OAuth aliases
+- Baseline RAG/API checks pass

@@ -19,7 +19,7 @@ OpenWebUI v0.8.3 natively supports **MCP (Model Context Protocol)** via Streamab
 ```bash
 # Check your .env has these set
 WEBUI_SECRET_KEY=your-32-byte-or-longer-secret-key  # REQUIRED
-OPENAI_API_BASE_URL=http://cliproxyapi:8317/v1      # Your existing setup
+OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1  # LiteLLM reference setup
 ```
 
 ### Step 2: Add MCPO to Docker Compose
@@ -307,7 +307,7 @@ services:
       - openwebui_data:/app/backend/data
     environment:
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
-      - OPENAI_API_BASE_URL=http://cliproxyapi:8317/v1
+      - OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - postgres
@@ -322,11 +322,11 @@ services:
     networks:
       - openwebui_network
 
-  # Your existing CLIProxyAPI
-  cliproxyapi:
-    # ... your existing config ...
-    networks:
-      - openwebui_network
+  # Optional legacy CLIProxyAPI sidecar (deprecated as primary upstream)
+  # cliproxyapi:
+  #   # ... your existing config ...
+  #   networks:
+  #     - openwebui_network
 
   # NEW: MCPO for MCP servers
   mcpo:

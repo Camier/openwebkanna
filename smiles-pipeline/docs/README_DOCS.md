@@ -10,6 +10,8 @@ This directory contains comprehensive documentation for the SMILES extraction pi
 |----------|----------|---------|--------|
 | [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md) | Developers, Architects | System design, component details, technical specifications | ✅ Complete |
 | [USAGE_GUIDE.md](USAGE_GUIDE.md) | Operators, Researchers | Step-by-step procedures, examples, troubleshooting | ✅ Complete |
+| [SMILES_BEST_PRACTICES_2026.md](SMILES_BEST_PRACTICES_2026.md) | Architects, Researchers | Source-backed 2026 best-practice baseline for SMILES/cheminformatics | ✅ New |
+| [SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md](SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md) | Developers, Operators | Compliance map of current pipeline vs best-practice controls | ✅ New |
 | [INSTALLATION.md](../INSTALLATION.md) | New users | Setup, environment creation, verification | ✅ Complete |
 | [README.md](../README.md) | All users | Quick start, overview, quick reference | ✅ Complete |
 | [MIGRATION.md](../MIGRATION.md) | v1 users | Migration from legacy v1 to v2 | ✅ Available |
@@ -38,8 +40,10 @@ This directory contains comprehensive documentation for the SMILES extraction pi
 
 **Technical documentation**:
 1. [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md) - System architecture and design
-2. [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md) § "Component Details" - API reference
-3. [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md) § "Testing Strategy" - Test guidelines
+2. [SMILES_BEST_PRACTICES_2026.md](SMILES_BEST_PRACTICES_2026.md) - External best-practice baseline
+3. [SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md](SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md) - Implementation gap map
+4. [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md) § "Component Details" - API reference
+5. [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md) § "Testing Strategy" - Test guidelines
 
 ### For Researchers
 
@@ -156,7 +160,9 @@ smiles-pipeline/
 ├── docs/                       # Detailed documentation
 │   ├── README_DOCS.md          # This file (document index)
 │   ├── ARCHITECTURE_v2.md      # Technical architecture
-│   └── USAGE_GUIDE.md          # Operational procedures
+│   ├── USAGE_GUIDE.md          # Operational procedures
+│   ├── SMILES_BEST_PRACTICES_2026.md         # External best-practice baseline
+│   └── SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md  # Current-state compliance map
 ├── config/                     # Configuration files
 │   ├── backends.yaml
 │   └── validation_rules.yaml
@@ -206,6 +212,8 @@ smiles-pipeline/
 | What's the architecture? | ARCHITECTURE_v2.md | System Overview |
 | Why is it slow? | USAGE_GUIDE.md | Slow extraction speed |
 | How do I add a backend? | ARCHITECTURE_v2.md | Adding New Backends |
+| What are current best practices? | SMILES_BEST_PRACTICES_2026.md | Gold Standard Practices |
+| What is compliant vs missing now? | SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md | Summary Scorecard |
 | What are gold standards? | README.md | Gold Standard Compounds |
 | How do I import to OpenWebUI? | USAGE_GUIDE.md | Procedure 3 |
 | Where are outputs? | USAGE_GUIDE.md | Data Management |
@@ -241,6 +249,8 @@ For missing documentation:
 | INSTALLATION.md | ✅ Complete | ✅ Verified | 2026-02-25 |
 | ARCHITECTURE_v2.md | ✅ Complete | ✅ Verified | 2026-02-25 |
 | USAGE_GUIDE.md | ✅ Complete | ✅ Verified | 2026-02-25 |
+| SMILES_BEST_PRACTICES_2026.md | ✅ Complete | ✅ Verified | 2026-02-26 |
+| SMILES_PIPELINE_COMPLIANCE_CHECKLIST.md | ✅ Complete | ✅ Verified | 2026-02-26 |
 | MIGRATION.md | ⚠️ Partial | Needs update | 2026-01-31 |
 
 **Status legend**:
@@ -250,5 +260,5 @@ For missing documentation:
 
 ---
 
-**Last updated**: 2026-02-25
+**Last updated**: 2026-02-26
 **Maintainer**: Thesis Research Team

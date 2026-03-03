@@ -136,8 +136,6 @@ async def search_similar_structures(request: StructureSearchRequest):
         fp_vector = f"[{','.join(map(str, query_fp))}]"
 
         # Step 2: Execute similarity search
-        # Uses pgvector <-> operator for cosine distance
-        # Similarity = 1 - cosine_distance
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
@@ -146,12 +144,12 @@ async def search_similar_structures(request: StructureSearchRequest):
             SELECT
                 id,
                 molecule_smiles,
-                1 - (molecule_fingerprint::halfvec <-> %s::halfvec) as similarity,
+                1 - (molecule_fingerprint <=> %s::halfvec) as similarity,
                 metadata->>'title' as title,
                 molecule_metadata
             FROM document_chunk
             WHERE molecule_fingerprint IS NOT NULL
-              AND 1 - (molecule_fingerprint::halfvec <-> %s::halfvec) >= %s
+              AND 1 - (molecule_fingerprint <=> %s::halfvec) >= %s
             ORDER BY similarity DESC
             LIMIT %s
         """,
@@ -268,6 +266,15 @@ async def get_statistics():
         cur.close()
         conn.close()
 
+        if row is None:
+            return {
+                "total_documents": 0,
+                "documents_with_fingerprints": 0,
+                "unique_smiles": 0,
+                "unique_documents": 0,
+                "coverage": 0.0,
+            }
+
         return {
             "total_documents": row[0],
             "documents_with_fingerprints": row[1],
@@ -312,11 +319,11 @@ async def batch_search(
                     SELECT
                         id,
                         molecule_smiles,
-                        1 - (molecule_fingerprint::halfvec <-> %s::halfvec) as similarity,
+                        1 - (molecule_fingerprint <=> %s::halfvec) as similarity,
                         metadata->>'title' as title
                     FROM document_chunk
                     WHERE molecule_fingerprint IS NOT NULL
-                      AND 1 - (molecule_fingerprint::halfvec <-> %s::halfvec) >= %s
+                      AND 1 - (molecule_fingerprint <=> %s::halfvec) >= %s
                     ORDER BY similarity DESC
                     LIMIT %s
                 """,

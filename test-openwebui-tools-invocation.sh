@@ -1309,17 +1309,12 @@ start_local_server() {
         python3 "$server_file" >"$OUTPUT_DIR/tool_test_server.log" 2>&1 &
     SERVER_PID="$!"
 
-    # Wait until the server is reachable from the host.
-    local attempt=1
-    while [ "$attempt" -le 30 ]; do
-        if curl -fsS "http://127.0.0.1:${SERVER_PORT}/nonce.txt" >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 0.1
-        attempt=$((attempt + 1))
-    done
-
-    return 1
+    curl --silent --show-error --fail \
+        --retry 30 \
+        --retry-delay 0 \
+        --retry-all-errors \
+        --retry-connrefused \
+        "http://127.0.0.1:${SERVER_PORT}/nonce.txt" >/dev/null 2>&1
 }
 
 stop_local_server() {
@@ -1524,14 +1519,14 @@ run_tool_chat_and_assert_nonce() {
     local out_file="$OUTPUT_DIR/${label}.response.json"
     local payload_file="$OUTPUT_DIR/${label}.payload.json"
     local assistant_text_file="$OUTPUT_DIR/${label}.assistant.txt"
-    local attempt=1
+    local attempt
     local code
     local err=""
     local chat_id=""
 
     LAST_TOOL_ERROR=""
 
-    while [ "$attempt" -le "$TOOL_INVOCATION_CHAT_RETRIES" ]; do
+    for ((attempt = 1; attempt <= TOOL_INVOCATION_CHAT_RETRIES; attempt++)); do
         chat_id="$(create_ephemeral_chat "Tool Invocation Test :: ${label}" "$OUTPUT_DIR/${label}.chat.new.json" 2>/dev/null || true)"
         if [ -z "$chat_id" ]; then
             err="failed to create chat (missing auth token or /api/v1/chats/new error)"
@@ -1572,7 +1567,6 @@ run_tool_chat_and_assert_nonce() {
         if [ "$attempt" -lt "$TOOL_INVOCATION_CHAT_RETRIES" ]; then
             sleep "$TOOL_INVOCATION_CHAT_RETRY_SLEEP_SECONDS"
         fi
-        attempt=$((attempt + 1))
     done
 
     LAST_TOOL_ERROR="HTTP ${code:-unknown}: ${err:-unknown error}"

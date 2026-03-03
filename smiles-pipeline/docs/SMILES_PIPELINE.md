@@ -19,7 +19,7 @@ Run-level output under `prod_max/`:
 Run the full pipeline (extract -> embed -> validate -> high-confidence filter -> QA summary):
 
 ```bash
-LIMIT=3 EXTRACT_ARGS='--backend-order molscribe,decimer,vlm --max-new-tokens 128' mise run smiles:pipeline
+LIMIT=3 EXTRACT_ARGS='--backend-order molscribe,decimer' mise run smiles:pipeline
 ```
 
 Publish high-confidence artifacts to OpenWebUI KB:
@@ -55,10 +55,10 @@ OPENWEBUI_URL=http://localhost:3010 ARGS='--keep-id <kb-id> --apply' mise run sm
 
 ## Environments
 
-- `scripts/environment-smiles-extraction.yml` for extraction + RDKit + DECIMER
-- `scripts/environment-molscribe-legacy.yml` for isolated MolScribe subprocess execution
+- `smiles-pipeline/envs/environment-smiles-extraction.yml` for extraction + RDKit + DECIMER
+- `smiles-pipeline/envs/environment-molscribe-legacy.yml` for isolated MolScribe subprocess execution
 
-The extractor calls MolScribe through `scripts/molscribe_predict.py` in the legacy environment to avoid dependency conflicts in the main runtime.
+The extractor calls MolScribe through `smiles-pipeline/archive/legacy-v1/molscribe_predict.py` in the legacy environment to avoid dependency conflicts in the main runtime.
 
 ## Source-backed OCSR guidance (2026-02-24)
 
@@ -95,13 +95,13 @@ Primary references:
 Baseline extraction:
 
 ```bash
-LIMIT=3 EXTRACT_ARGS='--backend-order molscribe,decimer,vlm --write-molecules-jsonl' mise run smiles:pipeline
+LIMIT=3 EXTRACT_ARGS='--backend-order molscribe,decimer' mise run smiles:pipeline
 ```
 
 Confidence-aware extraction (captures backend confidence metadata where available):
 
 ```bash
-LIMIT=3 EXTRACT_ARGS='--backend-order molscribe,decimer,vlm --write-molecules-jsonl --molscribe-return-confidence --decimer-return-confidence' mise run smiles:pipeline
+LIMIT=3 EXTRACT_ARGS='--backend-order molscribe,decimer --molscribe-return-confidence --decimer-return-confidence' mise run smiles:pipeline
 ```
 
 Candidate modernization track (research only, separate from baseline):
@@ -209,7 +209,7 @@ Retrieval comparison (`k=3`, 4 queries):
 | SMILES notation for mesembrine | 0.939, 0.933, 0.930 | JSON objects | 0.944, 0.943, 0.936 | Molecule sections |
 | joubertiamine class alkaloids | 0.950, 0.948, 0.947 | JSON objects | 0.950, 0.949, 0.947 | Molecule sections |
 
-**Important caveat**: The default markdown converter (`scripts/jsonl_to_markdown_smiles.py`) is designed for molecule extraction JSONL (`molecules_high_confidence.jsonl`) with `smiles`, `backend`, `confidence` fields. When applied to `rag/chunks.jsonl` (PDF extraction chunks with `id`, `block_type`, `html` fields), molecule-specific fields render as `N/A`/`unknown`. For general RAG chunks, either:
+**Important caveat**: The default markdown converter (`smiles-pipeline/archive/legacy-v1/jsonl_to_markdown_smiles.py`) is designed for molecule extraction JSONL (`molecules_high_confidence.jsonl`) with `smiles`, `backend`, `confidence` fields. When applied to `rag/chunks.jsonl` (PDF extraction chunks with `id`, `block_type`, `html` fields), molecule-specific fields render as `N/A`/`unknown`. For general RAG chunks, either:
 
 1. Use raw ingestion (no `--convert-markdown`), or
 2. Create a dedicated chunk-to-markdown converter for PDF extraction output.
@@ -225,4 +225,4 @@ Markdown conversion controls in importer:
 - `--convert-markdown`: convert each JSONL artifact to markdown before upload.
 - `--markdown-file`: output markdown filename per paper.
 - `--markdown-title`: top-level markdown heading.
-- `--markdown-script`: custom converter path (default: `scripts/jsonl_to_markdown_smiles.py`).
+- `--markdown-script`: custom converter path (default: `smiles-pipeline/archive/legacy-v1/jsonl_to_markdown_smiles.py`).

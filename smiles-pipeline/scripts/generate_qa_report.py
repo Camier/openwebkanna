@@ -39,6 +39,7 @@ class QAReportGenerator:
         """
         self.input_dir = input_dir
         self.molecules: List[Dict[str, Any]] = []
+        self.pipeline_stats: Dict[str, Any] = {}
         self.stats = {
             "summary": {},
             "per_paper": {},
@@ -62,6 +63,15 @@ class QAReportGenerator:
                     self.molecules.append(json.loads(line))
 
         return len(self.molecules)
+
+    def load_pipeline_stats(self) -> bool:
+        """Load extraction_stats.json when available."""
+        stats_file = self.input_dir / "extraction_stats.json"
+        if not stats_file.exists():
+            return False
+        with open(stats_file) as f:
+            self.pipeline_stats = json.load(f)
+        return True
 
     def compute_summary_stats(self):
         """Compute overall summary statistics."""
@@ -269,11 +279,51 @@ class QAReportGenerator:
 
         self.stats["confidence_distribution"] = buckets
 
+    def compute_rejection_analysis(self):
+        """Compute structured rejection breakdown from extraction_stats.json."""
+        errors = self.pipeline_stats.get("errors", [])
+        if not errors:
+            self.stats["rejection_reasons"] = {
+                "total_rejections": 0,
+                "by_stage": {},
+                "by_reason_code": {},
+                "by_backend": {},
+            }
+            return
+
+        by_stage = defaultdict(int)
+        by_reason_code = defaultdict(int)
+        by_backend = defaultdict(int)
+
+        for event in errors:
+            stage = str(event.get("stage") or "unknown")
+            reason_code = str(
+                event.get("reason_code")
+                or event.get("error")
+                or "unknown_reason"
+            )
+            backend = str(event.get("backend_used") or "unknown")
+            by_stage[stage] += 1
+            by_reason_code[reason_code] += 1
+            by_backend[backend] += 1
+
+        self.stats["rejection_reasons"] = {
+            "total_rejections": len(errors),
+            "by_stage": dict(by_stage),
+            "by_reason_code": dict(by_reason_code),
+            "by_backend": dict(by_backend),
+            "run_id": self.pipeline_stats.get("run_id"),
+            "started_at_utc": self.pipeline_stats.get("started_at_utc"),
+            "completed_at_utc": self.pipeline_stats.get("completed_at_utc"),
+        }
+
     def generate_report(self, output_file: Path):
         """Generate and save complete QA report."""
         print(f"Loading molecules from {self.input_dir}...")
         count = self.load_molecules()
         print(f"Loaded {count} molecules")
+        if self.load_pipeline_stats():
+            print("Loaded extraction stats for rejection analysis...")
 
         print("Computing summary statistics...")
         self.compute_summary_stats()
@@ -292,6 +342,9 @@ class QAReportGenerator:
 
         print("Computing confidence distribution...")
         self.compute_confidence_distribution()
+
+        print("Computing rejection analysis...")
+        self.compute_rejection_analysis()
 
         # Write report
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -334,6 +387,12 @@ class QAReportGenerator:
         if mw:
             print(
                 f"\nMolecular Weight: {mw.get('mean', 0):.1f} ± {mw.get('std', 0):.1f} Da"
+            )
+
+        rejections = self.stats.get("rejection_reasons", {})
+        if rejections:
+            print(
+                f"\nStructured rejections: {rejections.get('total_rejections', 0)}"
             )
 
 

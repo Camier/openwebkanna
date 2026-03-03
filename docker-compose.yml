@@ -94,7 +94,9 @@ services:
     networks:
       - openwebui_network
 
+  # Optional legacy sidecar. Not started by default.
   cliproxyapi:
+    profiles: ["legacy-cliproxy"]
     image: ${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}
     container_name: cliproxyapi
     restart: unless-stopped
@@ -142,7 +144,7 @@ services:
     command: ${MCPO_ARGS:---host 0.0.0.0 --port 8000 --config /app/config.json}
     # Resource limits
     cpus: "${MCPO_CPUS:-0.5}"
-    mem_limit: "${MCPO_MEM_LIMIT:-512m}"
+    mem_limit: "${MCPO_MEM_LIMIT:-1g}"
     pids_limit: ${MCPO_PIDS_LIMIT:-128}
     # Security hardening (note: DAC_OVERRIDE needed for volume access)
     cap_drop:
@@ -185,7 +187,7 @@ services:
       - UVICORN_WORKERS=1
     # Resource limits
     cpus: "${DOCLING_CPUS:-2.0}"
-    mem_limit: "${DOCLING_MEM_LIMIT:-8g}"
+    mem_limit: "${DOCLING_MEM_LIMIT:-4g}"
     pids_limit: ${DOCLING_PIDS_LIMIT:-256}
     # NVIDIA GPU support
     deploy:
@@ -314,7 +316,7 @@ services:
 
     # Resource limits
     cpus: "${OPENWEBUI_CPUS:-2.0}"
-    mem_limit: "${OPENWEBUI_MEM_LIMIT:-4g}"
+    mem_limit: "${OPENWEBUI_MEM_LIMIT:-2g}"
     pids_limit: ${OPENWEBUI_PIDS_LIMIT:-512}
     # NVIDIA GPU support (requires nvidia-docker and CUDA image)
     deploy:

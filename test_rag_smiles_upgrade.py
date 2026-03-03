@@ -13,6 +13,7 @@ Test Categories:
 """
 
 import sys
+import subprocess
 from pathlib import Path
 
 # Add smiles-pipeline to path
@@ -21,144 +22,137 @@ sys.path.insert(0, str(Path(__file__).parent / "smiles-pipeline" / "src"))
 
 def test_env_config():
     """Test .env configuration settings."""
-    try:
-        from dotenv import load_dotenv
-        from os import getenv
+    from dotenv import load_dotenv
+    from os import getenv
 
-        env_path = Path(__file__).parent / ".env"
-        load_dotenv(env_path)
+    env_path = Path(__file__).parent / ".env"
+    load_dotenv(env_path)
 
-        # Test embedding model
-        embedding_model = getenv("RAG_EMBEDDING_MODEL")
-        assert embedding_model == "BAAI/bge-base-en-v1.5", (
-            f"Expected BAAI/bge-base-en-v1.5, got {embedding_model}"
-        )
+    # Test embedding model
+    embedding_model = getenv("RAG_EMBEDDING_MODEL")
+    assert embedding_model == "BAAI/bge-base-en-v1.5", (
+        f"Expected BAAI/bge-base-en-v1.5, got {embedding_model}"
+    )
 
-        # Test reranker
-        reranker_model = getenv("RAG_RERANKING_MODEL")
-        assert reranker_model == "BAAI/bge-reranker-v2-m3", (
-            f"Expected BAAI/bge-reranker-v2-m3, got {reranker_model}"
-        )
+    # Test reranker
+    reranker_model = getenv("RAG_RERANKING_MODEL")
+    assert reranker_model == "BAAI/bge-reranker-v2-m3", (
+        f"Expected BAAI/bge-reranker-v2-m3, got {reranker_model}"
+    )
 
-        # Test RAG_TOP_K
-        rag_top_k = int(getenv("RAG_TOP_K", "15"))
-        assert rag_top_k >= 10, f"RAG_TOP_K too low: {rag_top_k}"
+    # Test RAG_TOP_K
+    rag_top_k = int(getenv("RAG_TOP_K", "15"))
+    assert rag_top_k >= 10, f"RAG_TOP_K too low: {rag_top_k}"
 
-        # Test CHUNK_SIZE
-        chunk_size = int(getenv("CHUNK_SIZE", "3000"))
-        assert chunk_size >= 2000, f"CHUNK_SIZE too small: {chunk_size}"
+    # Test CHUNK_SIZE
+    chunk_size = int(getenv("CHUNK_SIZE", "3000"))
+    assert chunk_size >= 2000, f"CHUNK_SIZE too small: {chunk_size}"
 
-        # Test CHUNK_OVERLAP
-        chunk_overlap = int(getenv("CHUNK_OVERLAP", "600"))
-        assert chunk_overlap >= 400, f"CHUNK_OVERLAP too small: {chunk_overlap}"
+    # Test CHUNK_OVERLAP
+    chunk_overlap = int(getenv("CHUNK_OVERLAP", "600"))
+    assert chunk_overlap >= 400, f"CHUNK_OVERLAP too small: {chunk_overlap}"
 
-        # Test CHUNK_MIN_SIZE_TARGET
-        min_target = int(getenv("CHUNK_MIN_SIZE_TARGET", "1000"))
-        assert min_target >= 500, f"CHUNK_MIN_SIZE_TARGET too small: {min_target}"
+    # Test CHUNK_MIN_SIZE_TARGET
+    min_target = int(getenv("CHUNK_MIN_SIZE_TARGET", "1000"))
+    assert min_target >= 500, f"CHUNK_MIN_SIZE_TARGET too small: {min_target}"
 
-        # Test RAG_HYBRID_BM25_WEIGHT
-        bm25_weight = float(getenv("RAG_HYBRID_BM25_WEIGHT", "0.4"))
-        assert 0.3 <= bm25_weight <= 0.6, (
-            f"BM25 weight outside expected range: {bm25_weight}"
-        )
+    # Test RAG_HYBRID_BM25_WEIGHT
+    bm25_weight = float(getenv("RAG_HYBRID_BM25_WEIGHT", "0.4"))
+    assert 0.3 <= bm25_weight <= 0.6, (
+        f"BM25 weight outside expected range: {bm25_weight}"
+    )
 
-        print("Config validation passed")
-        return True
-
-    except Exception as e:
-        print(f"Config test skipped: {e}")
-        return True  # Not blocking if dotenv not available
+    print("Config validation passed")
+    return True
 
 
 def test_confidence_scoring():
     """Test validation_rules.yaml confidence scoring."""
-    try:
-        import yaml
+    import yaml
 
-        config_path = (
-            Path(__file__).parent
-            / "smiles-pipeline"
-            / "config"
-            / "validation_rules.yaml"
-        )
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+    config_path = (
+        Path(__file__).parent / "smiles-pipeline" / "config" / "validation_rules.yaml"
+    )
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-        # Test require_positive_indicator
-        confidence = config.get("confidence_scoring", {})
-        requirements = confidence.get("requirements", {})
+    # Test require_positive_indicator
+    confidence = config.get("confidence_scoring", {})
+    requirements = confidence.get("requirements", {})
 
-        assert requirements.get("require_positive_indicator") is True, (
-            "require_positive_indicator should be True"
-        )
+    assert requirements.get("require_positive_indicator") is True, (
+        "require_positive_indicator should be True"
+    )
 
-        positive_indicators = requirements.get("positive_indicators", [])
-        assert "exact_gold_standard_match" in positive_indicators, (
-            "exact_gold_standard_match should be in positive indicators"
-        )
-        assert "scaffold_match" in positive_indicators, (
-            "scaffold_match should be in positive indicators"
-        )
-        assert "methoxy_groups_present" in positive_indicators, (
-            "methoxy_groups_present should be in positive indicators"
-        )
+    positive_indicators = requirements.get("positive_indicators", [])
+    assert "exact_gold_standard_match" in positive_indicators, (
+        "exact_gold_standard_match should be in positive indicators"
+    )
+    assert "scaffold_match" in positive_indicators, (
+        "scaffold_match should be in positive indicators"
+    )
+    assert "methoxy_groups_present" in positive_indicators, (
+        "methoxy_groups_present should be in positive indicators"
+    )
 
-        # Test base scores
-        base_scores = confidence.get("base_scores", {})
-        assert base_scores.get("level_1_syntax_pass") == 30, (
-            "Level 1 score should be 30"
-        )
-        assert base_scores.get("level_2_chemical_pass") == 30, (
-            "Level 2 score should be 30"
-        )
-        assert base_scores.get("level_3_domain_pass") == 20, (
-            "Level 3 score should be 20"
-        )
+    # Test base scores
+    base_scores = confidence.get("base_scores", {})
+    assert base_scores.get("level_1_syntax_pass") == 30, "Level 1 score should be 30"
+    assert base_scores.get("level_2_chemical_pass") == 30, (
+        "Level 2 score should be 30"
+    )
+    assert base_scores.get("level_3_domain_pass") == 20, "Level 3 score should be 20"
 
-        print("Confidence scoring validation passed")
-        return True
-
-    except Exception as e:
-        print(f"Confidence scoring test skipped: {e}")
-        return True  # Not blocking if YAML not available
+    print("Confidence scoring validation passed")
+    return True
 
 
 def test_fingerprint_generator():
     """Test fingerprint generator produces valid vectors."""
-    try:
-        from enrichers.fingerprint_generator import FingerprintGenerator
+    # Guard against silent ABI drift where RDKit emits errors but import still appears usable.
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from rdkit import Chem; from rdkit.Chem import AllChem, MACCSkeys",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    abi_error_markers = ("_ARRAY_API not found", "compiled using NumPy 1.x")
+    abi_output = f"{probe.stdout}\n{probe.stderr}"
+    assert probe.returncode == 0, f"RDKit import probe failed: {probe.stderr.strip()}"
+    assert not any(marker in abi_output for marker in abi_error_markers), (
+        "RDKit/NumPy ABI mismatch detected; align RDKit build with NumPy major version."
+    )
 
-        gen = FingerprintGenerator()
+    from enrichers.fingerprint_generator import FingerprintGenerator
 
-        # Test with a known alkaloid SMILES
-        smiles = "CN1CC[C@@H]2C1CC(=O)CC2"  # mesembrine core
+    gen = FingerprintGenerator()
 
-        # Test ECFP4
-        ecfp4 = gen.ecfp4(smiles)
-        assert len(ecfp4) == 2048, f"ECFP4 should be 2048-dim, got {len(ecfp4)}"
-        assert all(isinstance(x, float) for x in ecfp4), "ECFP4 should be float vector"
+    # Test with a known alkaloid SMILES
+    smiles = "CN1CC[C@@H]2C1CC(=O)CC2"  # mesembrine core
 
-        # Test MACCS
-        maccs = gen.maccs(smiles)
-        assert len(maccs) == 167, f"MACCS should be 167-dim, got {len(maccs)}"
-        assert all(isinstance(x, float) for x in maccs), "MACCS should be float vector"
+    # Test ECFP4
+    ecfp4 = gen.ecfp4(smiles)
+    assert len(ecfp4) == 2048, f"ECFP4 should be 2048-dim, got {len(ecfp4)}"
+    assert all(isinstance(x, float) for x in ecfp4), "ECFP4 should be float vector"
 
-        # Test similarity
-        smiles2 = "CN1CC[C@H]2C1CC(=O)CC2"  # stereoisomer
+    # Test MACCS
+    maccs = gen.maccs(smiles)
+    assert len(maccs) == 167, f"MACCS should be 167-dim, got {len(maccs)}"
+    assert all(isinstance(x, float) for x in maccs), "MACCS should be float vector"
 
-        ecfp4_2 = gen.ecfp4(smiles2)
+    # Test similarity
+    smiles2 = "CN1CC[C@H]2C1CC(=O)CC2"  # stereoisomer
 
-        tanimoto = gen.tanimoto_similarity(ecfp4, ecfp4_2)
-        assert 0.7 <= tanimoto <= 1.0, (
-            f"Similar isomers should have high Tanimoto: {tanimoto}"
-        )
+    ecfp4_2 = gen.ecfp4(smiles2)
 
-        print("Fingerprint generator passed")
-        return True
+    tanimoto = gen.tanimoto_similarity(ecfp4, ecfp4_2)
+    assert 0.7 <= tanimoto <= 1.0, f"Similar isomers should have high Tanimoto: {tanimoto}"
 
-    except Exception as e:
-        print(f"Fingerprint generator test skipped: {e}")
-        return True  # Not blocking if RDKit not available
+    print("Fingerprint generator passed")
+    return True
 
 
 def test_molecular_table_schema():

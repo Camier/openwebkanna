@@ -33,7 +33,7 @@ dependencies:
       - tensorflow>=2.15.0,<2.16.0
 
       # Cheminformatics (via pip)
-      - epam-indigo>=1.40.0
+      - epam-indigo>=1.40.0,<1.41.0
 
       # OCSR tools
       - git+https://github.com/thomas0809/MolScribe.git  # Python 3.11 compatible

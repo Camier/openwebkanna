@@ -5,8 +5,8 @@ This directory contains deprecated scripts that are no longer actively maintaine
 ## vLLM Scripts (Deprecated)
 
 **Status:** Deprecated as of February 2026
-**Replaced by:** CLIProxyAPI-first architecture
-**Migration:** Use CLIProxyAPI scripts (`start-cliproxyapi.sh`, `stop-cliproxyapi.sh`, etc.)
+**Replaced by:** LiteLLM-first architecture
+**Migration:** Use standard stack operations (`deploy.sh`, `status.sh`, baseline tests). CLIProxyAPI remains optional legacy sidecar only.
 
 ### Archived Scripts
 - `start-vllm.sh` - Start vLLM server (deprecated)
@@ -16,12 +16,12 @@ This directory contains deprecated scripts that are no longer actively maintaine
 
 ### Why Deprecated?
 
-vLLM was the original local LLM serving solution for this RAG deployment. However, it has been replaced by **CLIProxyAPI** for the following reasons:
+vLLM was the original local LLM serving solution for this RAG deployment. It is now non-default, with LiteLLM as the reference upstream and CLIProxyAPI kept only for legacy sidecar workflows.
 
-1. **Better OAuth Integration**: CLIProxyAPI provides seamless OAuth-backed model aliases (Z.ai, MiniMax, etc.)
-2. **Production-Ready**: CLIProxyAPI is a managed, battle-tested solution
-3. **Simplified Architecture**: No need to manage Python environments, CUDA drivers, and model downloads
-4. **Multi-Provider Support**: Single interface for multiple upstream providers
+1. **LiteLLM-first Operations**: the repository defaults are standardized on an OpenAI-compatible LiteLLM endpoint.
+2. **Simplified Runtime Expectations**: fallback paths remain available but are no longer required for normal operation.
+3. **Legacy OAuth Optionality**: CLIProxyAPI alias workflows remain possible without being the primary control plane.
+4. **Reduced Drift**: docs/tests now validate the same default upstream path.
 
 ### For Reference Only
 
@@ -33,10 +33,9 @@ These scripts remain here for:
 ### Current Architecture
 
 ```
-OpenWebUI → CLIProxyAPI → OAuth Providers
-              (port 8317)    - Z.ai glm-5
-                             - MiniMax MiniMax-M2.5
-                             - (optional local vLLM)
+OpenWebUI → LiteLLM → providers
+         \-> optional CLIProxyAPI sidecar (legacy)
+         \-> optional local vLLM fallback
 ```
 
 See [README.md](../README.md) for current deployment instructions.

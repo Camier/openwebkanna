@@ -1,9 +1,9 @@
-# Setup Guide: OpenWebUI + CLIProxyAPI
+# Setup Guide: OpenWebUI + LiteLLM
 
-Last updated: 2026-02-12 (UTC)
+Last updated: 2026-03-03 (UTC)
 
 This is the canonical setup path for this repository.
-Default mode is CLIProxyAPI-first with Docker-managed services.
+Default mode is LiteLLM-first with Docker-managed services.
 
 ## 1. Prepare environment
 
@@ -15,22 +15,15 @@ cp .env.example .env
 Edit `.env` if needed, then ensure these values:
 
 ```bash
-OPENAI_API_BASE_URL=http://cliproxyapi:8317/v1
-OPENAI_API_BASE_URLS=http://cliproxyapi:8317/v1
-CLIPROXYAPI_ENABLED=true
-CLIPROXYAPI_DOCKER_MANAGED=true
+OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
+OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
+CLIPROXYAPI_ENABLED=false
 ```
 
-## 2. Configure OAuth credentials
+## 2. Configure LiteLLM access
 
-If OAuth credentials are not set yet:
-
-```bash
-./configure-cliproxyapi-oauth.sh
-```
-
-Manual OAuth in the browser is expected.
-Credentials are persisted under `cliproxyapi/auth/`.
+- Start LiteLLM and confirm `/v1/models` is reachable from host.
+- Ensure `OPENAI_API_KEY` in `.env` matches LiteLLM's configured master key.
 
 ## 3. Start services
 
@@ -39,19 +32,23 @@ Credentials are persisted under `cliproxyapi/auth/`.
 ```
 
 What this does:
-- starts `cliproxyapi` Docker service
-- validates CLIProxyAPI health and models endpoint
-- starts OpenWebUI stack
-- skips vLLM startup if CLIProxyAPI is healthy
+- starts OpenWebUI stack (plus optional sidecars defined in compose)
+- validates core service health
+- keeps OpenWebUI routed to LiteLLM (reference upstream)
 
 ## 4. Validate deployment
 
 ```bash
 ./status.sh
 docker compose ps
+./audit-no-mock.sh
+```
+
+Optional legacy checks (only if `CLIPROXYAPI_ENABLED=true`):
+
+```bash
 ./check-cliproxyapi.sh
 ./test-openwebui-cliproxy-routing.sh
-./audit-no-mock.sh
 ```
 
 Baseline validation (fast checks):
@@ -118,6 +115,31 @@ OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh --restore
 Notes:
 - This is intentionally manual-token only (no auto sign-in), to avoid hidden credential assumptions.
 - UI path for the same settings: `http://localhost:<WEBUI_PORT>/admin/settings/documents`
+
+### LiteLLM multimodal full validation
+
+When running with LiteLLM (port `4000`), validate multimodal ingestion with a local PDF fixture.
+
+```bash
+# 1) Apply multimodal-friendly retrieval settings
+OPENWEBUI_API_KEY="<admin-bearer-token>" \
+TUNE_CONTENT_EXTRACTION_ENGINE=docling \
+TUNE_PDF_EXTRACT_IMAGES=true \
+./tune-openwebui-documents.sh --apply
+
+# 2) Run full RAG test suite in LiteLLM mode with a local PDF
+OPENWEBUI_URL=http://localhost:3010 \
+RAG_UPSTREAM_MODE=litellm \
+VLLM_URL=http://localhost:4000 \
+RAG_MULTIMODAL_TEST_PDF="data/pdfs/<your-paper>.pdf" \
+./test-rag.sh --full
+```
+
+If you need strict enforcement (no skip on missing fixture or prereqs), set:
+
+```bash
+RAG_MULTIMODAL_STRICT=true
+```
 
 ## 5. Validate OAuth aliases
 

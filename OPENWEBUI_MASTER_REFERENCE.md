@@ -1,8 +1,8 @@
 # OpenWebUI Master Technical Reference
 
 > **OpenWebUI Version:** v0.8.3
-> **Repository:** CLIProxyAPI-integrated deployment
-> **Last Updated:** 2026-02-18
+> **Repository:** LiteLLM-first deployment (CLIProxyAPI optional legacy sidecar)
+> **Last Updated:** 2026-03-03
 
 ---
 
@@ -529,14 +529,15 @@ class Filter:
 
 ### 8.1 Deploy OpenWebUI (Repository-Specific)
 
-This repository uses CLIProxyAPI for LLM provider integration with OAuth authentication.
+This repository uses LiteLLM as the reference OpenAI-compatible upstream.
+CLIProxyAPI is optional and only for legacy OAuth alias workflows.
 
 ```bash
 # 1. Prepare environment
 cp .env.example .env
 # Edit .env to set required values:
 # - WEBUI_SECRET_KEY (>=32 bytes)
-# - OPENAI_API_KEY (for CLIProxyAPI)
+# - OPENAI_API_KEY (for LiteLLM)
 # - JUPYTER_TOKEN
 # - POSTGRES_PASSWORD
 
@@ -545,14 +546,13 @@ cp .env.example .env
 
 # 3. Verify services
 ./status.sh
-./check-cliproxyapi.sh
 
 # 4. Run baseline tests
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
 ```
 
-**Note:** For OAuth setup, see `./configure-cliproxyapi-oauth.sh`
+**Note:** Optional legacy OAuth sidecar setup is available via `./configure-cliproxyapi-oauth.sh`.
 
 ### 8.2 Enable RAG with Custom Settings
 

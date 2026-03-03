@@ -161,7 +161,7 @@ class RAGFingerprintStorage:
                             cur.execute(
                                 """
                                 UPDATE document_chunk
-                                SET molecule_fingerprint = %s::vector,
+                                SET molecule_fingerprint = %s::halfvec,
                                     molecule_smiles = %s,
                                     molecule_metadata = %s::jsonb
                                 WHERE id = %s
@@ -211,7 +211,7 @@ class RAGFingerprintStorage:
                 cur.execute(
                     """
                     UPDATE document_chunk
-                    SET molecule_fingerprint = %s::vector,
+                    SET molecule_fingerprint = %s::halfvec,
                         molecule_smiles = %s,
                         molecule_metadata = %s::jsonb
                     WHERE id = %s
@@ -239,18 +239,17 @@ class RAGFingerprintStorage:
 
         with psycopg2.connect(self.db_url) as conn:
             with conn.cursor() as cur:
-                # Cosine similarity: 1 - cosine_distance
                 cur.execute(
                     """
                     SELECT
                         id,
                         molecule_smiles,
-                        1 - (molecule_fingerprint::halfvec <-> %s::halfvec) as similarity,
+                        1 - (molecule_fingerprint <=> %s::halfvec) as similarity,
                         metadata->>'title' as title,
                         molecule_metadata
                     FROM document_chunk
                     WHERE molecule_fingerprint IS NOT NULL
-                      AND 1 - (molecule_fingerprint::halfvec <-> %s::halfvec) >= %s
+                      AND 1 - (molecule_fingerprint <=> %s::halfvec) >= %s
                     ORDER BY similarity DESC
                     LIMIT %s
                 """,
@@ -318,6 +317,14 @@ class RAGFingerprintStorage:
                 """)
 
                 row = cur.fetchone()
+
+                if row is None:
+                    return {
+                        "total_documents": 0,
+                        "documents_with_fingerprints": 0,
+                        "unique_smiles": 0,
+                        "coverage": 0,
+                    }
 
                 return {
                     "total_documents": row[0],

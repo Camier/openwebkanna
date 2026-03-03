@@ -1,20 +1,20 @@
-# OpenWebUI + CLIProxyAPI RAG Deployment
+# OpenWebUI + LiteLLM RAG Deployment
 
-Last updated: 2026-02-25 (UTC)
+Last updated: 2026-03-03 (UTC)
 
-This repository is an orchestration layer for an academic-papers RAG workflow in OpenWebUI with a real CLIProxyAPI backend.
+This repository is an orchestration layer for an academic-papers RAG workflow in OpenWebUI with LiteLLM as the reference OpenAI-compatible backend.
 
 ## Current architecture
 
 - OpenWebUI runs in Docker (`openwebui` service).
-- CLIProxyAPI runs in Docker (`cliproxyapi` service) and exposes an OpenAI-compatible API.
-- OpenWebUI reaches CLIProxyAPI through Docker DNS: `http://cliproxyapi:8317/v1`.
-- vLLM is optional host-side fallback and is not started when CLIProxyAPI is healthy.
+- LiteLLM is the primary OpenAI-compatible upstream (`http://host.docker.internal:4000/v1`).
+- CLIProxyAPI is an optional/deprecated sidecar (`cliproxyapi` service) for legacy OAuth alias workflows.
+- OpenWebUI reaches LiteLLM through host-gateway bridge (`host.docker.internal` from container context).
 
 ```text
-OpenWebUI (container) --> CLIProxyAPI (container) --> OAuth-backed providers
-                                         \
-                                          \--> optional host vLLM fallback
+OpenWebUI (container) --> LiteLLM (host/container) --> providers
+                     \
+                      \--> optional CLIProxyAPI sidecar (legacy workflows)
 ```
 
 ## What is production-relevant here
@@ -30,9 +30,10 @@ OpenWebUI (container) --> CLIProxyAPI (container) --> OAuth-backed providers
 
 - Docker + Docker Compose plugin
 - `curl`, `jq`
-- Local OAuth credentials prepared manually for providers you use
+- LiteLLM credentials and reachable LiteLLM endpoint
 
 Optional:
+- CLIProxyAPI OAuth credentials (legacy sidecar workflows)
 - vLLM Python environment (only if you intentionally enable fallback)
 
 ## Quick start
@@ -44,10 +45,9 @@ cp .env.example .env
 
 2. Ensure these values are set in `.env`:
 ```bash
-OPENAI_API_BASE_URL=http://cliproxyapi:8317/v1
-OPENAI_API_BASE_URLS=http://cliproxyapi:8317/v1
-CLIPROXYAPI_DOCKER_MANAGED=true
-CLIPROXYAPI_ENABLED=true
+OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
+OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
+CLIPROXYAPI_ENABLED=false
 ```
 
 3. Start stack:
@@ -59,6 +59,10 @@ CLIPROXYAPI_ENABLED=true
 ```bash
 ./status.sh
 docker compose ps
+```
+
+Optional sidecar check (only if `CLIPROXYAPI_ENABLED=true`):
+```bash
 ./check-cliproxyapi.sh
 ```
 
@@ -254,16 +258,16 @@ Then validate aliases and chat routing:
 
 ## OpenWebUI routing verification
 
-Run end-to-end routing check from OpenWebUI to CLIProxyAPI:
+Run end-to-end routing check from OpenWebUI to LiteLLM:
 
+```bash
+./test-rag.sh --baseline
+```
+
+Optional legacy route verification (only when sidecar is enabled):
 ```bash
 ./test-openwebui-cliproxy-routing.sh
 ```
-
-This verifies:
-- OpenWebUI can reach `http://cliproxyapi:8317/v1/models`
-- OpenWebUI model list contains required aliases
-- Chat completions route through each alias
 
 ## LLM Council
 
@@ -482,7 +486,7 @@ conda activate smiles-extraction
 cd smiles-pipeline
 python -m scripts.extract_smiles_from_images \
   --paper-id "2024_Smith_TotalSynthesis" \
-  --backend-order "molscribe,decimer,vlm" \
+  --backend-order "molscribe,decimer" \
   --output-dir ../data/extractions
 ```
 
@@ -583,7 +587,7 @@ See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/doc
 
 ### Molecular retrieval pipeline
 
-- `scripts/extract_smiles_from_images.py`: Extract SMILES candidates from paper images with backend order control (`molscribe,decimer,vlm`), RDKit validation, and optional `molecules.jsonl` output.
+- `scripts/extract_smiles_from_images.py`: Extract SMILES candidates from paper images with backend order control (`molscribe,decimer`), RDKit validation, and optional `molecules.jsonl` output.
 - `scripts/embed_images_in_chunks.py`: Build multimodal chunk JSONL and optionally include molecule hints for matching image blocks.
 - `scripts/filter_high_confidence_smiles.py`: Keep only high-confidence molecule rows in `molecules_high_confidence.jsonl`.
 - `scripts/smiles_qa_summary.py`: Generate per-paper and aggregate QA metrics (`smiles_qa_summary.json`).
@@ -593,22 +597,22 @@ See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/doc
 
 ## Key files
 
-- `docker-compose.yml`: OpenWebUI + CLIProxyAPI services (SearXNG is host-local)
+- `docker-compose.yml`: OpenWebUI + LiteLLM-oriented services (SearXNG is host-local)
 - `.env.example`: canonical configuration template
 - `OPENWEBUI_ADVANCED_FEATURES_PLAYBOOK.md`: phased advanced-feature rollout and hardening guide
 - `cliproxyapi/config.yaml`: CLIProxyAPI provider and alias mapping
 - `deploy.sh`: orchestrated startup logic with health gates
-- `test-openwebui-cliproxy-routing.sh`: OpenWebUI-to-CLIProxyAPI E2E validation
+- `test-openwebui-cliproxy-routing.sh`: Optional OpenWebUI-to-CLIProxyAPI E2E validation
 
 ## Known constraints
 
 - `OPENWEBUI_URL` and `VLLM_URL` in `.env` are used by wrapper scripts, not Docker service discovery.
 - `cli-proxy-api.sh` command namespace still uses `vllm` as the OpenAI-compatible service label.
-  In this repository, that label usually points to CLIProxyAPI through `OPENAI_API_BASE_URL`.
+  In this repository, that label should point to LiteLLM through `OPENAI_API_BASE_URL`.
 
 ## Troubleshooting
 
-- If `cliproxyapi` is unhealthy in compose:
+- If optional `cliproxyapi` is unhealthy in compose:
 ```bash
 docker compose logs --tail=200 cliproxyapi
 ```
@@ -626,6 +630,6 @@ lsof -nP -iTCP:8317 -sTCP:LISTEN
 
 ## Scope note
 
-This README is the source of truth for the current deployment mode as of 2026-02-25.
-Legacy vLLM-first documentation has been intentionally replaced with CLIProxyAPI-first operations.
+This README is the source of truth for the current deployment mode as of 2026-03-03.
+Legacy sidecar-first documentation has been intentionally replaced with LiteLLM-first operations.
 The SMILES Extraction Pipeline v2.0 (OCSR backends) is now fully installed and tested.

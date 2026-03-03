@@ -231,15 +231,19 @@ check_http_health() {
 }
 
 check_models() {
-    local header="Authorization: Bearer $CLIPROXYAPI_API_KEY"
+    local auth_header=""
     local models_url="${CLIPROXYAPI_BASE_URL}${CLIPROXYAPI_MODELS_PATH}"
     local tmp_file
     tmp_file="$(mktemp)"
 
+    if [ -n "$CLIPROXYAPI_API_KEY" ]; then
+        auth_header="Bearer $CLIPROXYAPI_API_KEY"
+    fi
+
     print_step "Checking models endpoint"
 
     local code
-    code="$(http_status_with_body "$models_url" "$tmp_file" "$CLIPROXYAPI_CHECK_TIMEOUT" "$header")"
+    code="$(http_status_with_body "$models_url" "$tmp_file" "$CLIPROXYAPI_CHECK_TIMEOUT" "$auth_header")"
     if [ "$code" != "200" ]; then
         print_error "Models endpoint failed ($models_url), status: $code"
         if [ "$code" = "401" ] || [ "$code" = "403" ]; then
