@@ -7,7 +7,7 @@ This document is the operational single source of truth for the current text + S
 ## Active profile
 
 1. Text KB retrieval keeps a dedicated text embedding model via `RAG_EMBEDDING_MODEL`.
-2. SMILES retrieval keeps dedicated fingerprint channels with `ecfp4,maccs`.
+2. SMILES retrieval is locked to one stable fingerprint channel: `ecfp4`.
 3. Molecular embedding is optional and additive (`SMILES_ENABLE_EMBEDDING_SIGNAL=true`), not a replacement for fingerprints.
 4. Multi-channel fusion uses Reciprocal Rank Fusion (RRF).
 5. Validation tracks text and SMILES recall independently before and after fusion.
@@ -34,7 +34,7 @@ RETRIEVAL_CHANNEL_WEIGHTS=text_dense=1.0,bm25=1.0,smiles_fingerprint=1.0,smiles_
 
 # SMILES retrieval
 SMILES_RETRIEVAL_ENABLED=true
-SMILES_FINGERPRINT_TYPES=ecfp4,maccs
+SMILES_FINGERPRINT_TYPES=ecfp4
 SMILES_FINGERPRINT_INDEX_TYPE=ivfflat
 SMILES_ENABLE_EMBEDDING_SIGNAL=false
 SMILES_EMBEDDING_MODEL=ibm/MoLFormer-XL-both-10pct
@@ -44,16 +44,21 @@ SMILES_EMBEDDING_MODEL=ibm/MoLFormer-XL-both-10pct
 
 1. `text_dense`: text embedding retrieval from KB chunks.
 2. `bm25`: sparse keyword retrieval.
-3. `smiles_fingerprint`: structure similarity using ECFP4/MACCS vectors and dedicated DB columns/indexes.
+3. `smiles_fingerprint`: structure similarity using ECFP4 vectors and dedicated DB column/index.
 4. `smiles_embedding` (optional): molecular encoder signal, enabled explicitly.
 5. Fusion output: RRF over available channels.
 
 ## API behavior
 
-1. `POST /v1/structure/search` accepts `fingerprint_type=ecfp4|maccs`.
-2. `POST /v1/structure/batch-search` accepts query param `fingerprint_type=ecfp4|maccs`.
+1. `POST /v1/structure/search` accepts `fingerprint_type=ecfp4` in the stable profile.
+2. `POST /v1/structure/batch-search` accepts query param `fingerprint_type=ecfp4` in the stable profile.
 3. `POST /v1/retrieval/fuse` fuses `text_dense`, `bm25`, `smiles_fingerprint`, and optional `smiles_embedding`.
-4. `GET /v1/structure/stats` exposes combined and per-channel fingerprint coverage.
+4. `GET /v1/structure/stats` exposes combined/per-channel coverage and runtime-enabled fingerprint types.
+
+## Deferred channels
+
+1. `maccs` is intentionally deferred for now to minimize operational drift.
+2. Re-enable only after DB column/index parity and eval metrics are validated end-to-end.
 
 ## Operations
 
@@ -68,8 +73,12 @@ Validate retrieval metrics with sample data:
 
 ```bash
 mise run smiles:eval-retrieval
+# Eval-only toggle for the mise task flag (--enable-smiles-embedding)
 ENABLE_SMILES_EMBEDDING=1 mise run smiles:eval-retrieval
 ```
+
+Note: `ENABLE_SMILES_EMBEDDING` is only an eval-task switch.
+Runtime wiring still uses `.env` key `SMILES_ENABLE_EMBEDDING_SIGNAL`.
 
 Run targeted tests:
 

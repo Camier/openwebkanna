@@ -1,7 +1,7 @@
 # Repository Map: OpenWebUI + LiteLLM RAG Deployment
 
 ## TL;DR
-This repository is an **orchestration and deployment layer** for OpenWebUI + LiteLLM, optimized for ethnopharmacological research (specifically Sceletium tortuosum and related medicinal plants). OpenWebUI, LiteLLM, and supporting services run in Docker. Primary operations are shell-first, with supporting Python utilities for extraction, validation, and pipeline quality checks.
+This repository is an **orchestration and deployment layer** for OpenWebUI + LiteLLM, optimized for ethnopharmacological research (specifically Sceletium tortuosum and related medicinal plants). OpenWebUI and supporting services run in Docker; LiteLLM runs on host (port 4000) and is consumed from containers through `host.docker.internal`. Primary operations are shell-first, with supporting Python utilities for extraction, validation, and pipeline quality checks.
 
 ## Project Overview
 
@@ -12,7 +12,7 @@ Deploy and manage a complete RAG (Retrieval-Augmented Generation) system for aca
 ```text
 ┌─────────────────┐      ┌──────────────────┐      ┌─────────────────────────┐
 │   OpenWebUI     │──────▶  LiteLLM Proxy   │──────▶  Upstream Providers    │
-│   (Docker)      │      │   (Docker)       │      │  - openrouter/*         │
+│   (Docker)      │      │    (Host)        │      │  - openrouter/*         │
 │   Port 3000     │      │   Port 4000      │      │  - deepseek/*           │
 └─────────────────┘      └──────────────────┘      │  - zai-glm-*            │
          │                                         │  - minimax-*            │
@@ -36,7 +36,7 @@ Deploy and manage a complete RAG (Retrieval-Augmented Generation) system for aca
 |-----------|-----------|---------------|
 | Container Runtime | Docker + Docker Compose | v2 plugin preferred |
 | Web UI | OpenWebUI | v0.8.3 (pinned) |
-| API Proxy | LiteLLM | External Docker container, port 4000 |
+| API Proxy | LiteLLM | Host-side service on port 4000 (OpenAI-compatible) |
 | Vector Database | PostgreSQL + pgvector | pg16 |
 | Code Execution | Jupyter (scipy-notebook) | Latest (configurable) |
 | Scripting | Bash | All scripts use `set -e` |
@@ -47,7 +47,7 @@ Deploy and manage a complete RAG (Retrieval-Augmented Generation) system for aca
 ```
 openwebui/
 ├── *.sh                         # 40+ operational scripts (deploy, test, manage)
-├── docker-compose.yml           # Container definitions (5 default + 1 legacy profile service)
+├── docker-compose.yml           # Container definitions (7 services; cliproxyapi is profile-gated)
 ├── docker-compose.rg.yml        # Alternative compose configuration
 ├── .env / .env.example          # Configuration (NEVER commit .env)
 ├── Dockerfile.openwebui-rg      # Custom OpenWebUI image build
@@ -59,7 +59,6 @@ openwebui/
 │   ├── auth/                    # OAuth credentials (gitignored)
 │   ├── logs/                    # Runtime logs (gitignored)
 │   └── vendor/                  # Vendor files (gitignored)
-│
 ├── lib/                         # Shared shell script libraries
 │   ├── init.sh                 # Single-source loader (sources all below)
 │   ├── colors.sh                # ANSI color definitions
@@ -119,7 +118,7 @@ Primary configuration file. Key variables:
 |----------|---------|---------|
 | `WEBUI_PORT` | `3000` | Web interface port |
 | `WEBUI_SECRET_KEY` | (required) | Session signing key (>=32 bytes) |
-| `OPENAI_API_BASE_URL` | `http://host.docker.internal:4000/v1` | LiteLLM connection (host-gateway bridge) |
+| `OPENAI_API_BASE_URL` | `http://host.docker.internal:4000/v1` | LiteLLM connection (host gateway from Docker) |
 | `OPENAI_API_KEY` | (required) | LiteLLM master key |
 | `CLIPROXYAPI_ENABLED` | `false` | Enable optional CLIProxyAPI sidecar |
 | `CLIPROXYAPI_DOCKER_MANAGED` | `true` | Docker-managed CLIProxyAPI |
@@ -136,13 +135,14 @@ Primary configuration file. Key variables:
 | `ENABLE_WEB_SEARCH` | `false` | Enable web search via SearXNG |
 
 ### `docker-compose.yml`
-Defines 6 services (5 started by default; `cliproxyapi` is profile-gated legacy sidecar):
+Defines 7 services (6 started by default; `cliproxyapi` is profile-gated legacy sidecar):
 1. **postgres**: PostgreSQL 16 with pgvector extension
 2. **jupyter**: Jupyter notebook for code execution
 3. **mcpo**: MCP-to-OpenAPI proxy (v0.0.19)
 4. **docling**: Docling multimodal extraction service
-5. **openwebui**: OpenWebUI web interface
-6. **cliproxyapi**: CLIProxyAPI OAuth proxy (legacy profile `legacy-cliproxy`)
+5. **smiles-structure-api**: FastAPI + RDKit structure search service
+6. **openwebui**: OpenWebUI web interface
+7. **cliproxyapi**: CLIProxyAPI OAuth proxy (legacy profile `legacy-cliproxy`)
 ### `cliproxyapi/config.yaml`
 CLIProxyAPI configuration. Contains:
 - Server settings (host, port, TLS)
@@ -191,12 +191,12 @@ docker compose down          # Stop and remove containers
 ./logs.sh                    # View logs from all services
 ```
 
-#### vLLM Server (Optional Fallback)
+#### vLLM Server (Optional Fallback, archived scripts)
 ```bash
-./start-vllm.sh              # Start vLLM server (background, logs to vllm.log)
-./stop-vllm.sh               # Graceful shutdown
-./restart-vllm.sh            # Stop + start
-./check-vllm.sh              # Health check
+./archive/start-vllm.sh      # Start vLLM server (background, logs to vllm.log)
+./archive/stop-vllm.sh       # Graceful shutdown
+./archive/restart-vllm.sh    # Stop + start
+./archive/check-vllm.sh      # Health check
 ```
 
 ### Maintenance
@@ -393,7 +393,7 @@ bash -n *.sh                    # Syntax check
 Check with: `lsof -nP -iTCP:PORT -sTCP:LISTEN`
 
 ### Docker DNS
-Default upstream is LiteLLM via `http://host.docker.internal:4000/v1`.
+Default upstream is host LiteLLM via `http://host.docker.internal:4000/v1`.
 If you intentionally enable CLIProxyAPI sidecar routing, use `http://cliproxyapi:8317/v1` and keep both containers on `openwebui_network`.
 
 ### OAuth Credentials
@@ -409,7 +409,7 @@ CLIProxyAPI requires valid OAuth auth state in `cliproxyapi/auth/`. Manual OAuth
 ```
 
 ### vLLM Fallback
-Only used when CLIProxyAPI is unhealthy AND `AUTO_START_VLLM_ON_CLIPROXYAPI_FAILURE=true`. Requires Conda env at `~/.conda/envs/vllm`.
+No automatic vLLM fallback is currently wired in `deploy.sh`. Use archived scripts manually if you explicitly need local vLLM fallback (`./archive/start-vllm.sh`, etc.).
 
 ## Development Workflow
 
@@ -429,8 +429,8 @@ docker compose down && docker compose up -d
 ./restart-cliproxyapi.sh
 
 # 5. vLLM changes (if using fallback)
-# Edit start-vllm.sh
-./restart-vllm.sh
+# Edit archive/start-vllm.sh
+./archive/restart-vllm.sh
 
 # 6. Always run RAG tests after changes
 ./test-rag.sh --baseline

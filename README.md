@@ -391,12 +391,12 @@ To use LLM Council as an in-chat tool:
 ./restart-cliproxyapi.sh
 ```
 
-- vLLM lifecycle (optional fallback):
+- vLLM lifecycle (archived fallback scripts):
 ```bash
-./start-vllm.sh
-./check-vllm.sh
-./stop-vllm.sh
-./restart-vllm.sh
+./archive/start-vllm.sh
+./archive/check-vllm.sh
+./archive/stop-vllm.sh
+./archive/restart-vllm.sh
 ```
 
 - Runtime visibility:
@@ -412,7 +412,7 @@ This stack now includes `mcpo` (MCP-to-OpenAPI proxy) as a Docker service.
 1. Ensure these env values are set in `.env` (or keep defaults from `.env.example`):
 ```bash
 WEBUI_SECRET_KEY=<strong-random-secret-at-least-32-bytes>
-MCPO_IMAGE=ghcr.io/open-webui/mcpo:main
+MCPO_IMAGE=ghcr.io/open-webui/mcpo:v0.0.19
 MCPO_PORT=8000
 MCPO_CONFIG=./mcp/config.json
 ZOTERO_DATA_DIR=/home/miko/Zotero
@@ -568,8 +568,8 @@ See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/doc
 
 ## Important behavior in `deploy.sh`
 
-- If CLIProxyAPI is healthy and `AUTO_SKIP_VLLM_IF_CLIPROXYAPI_HEALTHY=true`, vLLM is skipped.
-- If CLIProxyAPI is unhealthy and `AUTO_START_VLLM_ON_CLIPROXYAPI_FAILURE=true`, fallback vLLM startup is allowed.
+- `deploy.sh` does not auto-start or auto-stop host-side vLLM/LiteLLM processes.
+- vLLM fallback automation knobs (`AUTO_SKIP_VLLM_IF_CLIPROXYAPI_HEALTHY`, `AUTO_START_VLLM_ON_CLIPROXYAPI_FAILURE`) are not active in current scripts.
 - Docker-managed CLIProxyAPI is controlled by:
 1. `CLIPROXYAPI_DOCKER_MANAGED`
 2. `CLIPROXYAPI_DOCKER_SERVICE`

@@ -157,8 +157,8 @@ Expected aliases:
 Only do this if you explicitly want fallback behavior.
 
 ```bash
-./start-vllm.sh
-./check-vllm.sh
+./archive/start-vllm.sh
+./archive/check-vllm.sh
 ```
 
 ## 7. Useful operations
