@@ -211,6 +211,40 @@ services:
     networks:
       - openwebui_network
 
+  # SMILES structure-search API (RDKit + FastAPI)
+  smiles-structure-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.smiles-structure-api
+    image: openwebui-smiles-structure-api:local
+    container_name: smiles_structure_api
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${SMILES_STRUCTURE_API_DB_URL:-postgresql://${POSTGRES_USER:-openwebui}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-openwebui}}
+      - SMILES_FINGERPRINT_TYPES=${SMILES_FINGERPRINT_TYPES:-ecfp4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${SMILES_STRUCTURE_API_BIND_ADDRESS:-127.0.0.1}:${SMILES_STRUCTURE_API_PORT:-8011}:8011"
+    # Resource limits
+    cpus: "${SMILES_STRUCTURE_API_CPUS:-1.0}"
+    mem_limit: "${SMILES_STRUCTURE_API_MEM_LIMIT:-1g}"
+    pids_limit: ${SMILES_STRUCTURE_API_PIDS_LIMIT:-256}
+    # Security hardening
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend_network
+
   openwebui:
     image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}
     container_name: openwebui
@@ -224,6 +258,8 @@ services:
       mcpo:
         condition: service_healthy
       docling:
+        condition: service_healthy
+      smiles-structure-api:
         condition: service_healthy
     environment:
       # Authentication
@@ -257,7 +293,7 @@ services:
       - RETRIEVAL_FUSION_TOP_K=${RETRIEVAL_FUSION_TOP_K:-20}
       - RETRIEVAL_CHANNEL_WEIGHTS=${RETRIEVAL_CHANNEL_WEIGHTS:-text_dense=1.0,bm25=1.0,smiles_fingerprint=1.0,smiles_embedding=1.0}
       - SMILES_RETRIEVAL_ENABLED=${SMILES_RETRIEVAL_ENABLED:-true}
-      - SMILES_FINGERPRINT_TYPES=${SMILES_FINGERPRINT_TYPES:-ecfp4,maccs}
+      - SMILES_FINGERPRINT_TYPES=${SMILES_FINGERPRINT_TYPES:-ecfp4}
       - SMILES_FINGERPRINT_INDEX_TYPE=${SMILES_FINGERPRINT_INDEX_TYPE:-ivfflat}
       - SMILES_ENABLE_EMBEDDING_SIGNAL=${SMILES_ENABLE_EMBEDDING_SIGNAL:-false}
       - SMILES_EMBEDDING_MODEL=${SMILES_EMBEDDING_MODEL:-ibm/MoLFormer-XL-both-10pct}

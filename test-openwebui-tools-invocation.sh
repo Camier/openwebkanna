@@ -73,6 +73,10 @@ load_env_defaults() {
     done <"$env_file"
 }
 
+# Load local .env values before deriving runtime defaults so this test aligns
+# with the active deployment profile (port, signin credentials, etc.).
+load_env_defaults
+
 # Color definitions (standard repository set)
 RED='\033[0;31m'
 GREEN='\033[0;32m'

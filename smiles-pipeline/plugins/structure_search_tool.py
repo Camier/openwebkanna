@@ -11,7 +11,6 @@ Usage in chat:
   Query: Find molecules similar to CN1CC[C@]2...
 """
 
-import os
 import logging
 import requests
 from typing import Optional
@@ -21,11 +20,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class Valve(BaseModel):
+class Valves(BaseModel):
     """Tool configuration valves (configurable in OpenWebUI admin)."""
 
     STRUCTURE_SEARCH_API_URL: str = Field(
-        default="http://localhost:8000/v1/structure",
+        default="http://smiles-structure-api:8011/v1/structure",
         description="Base URL for Structure Search API",
     )
     SIMILARITY_THRESHOLD: float = Field(
@@ -42,7 +41,7 @@ class Valve(BaseModel):
     )
 
 
-class Tool:
+class Tools:
     """
     Structure Similarity Search Tool for OpenWebUI.
 
@@ -50,7 +49,10 @@ class Tool:
     directly from the chat interface.
     """
 
-    val = Valve()
+    def __init__(self):
+        self.valves = Valves()
+        # OpenWebUI resolves valve schemas on the loaded Tools() instance.
+        self.Valves = Valves
 
     async def search_similar_structures(
         self,
@@ -81,9 +83,9 @@ class Tool:
               **SMILES**: `CN1CC[C@@]2...`
               **Document**: Sceletium phytochemistry..."
         """
-        api_url = f"{self.val.STRUCTURE_SEARCH_API_URL}/search"
-        threshold = threshold or self.val.SIMILARITY_THRESHOLD
-        max_results = max_results or self.val.MAX_RESULTS
+        api_url = f"{self.valves.STRUCTURE_SEARCH_API_URL}/search"
+        threshold = threshold or self.valves.SIMILARITY_THRESHOLD
+        max_results = max_results or self.valves.MAX_RESULTS
 
         try:
             # Call Structure Search API
@@ -94,7 +96,7 @@ class Tool:
                     "threshold": threshold,
                     "top_k": max_results,
                 },
-                timeout=self.val.TIMEOUT_SECONDS,
+                timeout=self.valves.TIMEOUT_SECONDS,
             )
 
             if response.status_code != 200:
@@ -154,10 +156,10 @@ class Tool:
             return "\n".join(lines)
 
         except requests.Timeout:
-            logger.error(f"Search timeout after {self.val.TIMEOUT_SECONDS}s")
+            logger.error(f"Search timeout after {self.valves.TIMEOUT_SECONDS}s")
             return (
                 f"❌ **Search Timeout**\n\n"
-                f"The structure search API did not respond within {self.val.TIMEOUT_SECONDS} seconds. "
+                f"The structure search API did not respond within {self.valves.TIMEOUT_SECONDS} seconds. "
                 f"Please try again or contact the administrator."
             )
         except requests.ConnectionError as e:
@@ -181,10 +183,10 @@ class Tool:
         Returns:
             Formatted molecule information or error message
         """
-        api_url = f"{self.val.STRUCTURE_SEARCH_API_URL}/{doc_id}"
+        api_url = f"{self.valves.STRUCTURE_SEARCH_API_URL}/{doc_id}"
 
         try:
-            response = requests.get(api_url, timeout=self.val.TIMEOUT_SECONDS)
+            response = requests.get(api_url, timeout=self.valves.TIMEOUT_SECONDS)
 
             if response.status_code == 404:
                 return f"❌ **Molecule Not Found**: No molecule data for document `{doc_id}`"
@@ -267,7 +269,7 @@ if __name__ == "__main__":
     # Test example
     import asyncio
 
-    tool = Tool()
+    tool = Tools()
 
     # Test with mesembrine
     test_smiles = "CN1CC[C@]2([C@@H]1CC(=O)CC2)C3=CC(=C(C=C3)OC)OC"

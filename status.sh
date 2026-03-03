@@ -16,8 +16,13 @@ OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 COMPOSE_FILE="docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
+SMILES_STRUCTURE_API_HOST="${SMILES_STRUCTURE_API_HOST:-127.0.0.1}"
+SMILES_STRUCTURE_API_PORT="${SMILES_STRUCTURE_API_PORT:-8011}"
+SMILES_STRUCTURE_API_BASE_URL="${SMILES_STRUCTURE_API_BASE_URL:-http://${SMILES_STRUCTURE_API_HOST}:${SMILES_STRUCTURE_API_PORT}}"
 # shellcheck disable=SC2034
 COMPOSE_CMD=()
+LITELLM_PROBE_SOURCE=""
+LITELLM_PROBE_URL=""
 
 ###############################################################################
 # Section helpers (use lib print functions, no local redefinitions)
@@ -102,22 +107,89 @@ check_openwebui() {
     return 1
 }
 
+http_code_is_reachable() {
+    local code="$1"
+    [ "$code" = "200" ] || [ "$code" = "401" ]
+}
+
+probe_litellm_from_host() {
+    local models_url="${LITELLM_URL%/}/v1/models"
+    local code
+    code=$(curl -so /dev/null -w "%{http_code}" -m 5 "$models_url" 2>/dev/null || echo "000")
+    if http_code_is_reachable "$code"; then
+        LITELLM_PROBE_SOURCE="host"
+        LITELLM_PROBE_URL="$models_url"
+        return 0
+    fi
+    return 1
+}
+
+probe_litellm_from_openwebui() {
+    local is_running
+    is_running=$(docker inspect -f '{{.State.Running}}' openwebui 2>/dev/null || echo "false")
+    [ "$is_running" = "true" ] || return 1
+
+    local upstream_url
+    upstream_url=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' openwebui 2>/dev/null |
+        awk -F= '/^OPENAI_API_BASE_URL=/{print substr($0, index($0, "=") + 1); exit}')
+    [ -n "$upstream_url" ] || upstream_url="${OPENAI_API_BASE_URL:-}"
+    [ -n "$upstream_url" ] || return 1
+
+    local models_url="${upstream_url%/}/models"
+    local code
+    code=$(docker exec openwebui sh -lc "curl -so /dev/null -w '%{http_code}' -m 5 \"$models_url\" 2>/dev/null || true" 2>/dev/null | tail -n1)
+    if http_code_is_reachable "$code"; then
+        LITELLM_PROBE_SOURCE="openwebui"
+        LITELLM_PROBE_URL="$models_url"
+        return 0
+    fi
+    return 1
+}
+
+resolve_litellm_status() {
+    LITELLM_PROBE_SOURCE=""
+    LITELLM_PROBE_URL=""
+
+    local openwebui_running
+    openwebui_running=$(docker inspect -f '{{.State.Running}}' openwebui 2>/dev/null || echo "false")
+
+    # When OpenWebUI is running, validate the effective live route from the container first.
+    if [ "$openwebui_running" = "true" ]; then
+        probe_litellm_from_openwebui && return 0
+
+        # Diagnostic fallback: host may still see LiteLLM even if OpenWebUI route is broken.
+        if probe_litellm_from_host; then
+            LITELLM_PROBE_SOURCE="host_only"
+        fi
+        return 1
+    fi
+
+    # If OpenWebUI is not running, host reachability is the best available signal.
+    probe_litellm_from_host && return 0
+    return 1
+}
+
 check_litellm() {
     print_section "LiteLLM Proxy (upstream)"
-    local health_url="${LITELLM_URL}/health"
-    if curl -sf -m 5 "$health_url" &>/dev/null 2>&1 ||
-        curl -sf -m 5 "${LITELLM_URL}/v1/models" -H "Authorization: Bearer ${OPENAI_API_KEY:-}" &>/dev/null 2>&1; then
-        print_svc "LiteLLM" "running" "(${LITELLM_URL})"
+    if resolve_litellm_status; then
+        if [ "$LITELLM_PROBE_SOURCE" = "openwebui" ]; then
+            print_svc "LiteLLM" "running" "(reachable from OpenWebUI via ${LITELLM_PROBE_URL})"
+            if probe_litellm_from_host; then
+                print_info "Host probe (${LITELLM_URL}) is also reachable"
+            else
+                print_info "Host probe (${LITELLM_URL}) unavailable, but live OpenWebUI upstream route is healthy"
+            fi
+        else
+            print_svc "LiteLLM" "running" "(${LITELLM_URL})"
+        fi
         return 0
     fi
-    # 401 means reachable but unauthenticated — still up
-    local code
-    code=$(curl -so /dev/null -w "%{http_code}" -m 5 "${LITELLM_URL}/v1/models" 2>/dev/null || echo "000")
-    if [ "$code" = "401" ] || [ "$code" = "200" ]; then
-        print_svc "LiteLLM" "running" "(${LITELLM_URL})"
-        return 0
+    if [ "$LITELLM_PROBE_SOURCE" = "host_only" ]; then
+        print_svc "LiteLLM" "warning" "(host reachable, but OpenWebUI cannot reach its configured upstream)"
+        print_info "Check OPENAI_API_BASE_URL from inside container and host-gateway routing"
+        return 1
     fi
-    print_svc "LiteLLM" "stopped" "(not reachable at ${LITELLM_URL})"
+    print_svc "LiteLLM" "stopped" "(not reachable from host or OpenWebUI container)"
     return 1
 }
 
@@ -129,6 +201,22 @@ check_mcpo() {
         return 0
     fi
     print_svc "MCPO" "stopped" "(not reachable at ${url})"
+    return 1
+}
+
+check_smiles_structure_api() {
+    print_section "SMILES Structure API"
+    local url="${SMILES_STRUCTURE_API_BASE_URL%/}"
+    local check_script="${SCRIPT_DIR}/check-smiles-structure-api.sh"
+    if curl -sf -m 5 "${url}/health" &>/dev/null 2>&1; then
+        print_svc "SMILES API" "running" "(${url})"
+        return 0
+    fi
+    if [ -x "$check_script" ] && "$check_script" --quiet &>/dev/null 2>&1; then
+        print_svc "SMILES API" "running" "(reachable via Docker network)"
+        return 0
+    fi
+    print_svc "SMILES API" "warning" "(not reachable at ${url})"
     return 1
 }
 
@@ -191,11 +279,16 @@ print_summary() {
         all_good=false
     fi
 
-    # LiteLLM
-    local litellm_code
-    litellm_code=$(curl -so /dev/null -w "%{http_code}" -m 5 "${LITELLM_URL}/v1/models" 2>/dev/null || echo "000")
-    if [ "$litellm_code" = "200" ] || [ "$litellm_code" = "401" ]; then
-        echo -e "  ${GREEN}●${NC} LiteLLM:    ${GREEN}OK${NC}"
+    # LiteLLM (host or effective OpenWebUI upstream route)
+    if resolve_litellm_status; then
+        if [ "$LITELLM_PROBE_SOURCE" = "openwebui" ]; then
+            echo -e "  ${GREEN}●${NC} LiteLLM:    ${GREEN}OK${NC} (via OpenWebUI upstream route)"
+        else
+            echo -e "  ${GREEN}●${NC} LiteLLM:    ${GREEN}OK${NC}"
+        fi
+    elif [ "$LITELLM_PROBE_SOURCE" = "host_only" ]; then
+        echo -e "  ${YELLOW}◐${NC} LiteLLM:    ${YELLOW}Host OK / OpenWebUI route broken${NC}"
+        all_good=false
     else
         echo -e "  ${RED}○${NC} LiteLLM:    ${RED}Not reachable${NC}"
         all_good=false
@@ -214,6 +307,14 @@ print_summary() {
         echo -e "  ${GREEN}●${NC} MCPO:       ${GREEN}OK${NC}"
     else
         echo -e "  ${YELLOW}◐${NC} MCPO:       ${YELLOW}Not reachable${NC}"
+    fi
+
+    # SMILES API
+    if curl -sf -m 5 "${SMILES_STRUCTURE_API_BASE_URL%/}/health" &>/dev/null 2>&1 ||
+        [ -x "${SCRIPT_DIR}/check-smiles-structure-api.sh" ] && "${SCRIPT_DIR}/check-smiles-structure-api.sh" --quiet &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}●${NC} SMILES API: ${GREEN}OK${NC}"
+    else
+        echo -e "  ${YELLOW}◐${NC} SMILES API: ${YELLOW}Not reachable${NC}"
     fi
 
     echo
@@ -263,6 +364,7 @@ main() {
             check_openwebui || true
             check_litellm || true
             check_mcpo || true
+            check_smiles_structure_api || true
             check_cliproxyapi || true
             check_rag_profile || true
             check_resources || true

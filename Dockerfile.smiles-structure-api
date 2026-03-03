@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/src
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# API-only runtime dependencies (kept intentionally small)
+RUN python -m pip install --upgrade pip \
+    && python -m pip install \
+        "numpy<2.0" \
+        "rdkit-pypi==2022.9.5" \
+        "fastapi>=0.111,<1" \
+        "uvicorn[standard]>=0.30,<1" \
+        "psycopg2-binary>=2.9,<3" \
+        "pydantic>=2,<3"
+
+COPY smiles-pipeline/src /app/src
+
+EXPOSE 8011
+
+CMD ["python", "-m", "uvicorn", "api.structure_search:app", "--host", "0.0.0.0", "--port", "8011"]

@@ -2,7 +2,7 @@
 Structure Search API
 
 FastAPI endpoints for molecular structure similarity search.
-Uses ECFP4/MACCS fingerprints and pgvector for sub-second similarity queries.
+Uses fingerprint vectors and pgvector for sub-second similarity queries.
 
 Phase 2, Task 2.3
 """
@@ -30,6 +30,41 @@ DATABASE_URL = os.getenv(
 )
 
 
+def _parse_enabled_fingerprint_types(raw: Optional[str]) -> tuple[str, ...]:
+    """Parse SMILES fingerprint channels from env and keep supported values only."""
+    allowed = {"ecfp4", "maccs"}
+    if not raw:
+        return ("ecfp4",)
+
+    parsed: list[str] = []
+    for item in raw.split(","):
+        channel = item.strip().lower()
+        if channel in allowed and channel not in parsed:
+            parsed.append(channel)
+
+    return tuple(parsed) if parsed else ("ecfp4",)
+
+
+ENABLED_FINGERPRINT_TYPES = _parse_enabled_fingerprint_types(
+    os.getenv("SMILES_FINGERPRINT_TYPES", "ecfp4")
+)
+ENABLED_FINGERPRINT_TYPES_LABEL = ", ".join(ENABLED_FINGERPRINT_TYPES)
+
+
+def _validate_fingerprint_channel(channel: str) -> str:
+    """Validate and normalize fingerprint channel against runtime-enabled channels."""
+    normalized = (channel or "").strip().lower()
+    if normalized not in ENABLED_FINGERPRINT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid fingerprint_type '{channel}'. "
+                f"Enabled values: {ENABLED_FINGERPRINT_TYPES_LABEL}"
+            ),
+        )
+    return normalized
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -48,10 +83,70 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Structure Search API",
-    description="Molecular structure similarity search using ECFP4/MACCS fingerprints",
+    description=(
+        "Molecular structure similarity search using fingerprint vectors "
+        f"(enabled: {ENABLED_FINGERPRINT_TYPES_LABEL})"
+    ),
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+# =============================================================================
+# Schema Helpers
+# =============================================================================
+
+
+def _get_document_chunk_columns(cur) -> set[str]:
+    """Return available columns on `document_chunk` for runtime-safe SQL."""
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'document_chunk'
+    """
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def _title_expr(columns: set[str]) -> str:
+    """Return SQL expression for document title across schema variants."""
+    if "vmetadata" in columns:
+        return "vmetadata->>'title'"
+    if "metadata" in columns:
+        return "metadata->>'title'"
+    return "NULL"
+
+
+def _resolve_fingerprint_column(channel: str, columns: set[str]) -> str:
+    """Resolve requested fingerprint channel to an existing DB column."""
+    channel = _validate_fingerprint_channel(channel)
+    if channel == "ecfp4":
+        if "molecule_fingerprint" not in columns:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "ECFP4 fingerprint column 'molecule_fingerprint' is missing in "
+                    "document_chunk. Apply SMILES DB migrations first."
+                ),
+            )
+        return "molecule_fingerprint"
+
+    if channel == "maccs":
+        if "molecule_fingerprint_maccs" not in columns:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "MACCS channel unavailable: column "
+                    "'molecule_fingerprint_maccs' is missing in document_chunk."
+                ),
+            )
+        return "molecule_fingerprint_maccs"
+
+    # Guard rail: should never happen because _validate_fingerprint_channel
+    # enforces runtime-enabled values.
+    raise HTTPException(status_code=500, detail="Unhandled fingerprint_type mapping")
 
 
 # =============================================================================
@@ -65,7 +160,10 @@ class StructureSearchRequest(BaseModel):
     query_smiles: str = Field(..., description="Query SMILES string")
     fingerprint_type: str = Field(
         default="ecfp4",
-        description="Fingerprint channel: ecfp4 or maccs",
+        description=(
+            "Fingerprint channel enabled at runtime via "
+            f"SMILES_FINGERPRINT_TYPES (current: {ENABLED_FINGERPRINT_TYPES_LABEL})"
+        ),
     )
     threshold: float = Field(
         default=0.7,
@@ -167,7 +265,8 @@ async def search_similar_structures(request: StructureSearchRequest):
     """
     Search for molecules similar to query structure.
 
-    Uses fingerprint channel (`ecfp4` or `maccs`) with cosine similarity search via
+    Uses enabled fingerprint channel (`SMILES_FINGERPRINT_TYPES`) with cosine
+    similarity search via
     pgvector IVFFlat index. Returns molecules with similarity >= threshold, sorted
     by similarity descending.
 
@@ -181,21 +280,14 @@ async def search_similar_structures(request: StructureSearchRequest):
     ```
     """
     try:
-        channel = request.fingerprint_type.strip().lower()
-        if channel not in {"ecfp4", "maccs"}:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid fingerprint_type. Supported values: ecfp4, maccs",
-            )
+        channel = _validate_fingerprint_channel(request.fingerprint_type)
 
         # Step 1: Generate query fingerprint
         fp_generator = FingerprintGenerator()
         if channel == "maccs":
             query_fp = fp_generator.maccs(request.query_smiles)
-            fp_column = "molecule_fingerprint_maccs"
         else:
             query_fp = fp_generator.ecfp4(request.query_smiles)
-            fp_column = "molecule_fingerprint"
 
         # Convert to pgvector format: "[0.0,1.0,0.0,...]"
         fp_vector = f"[{','.join(map(str, query_fp))}]"
@@ -203,6 +295,9 @@ async def search_similar_structures(request: StructureSearchRequest):
         # Step 2: Execute similarity search
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
+        columns = _get_document_chunk_columns(cur)
+        fp_column = _resolve_fingerprint_column(channel, columns)
+        title_column_expr = _title_expr(columns)
 
         cur.execute(
             f"""
@@ -210,7 +305,7 @@ async def search_similar_structures(request: StructureSearchRequest):
                 id,
                 molecule_smiles,
                 1 - ({fp_column} <=> %s::halfvec) as similarity,
-                metadata->>'title' as title,
+                {title_column_expr} as title,
                 molecule_metadata
             FROM document_chunk
             WHERE {fp_column} IS NOT NULL
@@ -243,6 +338,8 @@ async def search_similar_structures(request: StructureSearchRequest):
             total_results=len(results),
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         # Invalid SMILES
         raise HTTPException(status_code=400, detail=f"Invalid SMILES: {str(e)}")
@@ -251,6 +348,78 @@ async def search_similar_structures(request: StructureSearchRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
         logger.error(f"Search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/structure/stats", tags=["Statistics"])
+async def get_statistics():
+    """
+    Get fingerprint database statistics.
+
+    Returns counts of molecules, document_chunk, and coverage metrics.
+    """
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        columns = _get_document_chunk_columns(cur)
+        has_ecfp4 = "molecule_fingerprint" in columns
+        has_maccs = "molecule_fingerprint_maccs" in columns
+
+        any_fps_predicates = []
+        if has_ecfp4:
+            any_fps_predicates.append("molecule_fingerprint IS NOT NULL")
+        if has_maccs:
+            any_fps_predicates.append("molecule_fingerprint_maccs IS NOT NULL")
+
+        any_fps_filter = " OR ".join(any_fps_predicates) if any_fps_predicates else "FALSE"
+        ecfp4_count_expr = "COUNT(molecule_fingerprint)" if has_ecfp4 else "0"
+        maccs_count_expr = "COUNT(molecule_fingerprint_maccs)" if has_maccs else "0"
+
+        cur.execute(
+            f"""
+            SELECT
+                COUNT(*) as total_docs,
+                COUNT(*) FILTER (
+                    WHERE {any_fps_filter}
+                ) as docs_with_any_fps,
+                {ecfp4_count_expr} as docs_with_ecfp4,
+                {maccs_count_expr} as docs_with_maccs,
+                COUNT(DISTINCT molecule_smiles) as unique_smiles,
+                COUNT(DISTINCT id) as unique_documents
+            FROM document_chunk
+        """
+        )
+
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row is None:
+            return {
+                "total_documents": 0,
+                "documents_with_fingerprints": 0,
+                "documents_with_ecfp4": 0,
+                "documents_with_maccs": 0,
+                "unique_smiles": 0,
+                "unique_documents": 0,
+                "coverage": 0.0,
+            }
+
+        return {
+            "total_documents": row[0],
+            "documents_with_fingerprints": row[1],
+            "documents_with_ecfp4": row[2],
+            "documents_with_maccs": row[3],
+            "unique_smiles": row[4],
+            "unique_documents": row[5],
+            "coverage": row[1] / row[0] if row[0] > 0 else 0.0,
+            "coverage_ecfp4": row[2] / row[0] if row[0] > 0 else 0.0,
+            "coverage_maccs": row[3] / row[0] if row[0] > 0 else 0.0,
+            "enabled_fingerprint_types": list(ENABLED_FINGERPRINT_TYPES),
+        }
+
+    except Exception as e:
+        logger.error(f"Statistics query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -266,13 +435,15 @@ async def get_molecule(doc_id: str):
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
+        columns = _get_document_chunk_columns(cur)
+        title_column_expr = _title_expr(columns)
 
         cur.execute(
-            """
+            f"""
             SELECT
                 id,
                 molecule_smiles,
-                metadata->>'title' as title,
+                {title_column_expr} as title,
                 molecule_metadata
             FROM document_chunk
             WHERE id = %s AND molecule_smiles IS NOT NULL
@@ -306,65 +477,6 @@ async def get_molecule(doc_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/v1/structure/stats", tags=["Statistics"])
-async def get_statistics():
-    """
-    Get fingerprint database statistics.
-
-    Returns counts of molecules, document_chunk, and coverage metrics.
-    """
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT
-                COUNT(*) as total_docs,
-                COUNT(*) FILTER (
-                    WHERE molecule_fingerprint IS NOT NULL
-                       OR molecule_fingerprint_maccs IS NOT NULL
-                ) as docs_with_any_fps,
-                COUNT(molecule_fingerprint) as docs_with_ecfp4,
-                COUNT(molecule_fingerprint_maccs) as docs_with_maccs,
-                COUNT(DISTINCT molecule_smiles) as unique_smiles,
-                COUNT(DISTINCT id) as unique_documents
-            FROM document_chunk
-        """
-        )
-
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-
-        if row is None:
-            return {
-                "total_documents": 0,
-                "documents_with_fingerprints": 0,
-                "documents_with_ecfp4": 0,
-                "documents_with_maccs": 0,
-                "unique_smiles": 0,
-                "unique_documents": 0,
-                "coverage": 0.0,
-            }
-
-        return {
-            "total_documents": row[0],
-            "documents_with_fingerprints": row[1],
-            "documents_with_ecfp4": row[2],
-            "documents_with_maccs": row[3],
-            "unique_smiles": row[4],
-            "unique_documents": row[5],
-            "coverage": row[1] / row[0] if row[0] > 0 else 0.0,
-            "coverage_ecfp4": row[2] / row[0] if row[0] > 0 else 0.0,
-            "coverage_maccs": row[3] / row[0] if row[0] > 0 else 0.0,
-        }
-
-    except Exception as e:
-        logger.error(f"Statistics query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/v1/structure/batch-search", tags=["Batch Search"])
 async def batch_search(
     query_smiles_list: List[str],
@@ -379,27 +491,23 @@ async def batch_search(
     Useful for comparing multiple compounds or scaffold hopping.
     """
     try:
-        channel = fingerprint_type.strip().lower()
-        if channel not in {"ecfp4", "maccs"}:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid fingerprint_type. Supported values: ecfp4, maccs",
-            )
+        channel = _validate_fingerprint_channel(fingerprint_type)
         fp_generator = FingerprintGenerator()
         all_results = {}
 
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
+        columns = _get_document_chunk_columns(cur)
+        title_column_expr = _title_expr(columns)
+        fp_column = _resolve_fingerprint_column(channel, columns)
 
         for query_smiles in query_smiles_list:
             try:
                 # Generate fingerprint
                 if channel == "maccs":
                     query_fp = fp_generator.maccs(query_smiles)
-                    fp_column = "molecule_fingerprint_maccs"
                 else:
                     query_fp = fp_generator.ecfp4(query_smiles)
-                    fp_column = "molecule_fingerprint"
                 fp_vector = f"[{','.join(map(str, query_fp))}]"
 
                 # Search
@@ -409,7 +517,7 @@ async def batch_search(
                         id,
                         molecule_smiles,
                         1 - ({fp_column} <=> %s::halfvec) as similarity,
-                        metadata->>'title' as title
+                        {title_column_expr} as title
                     FROM document_chunk
                     WHERE {fp_column} IS NOT NULL
                       AND 1 - ({fp_column} <=> %s::halfvec) >= %s
@@ -448,6 +556,8 @@ async def batch_search(
 
         return {"queries": all_results}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Batch search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
