@@ -1,5 +1,9 @@
 # SMILES Extraction Pipeline
 
+> [!WARNING]
+> Legacy reference only. Current runtime supports `molscribe,decimer` backends.
+> Historical mentions of `imago`/`vlm` in this file are archival and not live-supported.
+
 **Optical Chemical Structure Recognition (OCSR) pipeline** for extracting molecular structures from ethnopharmacological research papers.
 
 ## Overview
@@ -28,7 +32,7 @@ mise run smiles:pipeline
 ./smiles-pipeline/scripts/extract_smiles_from_images.py \
   --input-dir data/extractions \
   --output-dir smiles-pipeline/data \
-  --backend-order molscribe,decimer,imago,vlm
+  --backend-order molscribe,decimer
 ```
 
 ### Publish to Knowledge Base
@@ -48,8 +52,7 @@ PDF Images → OCSR Backends → Validation → Filtering → Knowledge Base
      ↓              ↓              ↓           ↓            ↓
   Figure    MolScribe      RDKit     Confidence   OpenWebUI
   blocks    DECIMER        Canonical   Score      KB Upload
-            Imago          SMILES
-            VLM
+                           SMILES
 ```
 
 ## Components
@@ -93,7 +96,7 @@ PDF Images → OCSR Backends → Validation → Filtering → Knowledge Base
 
 ```bash
 # Default order (best to fastest)
-SMILES_BACKEND_ORDER=molscribe,decimer,imago,vlm
+SMILES_BACKEND_ORDER=molscribe,decimer
 
 # Custom order
 SMILES_BACKEND_ORDER=decimer,molscribe
@@ -108,8 +111,6 @@ SMILES_BACKEND_ORDER=molscribe
 |---------|----------|-------|------------|----------|
 | **MolScribe** | High | Medium | ~100MB | CPU/GPU |
 | **DECIMER** | High | Slow | ~500MB | CPU/GPU |
-| **Imago** | Medium | Fast | ~50MB | CPU only |
-| **VLM** | Variable | Slow | API-based | Cloud |
 
 ## Data Flow
 
@@ -252,7 +253,7 @@ if result.is_valid:
 
 ```bash
 # Compare backend performance
-for backend in molscribe decimer imago; do
+for backend in molscribe decimer; do
     SMILES_BACKEND_ORDER=$backend \
     ./smiles-pipeline/scripts/extract_smiles_from_images.py \
       --paper-ids "test_set_10_papers"
@@ -276,7 +277,7 @@ which molscribe
 **Issue: Low extraction rate**
 ```bash
 # Try different backend order
-SMILES_BACKEND_ORDER=decimer,molscribe,imago
+SMILES_BACKEND_ORDER=decimer,molscribe
 ```
 
 **Issue: Invalid SMILES in output**
@@ -343,7 +344,7 @@ tar -czf smiles-backup-$(date +%Y%m%d).tar.gz \
 
 - **MolScribe:** https://github.com/HongjianNi/MolScribe
 - **DECIMER:** https://github.com/Kohulan/DECIMER-Image_Transformer
-- **Imago:** https://github.com/epam/imago
+- **Imago (historical reference, not live backend):** https://github.com/epam/imago
 - **RDKit:** https://www.rdkit.org/
 
 ---

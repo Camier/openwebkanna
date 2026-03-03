@@ -870,7 +870,7 @@ def wait_for_processing(token, file_id, timeout=300):
 | `CHUNK_MIN_SIZE_TARGET` | Minimum chunk size target |
 | `ENABLE_RAG_HYBRID_SEARCH` | Enable hybrid search |
 | `SMILES_RETRIEVAL_ENABLED` | Enable dedicated SMILES retrieval channel |
-| `SMILES_FINGERPRINT_TYPES` | Fingerprints to index (`ecfp4,maccs`) |
+| `SMILES_FINGERPRINT_TYPES` | Fingerprints to index (stable default: `ecfp4`) |
 | `SMILES_FINGERPRINT_INDEX_TYPE` | Fingerprint index family (`ivfflat`, etc.) |
 | `SMILES_ENABLE_EMBEDDING_SIGNAL` | Optional molecular embedding channel |
 | `SMILES_EMBEDDING_MODEL` | Molecular encoder model (optional) |
