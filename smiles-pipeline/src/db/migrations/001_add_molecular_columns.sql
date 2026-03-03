@@ -14,11 +14,13 @@ BEGIN;
 -- Add molecular columns to document_chunk table (embedded schema)
 -- These columns store:
 --   molecule_fingerprint: ECFP4 2048-bit as half-precision vector
+--   molecule_fingerprint_maccs: MACCS 167-bit as half-precision vector
 --   molecule_smiles: Canonical SMILES string
 --   molecule_metadata: Additional molecule properties (MW, LogP, etc.)
 
 ALTER TABLE document_chunk
 ADD COLUMN IF NOT EXISTS molecule_fingerprint HALFVEC(2048),
+ADD COLUMN IF NOT EXISTS molecule_fingerprint_maccs HALFVEC(167),
 ADD COLUMN IF NOT EXISTS molecule_smiles TEXT,
 ADD COLUMN IF NOT EXISTS molecule_metadata JSONB;
 
@@ -33,11 +35,18 @@ CREATE INDEX IF NOT EXISTS document_chunk_mol_fp_idx
 ON document_chunk USING ivfflat (molecule_fingerprint halfvec_cosine_ops)
 WITH (lists = 100);
 
+-- Dedicated index for MACCS channel
+CREATE INDEX IF NOT EXISTS document_chunk_mol_maccs_idx
+ON document_chunk USING ivfflat (molecule_fingerprint_maccs halfvec_cosine_ops)
+WITH (lists = 100);
+
 -- Add comments for documentation
 COMMENT ON COLUMN document_chunk.molecule_fingerprint IS 'ECFP4 molecular fingerprint (2048-bit) for structure similarity search';
+COMMENT ON COLUMN document_chunk.molecule_fingerprint_maccs IS 'MACCS molecular fingerprint (167-bit) for complementary structure similarity search';
 COMMENT ON COLUMN document_chunk.molecule_smiles IS 'Canonical SMILES string for the molecule';
 COMMENT ON COLUMN document_chunk.molecule_metadata IS 'JSONB metadata: {source, generated_at, properties, ...}';
 COMMENT ON INDEX document_chunk_mol_fp_idx IS 'IVFFlat index on halfvec-cast molecular fingerprint (cosine distance)';
+COMMENT ON INDEX document_chunk_mol_maccs_idx IS 'IVFFlat index on halfvec-cast MACCS fingerprint (cosine distance)';
 
 -- Grant permissions (adjust role name if needed)
 GRANT SELECT ON document_chunk TO openwebui;

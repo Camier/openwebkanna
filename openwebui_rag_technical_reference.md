@@ -813,12 +813,16 @@ def wait_for_processing(token, file_id, timeout=300):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `RAG_EMBEDDING_MODEL` | Embedding model name | `sentence-transformers/all-MiniLM-L6-v2` |
+| `RAG_EMBEDDING_MODEL` | Text KB embedding model (do not use captioning model) | `sentence-transformers/all-MiniLM-L6-v2` |
 | `RAG_TOP_K` | Number of chunks to retrieve | `15` |
 | `RAG_SYSTEM_CONTEXT` | Inject context into system message | `true` |
 | `CHUNK_SIZE` | Document chunk size (characters) | `3000` |
 | `CHUNK_OVERLAP` | Chunk overlap (characters) | `600` |
 | `VECTOR_DB` | Vector database backend | `chroma` |
+| `RETRIEVAL_FUSION_STRATEGY` | Multi-channel fusion strategy | `rrf` |
+| `RETRIEVAL_FUSION_RRF_K` | RRF rank constant | `60` |
+| `RETRIEVAL_FUSION_TOP_K` | Maximum fused results retained | `20` |
+| `RETRIEVAL_CHANNEL_WEIGHTS` | Optional per-channel weights (`name=value` CSV) | `text_dense=1.0,bm25=1.0,smiles_fingerprint=1.0,smiles_embedding=1.0` |
 
 ### Vector Database Variables
 
@@ -865,10 +869,15 @@ def wait_for_processing(token, file_id, timeout=300):
 | `RAG_RERANKING_MODEL` | Re-ranker model name |
 | `CHUNK_MIN_SIZE_TARGET` | Minimum chunk size target |
 | `ENABLE_RAG_HYBRID_SEARCH` | Enable hybrid search |
-
-**Note:** Must include `ENABLE_` prefix
+| `SMILES_RETRIEVAL_ENABLED` | Enable dedicated SMILES retrieval channel |
+| `SMILES_FINGERPRINT_TYPES` | Fingerprints to index (`ecfp4,maccs`) |
+| `SMILES_FINGERPRINT_INDEX_TYPE` | Fingerprint index family (`ivfflat`, etc.) |
+| `SMILES_ENABLE_EMBEDDING_SIGNAL` | Optional molecular embedding channel |
+| `SMILES_EMBEDDING_MODEL` | Molecular encoder model (optional) |
 | `RAG_FULL_CONTEXT` | Enable full context mode |
 | `RAG_BYPASS_EMBEDDING` | Bypass embedding entirely |
+
+**Note:** feature flags should keep the `ENABLE_` prefix where applicable.
 
 ---
 

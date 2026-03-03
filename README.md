@@ -269,6 +269,27 @@ Optional legacy route verification (only when sidecar is enabled):
 ./test-openwebui-cliproxy-routing.sh
 ```
 
+## Consolidated SMILES + RAG runbook
+
+Use the consolidated operational document for text + SMILES retrieval profile, activation commands, and validation matrix:
+
+- `SMILES_RAG_CONSOLIDATION.md`
+
+Quick path:
+
+```bash
+source /home/miko/miniforge3/etc/profile.d/conda.sh
+conda activate smiles-extraction
+mise run smiles:eval-retrieval
+./test-rag.sh --baseline
+./test-api.sh --baseline
+```
+
+Model cache operations:
+
+- Refresh OpenWebUI model cache: `./refresh-models.sh --wait`
+- Validate model list/API path: `./test-api.sh --baseline`
+
 ## LLM Council
 
 LLM Council is a multi-model evaluation system with candidate/judge pattern:

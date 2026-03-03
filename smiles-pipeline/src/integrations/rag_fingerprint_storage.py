@@ -2,16 +2,15 @@
 RAG Fingerprint Storage Integration
 
 Integrates molecular fingerprint generation with the RAG pipeline.
-Stores ECFP4 fingerprints in PostgreSQL pgvector for structure similarity search.
+Stores ECFP4 + MACCS fingerprints in PostgreSQL pgvector for structure similarity
+search.
 
 Phase 2, Task 2.2
 """
 
-import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import psycopg2
 from psycopg2.extras import Json
@@ -41,6 +40,34 @@ class RAGFingerprintStorage:
         """
         self.db_url = db_url
         self.fp_generator = FingerprintGenerator()
+        self._channel_columns = {
+            "ecfp4": "molecule_fingerprint",
+            "maccs": "molecule_fingerprint_maccs",
+        }
+
+    def _generate_vectors(
+        self, smiles: str
+    ) -> Tuple[List[float], List[float], str, str]:
+        """Generate ECFP4 and MACCS vectors and convert to pgvector literals."""
+        ecfp4 = self.fp_generator.ecfp4(smiles)
+        maccs = self.fp_generator.maccs(smiles)
+
+        ecfp4_vector = f"[{','.join(map(str, ecfp4))}]"
+        maccs_vector = f"[{','.join(map(str, maccs))}]"
+        return ecfp4, maccs, ecfp4_vector, maccs_vector
+
+    def _resolve_channel(
+        self, fingerprint_type: str
+    ) -> Tuple[Literal["ecfp4", "maccs"], str]:
+        """Resolve channel label to a concrete DB column."""
+        channel = (fingerprint_type or "ecfp4").strip().lower()
+        if channel not in self._channel_columns:
+            supported = ", ".join(sorted(self._channel_columns.keys()))
+            raise ValueError(
+                f"Unsupported fingerprint_type '{fingerprint_type}'. "
+                f"Supported: {supported}"
+            )
+        return channel, self._channel_columns[channel]
 
     def store_fingerprint(
         self,
@@ -50,7 +77,7 @@ class RAGFingerprintStorage:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Generate ECFP4 fingerprint and store in document_chunk table.
+        Generate ECFP4 + MACCS fingerprints and store in document_chunk table.
 
         Args:
             doc_id: Document ID in PostgreSQL
@@ -66,18 +93,14 @@ class RAGFingerprintStorage:
             psycopg2.Error: If database operation fails
         """
         try:
-            # Generate ECFP4 fingerprint (2048-dim float vector)
-            ecfp4 = self.fp_generator.ecfp4(smiles)
-
-            # Convert to pgvector format: [0.0, 1.0, 0.0, ...]
-            fp_vector = f"[{','.join(map(str, ecfp4))}]"
+            ecfp4, maccs, ecfp4_vector, maccs_vector = self._generate_vectors(smiles)
 
             # Build metadata
             full_metadata = {
                 "source": "smiles_pipeline",
                 "generated_at": datetime.now().isoformat(),
-                "fingerprint_type": "ecfp4",
-                "fingerprint_dims": len(ecfp4),
+                "fingerprint_types": ["ecfp4", "maccs"],
+                "fingerprint_dims": {"ecfp4": len(ecfp4), "maccs": len(maccs)},
             }
 
             if properties:
@@ -86,15 +109,26 @@ class RAGFingerprintStorage:
                 full_metadata.update(metadata)
 
             # Update database
-            self._update_document(doc_id, smiles, fp_vector, full_metadata)
+            self._update_document(
+                doc_id,
+                smiles,
+                ecfp4_vector,
+                maccs_vector,
+                full_metadata,
+            )
 
-            logger.info(f"Stored fingerprint for doc {doc_id} (dims={len(ecfp4)})")
+            logger.info(
+                "Stored fingerprints for doc %s (ecfp4=%s dims, maccs=%s dims)",
+                doc_id,
+                len(ecfp4),
+                len(maccs),
+            )
 
             return {
                 "success": True,
                 "doc_id": doc_id,
                 "smiles": smiles,
-                "fingerprint_dims": len(ecfp4),
+                "fingerprint_dims": {"ecfp4": len(ecfp4), "maccs": len(maccs)},
                 "metadata": full_metadata,
             }
 
@@ -142,16 +176,19 @@ class RAGFingerprintStorage:
                         metadata = doc.get("metadata", {})
 
                         try:
-                            # Generate fingerprint
-                            ecfp4 = self.fp_generator.ecfp4(smiles)
-                            fp_vector = f"[{','.join(map(str, ecfp4))}]"
+                            ecfp4, maccs, ecfp4_vector, maccs_vector = (
+                                self._generate_vectors(smiles)
+                            )
 
                             # Build metadata
                             full_metadata = {
                                 "source": "smiles_pipeline",
                                 "generated_at": datetime.now().isoformat(),
-                                "fingerprint_type": "ecfp4",
-                                "fingerprint_dims": len(ecfp4),
+                                "fingerprint_types": ["ecfp4", "maccs"],
+                                "fingerprint_dims": {
+                                    "ecfp4": len(ecfp4),
+                                    "maccs": len(maccs),
+                                },
                                 "properties": properties,
                             }
                             if metadata:
@@ -162,11 +199,18 @@ class RAGFingerprintStorage:
                                 """
                                 UPDATE document_chunk
                                 SET molecule_fingerprint = %s::halfvec,
+                                    molecule_fingerprint_maccs = %s::halfvec,
                                     molecule_smiles = %s,
                                     molecule_metadata = %s::jsonb
                                 WHERE id = %s
                             """,
-                                (fp_vector, smiles, Json(full_metadata), doc_id),
+                                (
+                                    ecfp4_vector,
+                                    maccs_vector,
+                                    smiles,
+                                    Json(full_metadata),
+                                    doc_id,
+                                ),
                             )
 
                             success_count += 1
@@ -203,7 +247,12 @@ class RAGFingerprintStorage:
             }
 
     def _update_document(
-        self, doc_id: str, smiles: str, fp_vector: str, metadata: Dict[str, Any]
+        self,
+        doc_id: str,
+        smiles: str,
+        ecfp4_vector: str,
+        maccs_vector: str,
+        metadata: Dict[str, Any],
     ):
         """Update single document with molecular data."""
         with psycopg2.connect(self.db_url) as conn:
@@ -212,15 +261,20 @@ class RAGFingerprintStorage:
                     """
                     UPDATE document_chunk
                     SET molecule_fingerprint = %s::halfvec,
+                        molecule_fingerprint_maccs = %s::halfvec,
                         molecule_smiles = %s,
                         molecule_metadata = %s::jsonb
                     WHERE id = %s
                 """,
-                    (fp_vector, smiles, Json(metadata), doc_id),
+                    (ecfp4_vector, maccs_vector, smiles, Json(metadata), doc_id),
                 )
 
     def search_similar(
-        self, query_smiles: str, threshold: float = 0.7, top_k: int = 10
+        self,
+        query_smiles: str,
+        threshold: float = 0.7,
+        top_k: int = 10,
+        fingerprint_type: Literal["ecfp4", "maccs"] = "ecfp4",
     ) -> List[Dict[str, Any]]:
         """
         Search for molecules similar to query SMILES.
@@ -229,27 +283,33 @@ class RAGFingerprintStorage:
             query_smiles: Query SMILES string
             threshold: Minimum similarity threshold (0.0-1.0)
             top_k: Maximum results to return
+            fingerprint_type: Channel to query ('ecfp4' or 'maccs')
 
         Returns:
             List of similar molecules with similarity scores
         """
+        channel, fp_column = self._resolve_channel(fingerprint_type)
+
         # Generate query fingerprint
-        query_fp = self.fp_generator.ecfp4(query_smiles)
+        if channel == "maccs":
+            query_fp = self.fp_generator.maccs(query_smiles)
+        else:
+            query_fp = self.fp_generator.ecfp4(query_smiles)
         fp_vector = f"[{','.join(map(str, query_fp))}]"
 
         with psycopg2.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         id,
                         molecule_smiles,
-                        1 - (molecule_fingerprint <=> %s::halfvec) as similarity,
+                        1 - ({fp_column} <=> %s::halfvec) as similarity,
                         metadata->>'title' as title,
                         molecule_metadata
                     FROM document_chunk
-                    WHERE molecule_fingerprint IS NOT NULL
-                      AND 1 - (molecule_fingerprint <=> %s::halfvec) >= %s
+                    WHERE {fp_column} IS NOT NULL
+                      AND 1 - ({fp_column} <=> %s::halfvec) >= %s
                     ORDER BY similarity DESC
                     LIMIT %s
                 """,
@@ -263,6 +323,7 @@ class RAGFingerprintStorage:
                             "doc_id": row[0],
                             "smiles": row[1],
                             "similarity": float(row[2]),
+                            "fingerprint_type": channel,
                             "document_title": row[3],
                             "molecule_metadata": row[4],
                         }
@@ -270,29 +331,35 @@ class RAGFingerprintStorage:
 
                 return results
 
-    def get_fingerprint(self, doc_id: str) -> Optional[List[float]]:
+    def get_fingerprint(
+        self, doc_id: str, fingerprint_type: Literal["ecfp4", "maccs"] = "ecfp4"
+    ) -> Optional[List[float]]:
         """
         Retrieve stored fingerprint for a document.
 
         Args:
             doc_id: Document ID
+            fingerprint_type: Channel to retrieve ('ecfp4' or 'maccs')
 
         Returns:
-            ECFP4 fingerprint as float list, or None if not found
+            Fingerprint vector as float list, or None if not found
         """
+        _, fp_column = self._resolve_channel(fingerprint_type)
         with psycopg2.connect(self.db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT molecule_fingerprint
+                    f"""
+                    SELECT {fp_column}
                     FROM document_chunk
-                    WHERE id = %s AND molecule_fingerprint IS NOT NULL
+                    WHERE id = %s AND {fp_column} IS NOT NULL
                 """,
                     (doc_id,),
                 )
 
                 result = cur.fetchone()
                 if result:
+                    if isinstance(result[0], list):
+                        return [float(x) for x in result[0]]
                     # Parse pgvector format: "[0.0,1.0,0.0,...]"
                     fp_str = result[0].strip("[]")
                     return [float(x) for x in fp_str.split(",")]
@@ -311,7 +378,12 @@ class RAGFingerprintStorage:
                 cur.execute("""
                     SELECT
                         COUNT(*) as total_docs,
-                        COUNT(molecule_fingerprint) as docs_with_fps,
+                        COUNT(*) FILTER (
+                            WHERE molecule_fingerprint IS NOT NULL
+                               OR molecule_fingerprint_maccs IS NOT NULL
+                        ) as docs_with_any_fps,
+                        COUNT(molecule_fingerprint) as docs_with_ecfp4,
+                        COUNT(molecule_fingerprint_maccs) as docs_with_maccs,
                         COUNT(DISTINCT molecule_smiles) as unique_smiles
                     FROM document_chunk
                 """)
@@ -322,15 +394,23 @@ class RAGFingerprintStorage:
                     return {
                         "total_documents": 0,
                         "documents_with_fingerprints": 0,
+                        "documents_with_ecfp4": 0,
+                        "documents_with_maccs": 0,
                         "unique_smiles": 0,
                         "coverage": 0,
+                        "coverage_ecfp4": 0,
+                        "coverage_maccs": 0,
                     }
 
                 return {
                     "total_documents": row[0],
                     "documents_with_fingerprints": row[1],
-                    "unique_smiles": row[2],
+                    "documents_with_ecfp4": row[2],
+                    "documents_with_maccs": row[3],
+                    "unique_smiles": row[4],
                     "coverage": row[1] / row[0] if row[0] > 0 else 0,
+                    "coverage_ecfp4": row[2] / row[0] if row[0] > 0 else 0,
+                    "coverage_maccs": row[3] / row[0] if row[0] > 0 else 0,
                 }
 
 

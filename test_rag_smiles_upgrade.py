@@ -28,17 +28,22 @@ def test_env_config():
     env_path = Path(__file__).parent / ".env"
     load_dotenv(env_path)
 
-    # Test embedding model
+    # Text KB embedding must remain a text embedding model.
     embedding_model = getenv("RAG_EMBEDDING_MODEL")
-    assert embedding_model == "BAAI/bge-base-en-v1.5", (
-        f"Expected BAAI/bge-base-en-v1.5, got {embedding_model}"
+    assert embedding_model, "RAG_EMBEDDING_MODEL must be configured"
+    lower_embedding_model = embedding_model.lower()
+    captioning_markers = ("blip", "caption", "image-to-text")
+    assert not any(marker in lower_embedding_model for marker in captioning_markers), (
+        "RAG_EMBEDDING_MODEL must target text retrieval, not image captioning"
     )
 
-    # Test reranker
+    # Test reranker (optional, but if set it should not be a captioning model)
     reranker_model = getenv("RAG_RERANKING_MODEL")
-    assert reranker_model == "BAAI/bge-reranker-v2-m3", (
-        f"Expected BAAI/bge-reranker-v2-m3, got {reranker_model}"
-    )
+    if reranker_model:
+        lower_reranker = reranker_model.lower()
+        assert not any(marker in lower_reranker for marker in captioning_markers), (
+            "RAG_RERANKING_MODEL should target text ranking, not image captioning"
+        )
 
     # Test RAG_TOP_K
     rag_top_k = int(getenv("RAG_TOP_K", "15"))
@@ -60,6 +65,25 @@ def test_env_config():
     bm25_weight = float(getenv("RAG_HYBRID_BM25_WEIGHT", "0.4"))
     assert 0.3 <= bm25_weight <= 0.6, (
         f"BM25 weight outside expected range: {bm25_weight}"
+    )
+
+    fusion_strategy = (getenv("RETRIEVAL_FUSION_STRATEGY", "rrf") or "").lower()
+    assert fusion_strategy == "rrf", "RETRIEVAL_FUSION_STRATEGY should be rrf"
+
+    rrf_k = int(getenv("RETRIEVAL_FUSION_RRF_K", "60"))
+    assert rrf_k > 0, "RETRIEVAL_FUSION_RRF_K must be positive"
+
+    smiles_enabled = (getenv("SMILES_RETRIEVAL_ENABLED", "true") or "").lower()
+    assert smiles_enabled in {"true", "false"}, "SMILES_RETRIEVAL_ENABLED must be boolean"
+
+    fingerprint_types = getenv("SMILES_FINGERPRINT_TYPES", "ecfp4,maccs")
+    normalized_types = {part.strip().lower() for part in fingerprint_types.split(",") if part.strip()}
+    assert "ecfp4" in normalized_types, "SMILES_FINGERPRINT_TYPES must include ecfp4"
+    assert "maccs" in normalized_types, "SMILES_FINGERPRINT_TYPES must include maccs"
+
+    smiles_embedding_flag = (getenv("SMILES_ENABLE_EMBEDDING_SIGNAL", "false") or "").lower()
+    assert smiles_embedding_flag in {"true", "false"}, (
+        "SMILES_ENABLE_EMBEDDING_SIGNAL must be boolean"
     )
 
     print("Config validation passed")

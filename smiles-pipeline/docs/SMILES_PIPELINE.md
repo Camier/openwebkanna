@@ -52,6 +52,31 @@ OPENWEBUI_URL=http://localhost:3010 ARGS='--keep-id <kb-id> --apply' mise run sm
 - `smiles:publish-kb-markdown`
 - `smiles:kb-dedupe`
 - `smiles:pipeline`
+- `smiles:eval-retrieval`
+
+## Retrieval architecture (text + SMILES)
+
+Production recommendation in this repository:
+
+1. Keep a **text KB embedding model** in `RAG_EMBEDDING_MODEL` (never image captioning models).
+2. Keep a **dedicated SMILES fingerprint channel** (`ECFP4` + `MACCS`).
+3. Optionally add a **molecular embedding channel** (for example `MoLFormer`/`ChemBERTa`) as an additive third signal.
+4. Fuse channels with **Reciprocal Rank Fusion (RRF)**:
+   - `text_dense`
+   - `bm25`
+   - `smiles_fingerprint`
+   - `smiles_embedding` (optional)
+5. Validate separately:
+   - `Recall@k` on text queries
+   - `Recall@k` on SMILES queries
+   - compare pre-fusion vs post-fusion.
+
+Run the included evaluation harness:
+
+```bash
+mise run smiles:eval-retrieval
+ENABLE_SMILES_EMBEDDING=1 mise run smiles:eval-retrieval
+```
 
 ## Environments
 

@@ -2,14 +2,14 @@
 Structure Search API
 
 FastAPI endpoints for molecular structure similarity search.
-Uses ECFP4 fingerprints and pgvector for sub-second similarity queries.
+Uses ECFP4/MACCS fingerprints and pgvector for sub-second similarity queries.
 
 Phase 2, Task 2.3
 """
 
 import os
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 import psycopg2
 
 from enrichers.fingerprint_generator import FingerprintGenerator
+from retrieval.rrf_fusion import fuse_rankings_rrf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Structure Search API",
-    description="Molecular structure similarity search using ECFP4 fingerprints",
+    description="Molecular structure similarity search using ECFP4/MACCS fingerprints",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -62,6 +63,10 @@ class StructureSearchRequest(BaseModel):
     """Request model for structure similarity search."""
 
     query_smiles: str = Field(..., description="Query SMILES string")
+    fingerprint_type: str = Field(
+        default="ecfp4",
+        description="Fingerprint channel: ecfp4 or maccs",
+    )
     threshold: float = Field(
         default=0.7,
         ge=0.0,
@@ -78,6 +83,7 @@ class StructureSearchResult(BaseModel):
 
     doc_id: str = Field(..., description="Document ID")
     smiles: str = Field(..., description="SMILES string")
+    fingerprint_type: str = Field(..., description="Similarity channel used")
     similarity: float = Field(..., description="Similarity score (0.0-1.0)")
     document_title: Optional[str] = Field(None, description="Document title")
     molecule_metadata: Optional[dict] = Field(None, description="Molecule metadata")
@@ -101,6 +107,52 @@ class MoleculeInfo(BaseModel):
     molecule_metadata: Optional[dict] = None
 
 
+class RankedDoc(BaseModel):
+    """Ranked retrieval hit from a single channel."""
+
+    doc_id: str = Field(..., description="Document ID")
+    score: Optional[float] = Field(None, description="Channel-native score")
+    metadata: Optional[Dict[str, Any]] = Field(
+        None, description="Optional hit metadata"
+    )
+
+
+class RetrievalFuseRequest(BaseModel):
+    """Request model for multi-channel RRF fusion."""
+
+    text_dense_results: List[RankedDoc] = Field(
+        default_factory=list, description="Dense text retrieval ranking"
+    )
+    bm25_results: List[RankedDoc] = Field(
+        default_factory=list, description="Sparse BM25 retrieval ranking"
+    )
+    smiles_fingerprint_results: List[RankedDoc] = Field(
+        default_factory=list, description="SMILES fingerprint retrieval ranking"
+    )
+    smiles_embedding_results: List[RankedDoc] = Field(
+        default_factory=list,
+        description="Optional molecular embedding retrieval ranking",
+    )
+    include_smiles_embedding: bool = Field(
+        default=False,
+        description="Include smiles_embedding_results in fusion",
+    )
+    top_k: int = Field(default=20, ge=1, le=200)
+    rrf_k: int = Field(default=60, ge=1, le=1000)
+    channel_weights: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Optional channel weights (e.g. {'text_dense': 1.0})",
+    )
+
+
+class RetrievalFuseResponse(BaseModel):
+    """RRF fusion response payload."""
+
+    total_results: int
+    included_channels: List[str]
+    results: List[Dict[str, Any]]
+
+
 # =============================================================================
 # API Endpoints
 # =============================================================================
@@ -115,8 +167,9 @@ async def search_similar_structures(request: StructureSearchRequest):
     """
     Search for molecules similar to query structure.
 
-    Uses ECFP4 fingerprints with cosine similarity search via pgvector HNSW index.
-    Returns molecules with similarity >= threshold, sorted by similarity descending.
+    Uses fingerprint channel (`ecfp4` or `maccs`) with cosine similarity search via
+    pgvector IVFFlat index. Returns molecules with similarity >= threshold, sorted
+    by similarity descending.
 
     **Example:**
     ```json
@@ -128,9 +181,21 @@ async def search_similar_structures(request: StructureSearchRequest):
     ```
     """
     try:
+        channel = request.fingerprint_type.strip().lower()
+        if channel not in {"ecfp4", "maccs"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid fingerprint_type. Supported values: ecfp4, maccs",
+            )
+
         # Step 1: Generate query fingerprint
         fp_generator = FingerprintGenerator()
-        query_fp = fp_generator.ecfp4(request.query_smiles)
+        if channel == "maccs":
+            query_fp = fp_generator.maccs(request.query_smiles)
+            fp_column = "molecule_fingerprint_maccs"
+        else:
+            query_fp = fp_generator.ecfp4(request.query_smiles)
+            fp_column = "molecule_fingerprint"
 
         # Convert to pgvector format: "[0.0,1.0,0.0,...]"
         fp_vector = f"[{','.join(map(str, query_fp))}]"
@@ -140,16 +205,16 @@ async def search_similar_structures(request: StructureSearchRequest):
         cur = conn.cursor()
 
         cur.execute(
-            """
+            f"""
             SELECT
                 id,
                 molecule_smiles,
-                1 - (molecule_fingerprint <=> %s::halfvec) as similarity,
+                1 - ({fp_column} <=> %s::halfvec) as similarity,
                 metadata->>'title' as title,
                 molecule_metadata
             FROM document_chunk
-            WHERE molecule_fingerprint IS NOT NULL
-              AND 1 - (molecule_fingerprint <=> %s::halfvec) >= %s
+            WHERE {fp_column} IS NOT NULL
+              AND 1 - ({fp_column} <=> %s::halfvec) >= %s
             ORDER BY similarity DESC
             LIMIT %s
         """,
@@ -162,6 +227,7 @@ async def search_similar_structures(request: StructureSearchRequest):
                 StructureSearchResult(
                     doc_id=row[0],
                     smiles=row[1],
+                    fingerprint_type=channel,
                     similarity=float(row[2]),
                     document_title=row[3],
                     molecule_metadata=row[4],
@@ -255,7 +321,12 @@ async def get_statistics():
             """
             SELECT
                 COUNT(*) as total_docs,
-                COUNT(molecule_fingerprint) as docs_with_fps,
+                COUNT(*) FILTER (
+                    WHERE molecule_fingerprint IS NOT NULL
+                       OR molecule_fingerprint_maccs IS NOT NULL
+                ) as docs_with_any_fps,
+                COUNT(molecule_fingerprint) as docs_with_ecfp4,
+                COUNT(molecule_fingerprint_maccs) as docs_with_maccs,
                 COUNT(DISTINCT molecule_smiles) as unique_smiles,
                 COUNT(DISTINCT id) as unique_documents
             FROM document_chunk
@@ -270,6 +341,8 @@ async def get_statistics():
             return {
                 "total_documents": 0,
                 "documents_with_fingerprints": 0,
+                "documents_with_ecfp4": 0,
+                "documents_with_maccs": 0,
                 "unique_smiles": 0,
                 "unique_documents": 0,
                 "coverage": 0.0,
@@ -278,9 +351,13 @@ async def get_statistics():
         return {
             "total_documents": row[0],
             "documents_with_fingerprints": row[1],
-            "unique_smiles": row[2],
-            "unique_documents": row[3],
+            "documents_with_ecfp4": row[2],
+            "documents_with_maccs": row[3],
+            "unique_smiles": row[4],
+            "unique_documents": row[5],
             "coverage": row[1] / row[0] if row[0] > 0 else 0.0,
+            "coverage_ecfp4": row[2] / row[0] if row[0] > 0 else 0.0,
+            "coverage_maccs": row[3] / row[0] if row[0] > 0 else 0.0,
         }
 
     except Exception as e:
@@ -291,6 +368,7 @@ async def get_statistics():
 @app.post("/v1/structure/batch-search", tags=["Batch Search"])
 async def batch_search(
     query_smiles_list: List[str],
+    fingerprint_type: str = Query(default="ecfp4"),
     threshold: float = Query(default=0.7, ge=0.0, le=1.0),
     top_k: int = Query(default=5, ge=1, le=50),
 ):
@@ -301,6 +379,12 @@ async def batch_search(
     Useful for comparing multiple compounds or scaffold hopping.
     """
     try:
+        channel = fingerprint_type.strip().lower()
+        if channel not in {"ecfp4", "maccs"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid fingerprint_type. Supported values: ecfp4, maccs",
+            )
         fp_generator = FingerprintGenerator()
         all_results = {}
 
@@ -310,20 +394,25 @@ async def batch_search(
         for query_smiles in query_smiles_list:
             try:
                 # Generate fingerprint
-                query_fp = fp_generator.ecfp4(query_smiles)
+                if channel == "maccs":
+                    query_fp = fp_generator.maccs(query_smiles)
+                    fp_column = "molecule_fingerprint_maccs"
+                else:
+                    query_fp = fp_generator.ecfp4(query_smiles)
+                    fp_column = "molecule_fingerprint"
                 fp_vector = f"[{','.join(map(str, query_fp))}]"
 
                 # Search
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         id,
                         molecule_smiles,
-                        1 - (molecule_fingerprint <=> %s::halfvec) as similarity,
+                        1 - ({fp_column} <=> %s::halfvec) as similarity,
                         metadata->>'title' as title
                     FROM document_chunk
-                    WHERE molecule_fingerprint IS NOT NULL
-                      AND 1 - (molecule_fingerprint <=> %s::halfvec) >= %s
+                    WHERE {fp_column} IS NOT NULL
+                      AND 1 - ({fp_column} <=> %s::halfvec) >= %s
                     ORDER BY similarity DESC
                     LIMIT %s
                 """,
@@ -335,6 +424,7 @@ async def batch_search(
                         "doc_id": row[0],
                         "smiles": row[1],
                         "similarity": float(row[2]),
+                        "fingerprint_type": channel,
                         "document_title": row[3],
                     }
                     for row in cur.fetchall()
@@ -361,6 +451,50 @@ async def batch_search(
     except Exception as e:
         logger.error(f"Batch search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/v1/retrieval/fuse",
+    response_model=RetrievalFuseResponse,
+    tags=["Retrieval Fusion"],
+)
+async def fuse_retrieval_rankings(request: RetrievalFuseRequest):
+    """
+    Fuse heterogeneous retrieval rankings with Reciprocal Rank Fusion (RRF).
+
+    Intended channels:
+    - text_dense
+    - bm25
+    - smiles_fingerprint
+    - smiles_embedding (optional)
+    """
+    def _dump(item: RankedDoc) -> Dict[str, Any]:
+        if hasattr(item, "model_dump"):
+            return item.model_dump()
+        return item.dict()
+
+    channel_rankings: Dict[str, List[Dict[str, Any]]] = {
+        "text_dense": [_dump(item) for item in request.text_dense_results],
+        "bm25": [_dump(item) for item in request.bm25_results],
+        "smiles_fingerprint": [_dump(item) for item in request.smiles_fingerprint_results],
+    }
+    if request.include_smiles_embedding:
+        channel_rankings["smiles_embedding"] = [
+            _dump(item) for item in request.smiles_embedding_results
+        ]
+
+    fused = fuse_rankings_rrf(
+        channel_rankings,
+        top_k=request.top_k,
+        rrf_k=request.rrf_k,
+        channel_weights=request.channel_weights,
+    )
+
+    return RetrievalFuseResponse(
+        total_results=len(fused),
+        included_channels=list(channel_rankings.keys()),
+        results=fused,
+    )
 
 
 # =============================================================================
