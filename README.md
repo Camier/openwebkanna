@@ -9,12 +9,15 @@ This repository is an orchestration layer for an academic-papers RAG workflow in
 - OpenWebUI runs in Docker (`openwebui` service).
 - LiteLLM is the primary OpenAI-compatible upstream (`http://host.docker.internal:4000/v1`).
 - CLIProxyAPI is an optional/deprecated sidecar (`cliproxyapi` service) for legacy OAuth alias workflows.
+- Open Terminal is an optional sidecar (`open-terminal` profile) for terminal/file server integration.
 - OpenWebUI reaches LiteLLM through host-gateway bridge (`host.docker.internal` from container context).
 
 ```text
 OpenWebUI (container) --> LiteLLM (host/container) --> providers
                      \
-                      \--> optional CLIProxyAPI sidecar (legacy workflows)
+                      \--> optional sidecars:
+                           - CLIProxyAPI (legacy OAuth workflows)
+                           - Open Terminal (terminal/file integration)
 ```
 
 ## What is production-relevant here
@@ -34,6 +37,7 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
 
 Optional:
 - CLIProxyAPI OAuth credentials (legacy sidecar workflows)
+- Open Terminal API key (only if you enable `OPEN_TERMINAL_ENABLED=true`)
 - vLLM Python environment (only if you intentionally enable fallback)
 
 ## Quick start
@@ -48,6 +52,7 @@ cp .env.example .env
 OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
 CLIPROXYAPI_ENABLED=false
+OPEN_TERMINAL_ENABLED=false
 ```
 
 3. Start stack:
@@ -66,6 +71,26 @@ Optional sidecar check (only if `CLIPROXYAPI_ENABLED=true`):
 ./check-cliproxyapi.sh
 ```
 
+Optional Open Terminal enablement:
+```bash
+# .env
+OPEN_TERMINAL_ENABLED=true
+OPEN_TERMINAL_API_KEY=<strong-random-key>
+TERMINAL_SERVER_CONNECTIONS=[{"id":"open-terminal","name":"Open Terminal","enabled":true,"url":"http://open-terminal:8000","path":"/openapi.json","key":"<strong-random-key>","auth_type":"bearer","config":{"access_grants":[{"principal_type":"user","principal_id":"*","permission":"read"}]}}]
+
+# deploy with optional profile start/stop handling
+./deploy.sh --no-logs
+
+# verify optional sidecar + OpenWebUI health
+./status.sh
+OPENWEBUI_API_KEY=<openwebui-admin-api-key> ./test-openwebui-open-terminal.sh
+```
+
+Smoke test notes:
+- `test-openwebui-open-terminal.sh` requires OpenWebUI API auth (`OPENWEBUI_API_KEY` or `OPENWEBUI_TOKEN`, or signin credentials).
+- WebSocket checks are enabled by default (`OPEN_TERMINAL_SMOKE_WS=true`); disable with `OPEN_TERMINAL_SMOKE_WS=false` if Node runtime WS support is unavailable.
+- Test default behavior restores previous terminal configuration after execution. Set `OPEN_TERMINAL_SMOKE_RESTORE_CONFIG=false` if you intentionally want smoke-applied config to remain.
+
 ## Troubleshooting
 
 If the UI shows "no models", "pending activation", or you get 401/502 surprises, use:
@@ -80,7 +105,7 @@ Before enabling advanced features, baseline defaults now include:
 - Local SearXNG via host bridge (`host.docker.internal:${SEARXNG_PORT}`).
 - Code execution + code-interpreter bootstrap enabled using Pyodide.
 - OpenWebUI image aligned with current upstream release reference:
-  `ghcr.io/open-webui/open-webui:v0.8.3`.
+  `ghcr.io/open-webui/open-webui:v0.8.8`.
 
 If you need a current release tag from upstream manually:
 
@@ -155,6 +180,7 @@ Check which Docker images have newer versions available:
 
 This compares locally pinned versions against upstream registry tags for:
 - OpenWebUI (`ghcr.io/open-webui/open-webui`)
+- Open Terminal (`ghcr.io/open-webui/open-terminal`)
 - CLIProxyAPI (if using a versioned image)
 - Any other images defined in `docker-compose.yml`
 
@@ -175,13 +201,13 @@ Run vulnerability scans on container images:
 This wrapper runs Trivy against all images in the compose stack. For a single image:
 
 ```bash
-trivy image ghcr.io/open-webui/open-webui:v0.8.3
+trivy image ghcr.io/open-webui/open-webui:v0.8.8
 ```
 
 For a deeper SBOM-based scan:
 
 ```bash
-trivy image --format spdx-json --output sbom.json ghcr.io/open-webui/open-webui:v0.8.3
+trivy image --format spdx-json --output sbom.json ghcr.io/open-webui/open-webui:v0.8.8
 trivy sbom sbom.json
 ```
 
@@ -198,12 +224,13 @@ Review CVE severity levels and prioritize:
 
 2. Review changelog for breaking changes:
    - OpenWebUI: https://github.com/open-webui/open-webui/releases
+   - Open Terminal: https://github.com/open-webui/open-terminal/releases
    - CLIProxyAPI: check upstream release notes
 
 3. Update image tags in `.env` or `docker-compose.yml`:
    ```bash
    # Example: pin to a specific OpenWebUI release
-   sed -i 's|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.8.4|' .env
+   sed -i 's|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.8.8|' .env
    ```
 
 4. Pull and restart:
@@ -227,7 +254,7 @@ Review CVE severity levels and prioritize:
 ### Version Pinning Policy
 
 **When to pin versions:**
-- Production deployments: always pin to specific tags (e.g., `v0.8.3`, not `latest`)
+- Production deployments: always pin to specific tags (e.g., `v0.8.8`, not `latest`)
 - After validated upgrades: update the pinned version in `.env.example`
 - When reproducibility matters: CI/CD pipelines, shared environments
 
@@ -239,7 +266,8 @@ Review CVE severity levels and prioritize:
 **Recommended pattern in `.env`:**
 ```bash
 # Pinned versions (update after validation)
-OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.8.3
+OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.8.8
+OPEN_TERMINAL_IMAGE=ghcr.io/open-webui/open-terminal:0.8.2
 CLIPROXYAPI_IMAGE=your-registry/cliproxyapi:1.2.0
 ```
 
@@ -572,6 +600,13 @@ See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/doc
 ./test-openwebui-cliproxy-routing.sh
 ```
 
+- Open Terminal integration smoke:
+```bash
+OPENWEBUI_API_KEY=<openwebui-admin-api-key> ./test-openwebui-open-terminal.sh
+# optional: skip ws leg
+OPENWEBUI_API_KEY=<openwebui-admin-api-key> OPEN_TERMINAL_SMOKE_WS=false ./test-openwebui-open-terminal.sh
+```
+
 ## Important behavior in `deploy.sh`
 
 - `deploy.sh` does not auto-start or auto-stop host-side vLLM/LiteLLM processes.
@@ -630,6 +665,7 @@ See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/doc
 - `cliproxyapi/config.yaml`: CLIProxyAPI provider and alias mapping
 - `deploy.sh`: orchestrated startup logic with health gates
 - `test-openwebui-cliproxy-routing.sh`: Optional OpenWebUI-to-CLIProxyAPI E2E validation
+- `test-openwebui-open-terminal.sh`: Open Terminal integration smoke test (REST + optional WS)
 
 ## Known constraints
 

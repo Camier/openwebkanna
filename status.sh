@@ -19,6 +19,10 @@ LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 SMILES_STRUCTURE_API_HOST="${SMILES_STRUCTURE_API_HOST:-127.0.0.1}"
 SMILES_STRUCTURE_API_PORT="${SMILES_STRUCTURE_API_PORT:-8011}"
 SMILES_STRUCTURE_API_BASE_URL="${SMILES_STRUCTURE_API_BASE_URL:-http://${SMILES_STRUCTURE_API_HOST}:${SMILES_STRUCTURE_API_PORT}}"
+OPEN_TERMINAL_ENABLED="${OPEN_TERMINAL_ENABLED:-false}"
+OPEN_TERMINAL_BIND_ADDRESS="${OPEN_TERMINAL_BIND_ADDRESS:-127.0.0.1}"
+OPEN_TERMINAL_PORT="${OPEN_TERMINAL_PORT:-8320}"
+OPEN_TERMINAL_BASE_URL="${OPEN_TERMINAL_BASE_URL:-http://${OPEN_TERMINAL_BIND_ADDRESS}:${OPEN_TERMINAL_PORT}}"
 # shellcheck disable=SC2034
 COMPOSE_CMD=()
 LITELLM_PROBE_SOURCE=""
@@ -236,6 +240,24 @@ check_cliproxyapi() {
     return 0
 }
 
+check_open_terminal() {
+    print_section "Open Terminal (optional sidecar)"
+
+    if ! is_true "$OPEN_TERMINAL_ENABLED"; then
+        print_info "Open Terminal disabled (OPEN_TERMINAL_ENABLED=false)"
+        return 0
+    fi
+
+    local url="${OPEN_TERMINAL_BASE_URL%/}"
+    if curl -sf -m 5 "${url}/health" &>/dev/null 2>&1; then
+        print_svc "Open Terminal" "running" "(${url})"
+        return 0
+    fi
+
+    print_svc "Open Terminal" "warning" "(not reachable at ${url})"
+    return 1
+}
+
 check_rag_profile() {
     print_section "RAG Profile"
     print_info "RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-<unset>}"
@@ -317,6 +339,15 @@ print_summary() {
         echo -e "  ${YELLOW}◐${NC} SMILES API: ${YELLOW}Not reachable${NC}"
     fi
 
+    # Open Terminal (optional)
+    if is_true "$OPEN_TERMINAL_ENABLED"; then
+        if curl -sf -m 5 "${OPEN_TERMINAL_BASE_URL%/}/health" &>/dev/null 2>&1; then
+            echo -e "  ${GREEN}●${NC} OpenTerm:   ${GREEN}OK${NC}"
+        else
+            echo -e "  ${YELLOW}◐${NC} OpenTerm:   ${YELLOW}Not reachable${NC}"
+        fi
+    fi
+
     echo
     if [ "$all_good" = true ]; then
         print_success "All core services operational — http://localhost:${OPENWEBUI_PORT}"
@@ -366,6 +397,7 @@ main() {
             check_mcpo || true
             check_smiles_structure_api || true
             check_cliproxyapi || true
+            check_open_terminal || true
             check_rag_profile || true
             check_resources || true
         fi

@@ -58,6 +58,20 @@ start_docker_compose() {
         docker_compose --profile legacy-cliproxy rm -f -s cliproxyapi >/dev/null 2>&1 || true
     fi
 
+    # Open Terminal sidecar is optional and explicitly opt-in.
+    if is_true "${OPEN_TERMINAL_ENABLED:-false}"; then
+        if [ -z "${OPEN_TERMINAL_API_KEY:-}" ]; then
+            print_error "OPEN_TERMINAL_ENABLED=true but OPEN_TERMINAL_API_KEY is empty. Set it in .env before deploy."
+            exit 1
+        fi
+        print_step "OPEN_TERMINAL enabled; starting open-terminal profile"
+        docker_compose --profile open-terminal up -d open-terminal
+    else
+        print_info "OPEN_TERMINAL disabled; ensuring open-terminal sidecar is not running"
+        docker_compose --profile open-terminal stop open-terminal >/dev/null 2>&1 || true
+        docker_compose --profile open-terminal rm -f -s open-terminal >/dev/null 2>&1 || true
+    fi
+
     print_success "Docker Compose services started"
 }
 
