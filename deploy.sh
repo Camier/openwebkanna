@@ -19,6 +19,7 @@ MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 PLUGIN_AUDIT_ENABLED="${PLUGIN_AUDIT_ENABLED:-true}"
 PLUGIN_AUDIT_SCRIPT="${PLUGIN_AUDIT_SCRIPT:-./audit-openwebui-plugins.sh}"
 PLUGIN_AUDIT_FOCUS="${PLUGIN_AUDIT_FOCUS:-all}"
+INDIGO_TOOL_AUTOCONFIGURE="${INDIGO_TOOL_AUTOCONFIGURE:-true}"
 # shellcheck disable=SC2034
 COMPOSE_CMD=()
 
@@ -72,6 +73,16 @@ start_docker_compose() {
         docker_compose --profile open-terminal rm -f -s open-terminal >/dev/null 2>&1 || true
     fi
 
+    # Indigo Service sidecar is optional and explicitly opt-in.
+    if is_true "${INDIGO_SERVICE_ENABLED:-false}"; then
+        print_step "INDIGO_SERVICE enabled; starting indigo-service profile"
+        docker_compose --profile indigo-service up -d indigo-service
+    else
+        print_info "INDIGO_SERVICE disabled; ensuring indigo-service sidecar is not running"
+        docker_compose --profile indigo-service stop indigo-service >/dev/null 2>&1 || true
+        docker_compose --profile indigo-service rm -f -s indigo-service >/dev/null 2>&1 || true
+    fi
+
     print_success "Docker Compose services started"
 }
 
@@ -116,12 +127,52 @@ run_plugin_audit_gate() {
     return 1
 }
 
+configure_indigo_tool() {
+    if ! is_true "${INDIGO_SERVICE_ENABLED:-false}"; then
+        print_info "Indigo tool setup skipped (INDIGO_SERVICE_ENABLED=false)"
+        return 0
+    fi
+
+    if ! is_true "${INDIGO_TOOL_AUTOCONFIGURE:-true}"; then
+        print_info "Indigo tool setup skipped (INDIGO_TOOL_AUTOCONFIGURE=false)"
+        return 0
+    fi
+
+    if [ ! -x "./enable-indigo-live.sh" ]; then
+        print_error "Indigo tool setup script is missing or not executable: ./enable-indigo-live.sh"
+        return 1
+    fi
+
+    print_step "Provisioning Indigo tool in OpenWebUI"
+    ./enable-indigo-live.sh
+    print_success "Indigo tool provisioned"
+}
+
+sync_openwebui_web_search_config() {
+    if [ ! -x "./sync-openwebui-web-search-config.sh" ]; then
+        print_warning "Web-search sync script missing or not executable: ./sync-openwebui-web-search-config.sh"
+        return 0
+    fi
+
+    print_step "Syncing OpenWebUI retrieval web-search config"
+    ./sync-openwebui-web-search-config.sh
+    print_success "OpenWebUI retrieval web-search config synced"
+}
+
 show_access_info() {
+    local indigo_url="${INDIGO_SERVICE_BASE_URL:-http://${INDIGO_SERVICE_BIND_ADDRESS:-127.0.0.1}:${INDIGO_SERVICE_PORT:-8012}}"
+
     echo
     print_success "Deployment complete"
     echo
     echo -e "  ${CYAN}OpenWebUI:${NC}  http://localhost:${OPENWEBUI_PORT}"
     echo -e "  ${CYAN}MCPO:${NC}       ${MCPO_BASE_URL}"
+    if is_true "${INDIGO_SERVICE_ENABLED:-false}"; then
+        echo -e "  ${CYAN}Indigo:${NC}     ${indigo_url}"
+        if is_true "${INDIGO_TOOL_AUTOCONFIGURE:-true}"; then
+            echo -e "  ${CYAN}Tool:${NC}       indigo_chemistry (auto-provisioned)"
+        fi
+    fi
     echo
     echo -e "  ${YELLOW}Logs:${NC}    ./logs.sh"
     echo -e "  ${YELLOW}Status:${NC}  ./status.sh"
@@ -159,6 +210,7 @@ main() {
                 echo "Env vars:"
                 echo "  PLUGIN_AUDIT_ENABLED   Gate deploy on plugin syntax audit (default: true)"
                 echo "  PLUGIN_AUDIT_FOCUS     Audit scope: all|tool|function (default: all)"
+                echo "  INDIGO_TOOL_AUTOCONFIGURE  Auto-register Indigo tool when INDIGO_SERVICE_ENABLED=true (default: true)"
                 exit 0
                 ;;
             *)
@@ -181,8 +233,18 @@ main() {
         print_info "Skipping docker compose (--skip-docker)"
     fi
 
-    wait_for_openwebui || true
+    local openwebui_ready=false
+    if wait_for_openwebui; then
+        openwebui_ready=true
+        sync_openwebui_web_search_config || exit 1
+    fi
+
+    if [ "$openwebui_ready" = false ]; then
+        print_warning "Skipping retrieval web-search sync because OpenWebUI is not ready yet"
+    fi
+
     run_plugin_audit_gate || exit 1
+    configure_indigo_tool || exit 1
 
     if [ "$SHOW_LOGS" = true ]; then
         print_step "Recent logs"

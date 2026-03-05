@@ -12,13 +12,13 @@ source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
 
 # Configuration
-OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}"
-OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.2}"
+OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.8}"
+OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.7}"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="backups"
 OPENWEBUI_VOLUME="${OPENWEBUI_VOLUME:-openwebui_data}"
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
-CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
+CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-false}"
 CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
 CLIPROXYAPI_START_SCRIPT="./start-cliproxyapi.sh"
 CLIPROXYAPI_RESTART_SCRIPT="./restart-cliproxyapi.sh"
@@ -333,9 +333,9 @@ wait_for_openwebui() {
 }
 
 ensure_cliproxyapi() {
-    if [ "$CLIPROXYAPI_ENABLED" = "false" ]; then
-        print_error "CLIPROXYAPI_ENABLED=false is not supported for this update flow"
-        return 1
+    if ! is_true "$CLIPROXYAPI_ENABLED"; then
+        print_info "CLIPROXYAPI_ENABLED=false; skipping CLIProxyAPI health checks"
+        return 0
     fi
 
     print_step "Ensuring CLIProxyAPI is healthy..."
@@ -383,7 +383,11 @@ show_update_summary() {
     echo -e "${BOLD}Updated Services:${NC}"
     echo -e "  ${CYAN}OpenWebUI:${NC}    Updated image: ${OPENWEBUI_IMAGE}"
     echo -e "  ${CYAN}vLLM:${NC}         Unchanged (still running)"
-    echo -e "  ${CYAN}CLIProxyAPI:${NC}  Checked/restarted as needed"
+    if is_true "$CLIPROXYAPI_ENABLED"; then
+        echo -e "  ${CYAN}CLIProxyAPI:${NC}  Checked/restarted as needed"
+    else
+        echo -e "  ${CYAN}CLIProxyAPI:${NC}  Skipped (CLIPROXYAPI_ENABLED=false)"
+    fi
 
     echo -e "\n${BOLD}Quick Commands:${NC}"
     echo -e "  ${YELLOW}View logs:${NC}     ./logs.sh"
@@ -392,6 +396,17 @@ show_update_summary() {
     echo -e "\n${BOLD}Access OpenWebUI:${NC} http://localhost:${OPENWEBUI_PORT}"
 
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════════${NC}\n"
+}
+
+sync_openwebui_web_search_config() {
+    if [ ! -x "./sync-openwebui-web-search-config.sh" ]; then
+        print_warning "Web-search sync script missing or not executable: ./sync-openwebui-web-search-config.sh"
+        return 0
+    fi
+
+    print_step "Syncing OpenWebUI retrieval web-search config"
+    ./sync-openwebui-web-search-config.sh
+    print_success "OpenWebUI retrieval web-search config synced"
 }
 
 ###############################################################################
@@ -492,7 +507,11 @@ main() {
 
     echo "  • Pull latest OpenWebUI image"
     echo "  • Restart OpenWebUI container"
-    echo "  • Ensure CLIProxyAPI service is healthy"
+    if is_true "$CLIPROXYAPI_ENABLED"; then
+        echo "  • Ensure CLIProxyAPI service is healthy"
+    else
+        echo "  • Skip CLIProxyAPI checks (CLIPROXYAPI_ENABLED=false)"
+    fi
     echo "  • vLLM will continue running (no interruption)"
     echo
 
@@ -507,7 +526,7 @@ main() {
 
     # Ensure CLIProxyAPI is healthy before restarting OpenWebUI
     if ! ensure_cliproxyapi; then
-        print_error "CLIProxyAPI is required and must be healthy before update"
+        print_error "Failed to ensure CLIProxyAPI health before update"
         exit 1
     fi
 
@@ -544,6 +563,11 @@ main() {
     # Wait for OpenWebUI to be ready
     if ! wait_for_openwebui; then
         print_error "OpenWebUI failed readiness checks"
+        exit 1
+    fi
+
+    if ! sync_openwebui_web_search_config; then
+        print_error "Failed to sync OpenWebUI retrieval web-search config"
         exit 1
     fi
 
