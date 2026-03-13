@@ -50,11 +50,16 @@ validate_focus() {
     return 1
 }
 
-is_openwebui_running() {
-    local services=""
-    init_compose_cmd || return 1
-    services="$("${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" ps --status running --services 2>/dev/null || true)"
-    printf "%s\n" "$services" | grep -qx "$OPENWEBUI_SERVICE"
+resolve_local_python() {
+    if command_exists python3; then
+        printf "python3"
+        return 0
+    fi
+    if command_exists python; then
+        printf "python"
+        return 0
+    fi
+    return 1
 }
 
 # Detect timeout command at runtime (Linux: timeout, macOS: gtimeout)
@@ -69,8 +74,6 @@ get_timeout_cmd() {
 }
 
 run_python_audit() {
-    init_compose_cmd || return 1
-
     local audit_script="${SCRIPT_DIR}/lib/audit_plugins.py"
     if [ ! -f "$audit_script" ]; then
         print_error "Audit script not found: $audit_script"
@@ -80,7 +83,19 @@ run_python_audit() {
     local timeout_cmd
     timeout_cmd="$(get_timeout_cmd)"
 
-    local -a compose_exec_cmd=("${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" exec -T "$OPENWEBUI_SERVICE" python - "$FOCUS" "$PLUGIN_AUDIT_IMPORT_CHECK")
+    local -a compose_exec_cmd=(
+        "${COMPOSE_CMD[@]}"
+        -f "$COMPOSE_FILE"
+        exec
+        -T
+        "$OPENWEBUI_SERVICE"
+        sh
+        -lc
+        'if command -v python3 >/dev/null 2>&1; then exec python3 - "$@"; fi; exec python - "$@"'
+        sh
+        "$FOCUS"
+        "$PLUGIN_AUDIT_IMPORT_CHECK"
+    )
 
     if [ -n "$timeout_cmd" ]; then
         "$timeout_cmd" "${PLUGIN_AUDIT_TIMEOUT_SECONDS}s" "${compose_exec_cmd[@]}" <"$audit_script"
@@ -92,6 +107,7 @@ run_python_audit() {
 
 run_filesystem_pipeline_audit() {
     local pipelines_root="$PIPELINES_DIR"
+    local python_cmd=""
     local failed=0
     local file=""
 
@@ -113,14 +129,15 @@ run_filesystem_pipeline_audit() {
         return 1
     fi
 
-    if ! command_exists python; then
-        print_error "python is required for filesystem pipeline audit"
+    python_cmd="$(resolve_local_python || true)"
+    if [ -z "$python_cmd" ]; then
+        print_error "python3 or python is required for filesystem pipeline audit"
         return 1
     fi
 
     print_step "Compiling pipeline .py files from PIPELINES_DIR"
     while IFS= read -r file; do
-        if ! python -m py_compile "$file" >/dev/null 2>&1; then
+        if ! "$python_cmd" -m py_compile "$file" >/dev/null 2>&1; then
             print_error "Syntax error in pipeline file: $file"
             failed=1
         fi
@@ -209,7 +226,7 @@ main() {
     print_header "OpenWebUI Plugin Code Audit"
     print_step "Checking OpenWebUI runtime availability"
 
-    if ! is_openwebui_running; then
+    if ! compose_service_running "$OPENWEBUI_SERVICE"; then
         print_error "OpenWebUI service '$OPENWEBUI_SERVICE' is not running"
         print_warning "Start services first (e.g., ./deploy.sh) then rerun this audit"
         exit 1

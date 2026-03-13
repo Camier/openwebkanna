@@ -15,6 +15,8 @@ source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
 cd "$SCRIPT_DIR"
 
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-openwebui}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-$OPENWEBUI_SERVICE}"
 INDIGO_TOOL_ID="${INDIGO_TOOL_ID:-indigo_chemistry}"
 INDIGO_TOOL_NAME="${INDIGO_TOOL_NAME:-Indigo Chemistry}"
 INDIGO_TOOL_SOURCE="${INDIGO_TOOL_SOURCE:-${SCRIPT_DIR}/local/plugins/indigo_chemistry_tool.py}"
@@ -79,8 +81,15 @@ main() {
     print_success "Indigo Service is healthy"
 
     print_step "Ensuring OpenWebUI container is running"
-    if ! docker ps --format '{{.Names}}' | grep -qx 'openwebui'; then
-        print_error "openwebui container is not running"
+    if ! compose_service_running "$OPENWEBUI_SERVICE"; then
+        print_error "OpenWebUI service '$OPENWEBUI_SERVICE' is not running"
+        exit 1
+    fi
+
+    local openwebui_container_id
+    openwebui_container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
+    if [ -z "$openwebui_container_id" ]; then
+        print_error "Unable to resolve running container for service '$OPENWEBUI_SERVICE'"
         exit 1
     fi
 
@@ -88,7 +97,12 @@ main() {
     local content_b64
     content_b64="$(base64 -w 0 "$INDIGO_TOOL_SOURCE")"
 
-    docker_compose exec -T openwebui python - \
+    docker_compose exec -T "$OPENWEBUI_SERVICE" sh -lc '
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 - "$@"
+fi
+exec python - "$@"
+' sh \
         "$INDIGO_TOOL_ID" \
         "$INDIGO_TOOL_NAME" \
         "$INDIGO_TOOL_API_BASE_URL" \
@@ -195,14 +209,19 @@ PY
 
     if [ "$NO_RESTART" != "true" ]; then
         print_step "Restarting openwebui to reload tool cache"
-        docker_compose restart openwebui >/dev/null
-        print_success "openwebui restarted"
+        docker_compose restart "$OPENWEBUI_SERVICE" >/dev/null
+        print_success "${OPENWEBUI_SERVICE} restarted"
     else
         print_warning "Skipping openwebui restart (--no-restart)"
     fi
 
     print_step "Verifying tool registration"
-    docker_compose exec -T openwebui python - \
+    docker_compose exec -T "$OPENWEBUI_SERVICE" sh -lc '
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 - "$@"
+fi
+exec python - "$@"
+' sh \
         "$INDIGO_TOOL_ID" <<'PY'
 import sqlite3
 import sys
@@ -222,7 +241,7 @@ PY
     print_step "Verifying Indigo reachability from OpenWebUI container"
     local info_url http_code
     info_url="${INDIGO_TOOL_API_BASE_URL%/}/info"
-    http_code="$(docker exec openwebui sh -lc "curl -sS --connect-timeout 3 --max-time 8 -o /tmp/indigo_tool_info.json -w '%{http_code}' '${info_url}'" || true)"
+    http_code="$(docker exec "$openwebui_container_id" sh -lc "curl -sS --connect-timeout 3 --max-time 8 -o /tmp/indigo_tool_info.json -w '%{http_code}' '${info_url}'" || true)"
     if [ "$http_code" != "200" ]; then
         print_error "OpenWebUI container cannot reach Indigo API at ${info_url} (HTTP ${http_code})"
         exit 1

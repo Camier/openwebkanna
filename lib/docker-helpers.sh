@@ -78,3 +78,56 @@ docker_compose() {
     init_compose_cmd || return 1
     "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" "$@"
 }
+
+###############################################################################
+# compose_service_running
+# Check whether a compose service currently has a running container.
+#
+# Arguments:
+#   $1 - Compose service name
+#
+# Returns:
+#   0 if the service is running, 1 otherwise
+###############################################################################
+compose_service_running() {
+    local service="$1"
+    local services=""
+
+    services="$(docker_compose ps --status running --services 2>/dev/null || true)"
+    printf "%s\n" "$services" | grep -qx "$service"
+}
+
+###############################################################################
+# resolve_container_id
+# Resolve a running container ID for a compose service, with an optional
+# fallback to a literal Docker container name for compatibility copies.
+#
+# Arguments:
+#   $1 - Compose service name
+#   $2 - Optional fallback container name (defaults to the service name)
+#
+# Output:
+#   Container ID to stdout
+#
+# Returns:
+#   0 if a running container ID was found, 1 otherwise
+###############################################################################
+resolve_container_id() {
+    local service="$1"
+    local fallback_name="${2:-$service}"
+    local container_id=""
+
+    container_id="$(docker_compose ps -q "$service" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+    if [ -n "$container_id" ]; then
+        printf "%s" "$container_id"
+        return 0
+    fi
+
+    container_id="$(docker ps -q --filter "name=^/${fallback_name}$" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+    if [ -n "$container_id" ]; then
+        printf "%s" "$container_id"
+        return 0
+    fi
+
+    return 1
+}
