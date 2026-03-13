@@ -52,6 +52,7 @@ Operationally relevant roots:
 - `scripts/`: narrower maintenance, hygiene, backup, and data utilities.
 - `cliproxyapi/`: optional legacy sidecar config, local overlay, and auth state.
 - `local/`: local-only helper namespace for sidecar binaries, optional tool payloads, and separate workspaces that should not clutter the repo root.
+- `certs/`: local TLS material and placeholders; real certificate/key files stay ignored by default.
 - `data/`: local corpus, PDFs, extractions, notes, and processing artifacts.
 - `artifacts/`: generated audit and evaluation outputs.
 - `archive/`: archived fallback flows and retired operator paths.

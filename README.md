@@ -9,6 +9,7 @@ Layout note:
 - Canonical config paths live under `config/`, canonical runbooks/references live under `docs/`, and canonical operator scripts live at the repo root.
 - Local directory maps now exist for the main subtrees: `config/README.md`, `scripts/README.md`, `artifacts/README.md`, `cliproxyapi/README.md`, `research/README.md`, and `local/README.md`.
 - Local-only helper assets now live under `local/` instead of cluttering the repo root. This includes sidecar binaries under `local/bin/`, optional tool payloads under `local/plugins/`, and the separate entity-maintenance workspace under `local/entities/`.
+- `certs/` is reserved for local TLS material and placeholders such as `.gitkeep`; certificate files remain ignored by default.
 
 Editing rule:
 - Change `config/*` first for runtime behavior.
