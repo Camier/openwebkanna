@@ -131,3 +131,53 @@ resolve_container_id() {
 
     return 1
 }
+
+###############################################################################
+# resolve_host_python
+# Resolve a usable Python interpreter on the host, preferring python3.
+#
+# Output:
+#   Interpreter name to stdout
+#
+# Returns:
+#   0 if a supported interpreter was found, 1 otherwise
+###############################################################################
+resolve_host_python() {
+    if command -v python3 >/dev/null 2>&1; then
+        printf "python3"
+        return 0
+    fi
+
+    if command -v python >/dev/null 2>&1; then
+        printf "python"
+        return 0
+    fi
+
+    return 1
+}
+
+###############################################################################
+# resolve_container_python
+# Resolve a usable Python interpreter inside a running container, preferring
+# python3 over python.
+#
+# Arguments:
+#   $1 - Running container ID or name
+#
+# Output:
+#   Interpreter name to stdout
+#
+# Returns:
+#   0 if a supported interpreter was found, 1 otherwise
+###############################################################################
+resolve_container_python() {
+    local container_id="$1"
+    local python_bin=""
+
+    python_bin="$(docker exec "$container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true)"
+    if [ -z "$python_bin" ]; then
+        return 1
+    fi
+
+    printf "%s" "$python_bin"
+}

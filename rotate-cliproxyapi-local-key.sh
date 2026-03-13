@@ -116,7 +116,7 @@ PY
     init_compose_cmd >/dev/null
     if command_exists docker && compose_service_running "$OPENWEBUI_SERVICE"; then
         openwebui_container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
-        openwebui_python="$(docker exec "$openwebui_container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true)"
+        openwebui_python="$(resolve_container_python "$openwebui_container_id" || true)"
     fi
 
     if [ -n "$openwebui_container_id" ] && [ -n "$openwebui_python" ]; then

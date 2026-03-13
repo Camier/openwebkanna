@@ -108,8 +108,7 @@ if [ -z "$openwebui_container_id" ]; then
     exit 1
 fi
 
-openwebui_python="$(docker exec "$openwebui_container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true)"
-if [ -z "$openwebui_python" ]; then
+if ! openwebui_python="$(resolve_container_python "$openwebui_container_id")"; then
     print_error "No python interpreter found inside OpenWebUI container."
     exit 1
 fi

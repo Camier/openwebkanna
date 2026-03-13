@@ -20,7 +20,8 @@ OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
 OPENWEBUI_TOKEN="${OPENWEBUI_TOKEN:-}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
-OPENWEBUI_DOCKER_SERVICE="${OPENWEBUI_DOCKER_SERVICE:-openwebui}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-45}"
 VERBOSE="${VERBOSE:-false}"
@@ -114,24 +115,13 @@ read_dot007_key() {
     ' "$dotfile"
 }
 
-docker_compose_ps_q() {
-    local service="$1"
-
-    if command_exists docker && docker compose version >/dev/null 2>&1; then
-        docker compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null || true
-        return 0
-    fi
-
-    if command_exists docker-compose; then
-        docker-compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null || true
-        return 0
-    fi
-
-    return 1
-}
-
 try_mint_openwebui_admin_jwt() {
-    if ! command_exists python3 || ! command_exists docker; then
+    local cid=""
+    local admin_id=""
+    local host_python=""
+    local container_python=""
+
+    if ! command_exists docker; then
         return 1
     fi
 
@@ -139,24 +129,28 @@ try_mint_openwebui_admin_jwt() {
         return 1
     fi
 
-    local cid=""
-    cid="$(docker_compose_ps_q "$OPENWEBUI_DOCKER_SERVICE" | tr -d '\r' | head -n 1)"
-    if [ -z "$cid" ]; then
-        cid="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_SERVICE}$" 2>/dev/null | head -n 1 || true)"
+    if ! host_python="$(resolve_host_python)"; then
+        return 1
     fi
+
+    init_compose_cmd >/dev/null
+    cid="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
     if [ -z "$cid" ]; then
         return 1
     fi
 
-    local admin_id=""
-    admin_id="$(docker exec "$cid" python3 -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+    if ! container_python="$(resolve_container_python "$cid")"; then
+        return 1
+    fi
+
+    admin_id="$(docker exec "$cid" "$container_python" -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
     if [ -z "$admin_id" ]; then
         return 1
     fi
 
     local token=""
     token="$(
-        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" python3 - <<'PY'
+        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" "$host_python" - <<'PY'
 import base64
 import hashlib
 import hmac

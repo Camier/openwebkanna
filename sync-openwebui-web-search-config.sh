@@ -39,23 +39,6 @@ SSL_VERIFY_RAW="${ENABLE_WEB_LOADER_SSL_VERIFICATION:-}"
 
 API_TOKEN=""
 
-resolve_local_python() {
-    if command_exists python3; then
-        printf "python3"
-        return 0
-    fi
-    if command_exists python; then
-        printf "python"
-        return 0
-    fi
-    return 1
-}
-
-resolve_container_python() {
-    local container_id="$1"
-    docker exec "$container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true
-}
-
 to_bool_json_or_null() {
     local value="$1"
     if [ -z "$value" ]; then
@@ -89,7 +72,7 @@ mint_local_admin_jwt() {
     if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
         return 1
     fi
-    if ! host_python="$(resolve_local_python)"; then
+    if ! host_python="$(resolve_host_python)"; then
         return 1
     fi
 
@@ -99,8 +82,7 @@ mint_local_admin_jwt() {
         return 1
     fi
 
-    container_python="$(resolve_container_python "$container_id")"
-    if [ -z "$container_python" ]; then
+    if ! container_python="$(resolve_container_python "$container_id")"; then
         return 1
     fi
 
