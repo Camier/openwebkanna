@@ -21,7 +21,7 @@ source "${_PRINT_UTILS_DIR}/colors.sh"
 # Print a fancy bordered header
 # Usage: print_header "Title Text"
 print_header() {
-    local title="$1"
+    local title="${1:-OpenWebUI Utility}"
     local width=60
     local padding
     local left_pad=""

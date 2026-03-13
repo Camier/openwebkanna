@@ -16,7 +16,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${SELF_DIR}/../.." && pwd)"
 cd "$SCRIPT_DIR"
 source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
