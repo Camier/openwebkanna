@@ -85,34 +85,6 @@ request_api() {
     RESPONSE_CODE="$(curl "${args[@]}" 2>"$RESPONSE_ERR_FILE" || true)"
 }
 
-request_signin_jwt() {
-    local payload_file="${TMP_DIR}/signin_payload.json"
-    local out_file="${TMP_DIR}/signin_response.json"
-    local err_file="${TMP_DIR}/signin_response.curl.err"
-    local code=""
-
-    jq -n \
-        --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-        --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-        '{email:$email,password:$password}' >"$payload_file"
-
-    code="$(curl -sS -m "$OPEN_TERMINAL_TIMEOUT" \
-        -X POST "${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}" \
-        -H "Content-Type: application/json" \
-        -H "Accept: application/json" \
-        --data @"$payload_file" \
-        -o "$out_file" \
-        -w "%{http_code}" 2>"$err_file" || true)"
-
-    if [ "$code" != "200" ]; then
-        return 1
-    fi
-
-    JWT_TOKEN="$(jq -r '.token // empty' "$out_file" 2>/dev/null || true)"
-    [ -n "$JWT_TOKEN" ] || return 1
-    return 0
-}
-
 restore_terminal_config() {
     [ "$PENDING_CONFIG_RESTORE" = true ] || return 0
     [ -n "$PREV_CONFIG_FILE" ] || return 0
@@ -200,7 +172,15 @@ authenticate() {
     fi
 
     if [ -z "$JWT_TOKEN" ] && [ -n "$OPENWEBUI_SIGNIN_EMAIL" ] && [ -n "$OPENWEBUI_SIGNIN_PASSWORD" ]; then
-        if request_signin_jwt; then
+        JWT_TOKEN="$(
+            openwebui_signin_token \
+                "$OPENWEBUI_URL" \
+                "$OPENWEBUI_SIGNIN_EMAIL" \
+                "$OPENWEBUI_SIGNIN_PASSWORD" \
+                "$OPEN_TERMINAL_TIMEOUT" \
+                "$OPENWEBUI_SIGNIN_PATH" || true
+        )"
+        if [ -n "$JWT_TOKEN" ]; then
             print_success "Obtained JWT via signin"
         else
             print_warning "Signin did not return JWT; websocket check may be skipped"

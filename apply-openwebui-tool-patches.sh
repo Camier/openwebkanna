@@ -89,28 +89,20 @@ signin() {
     fi
 
     print_step "Signing in to OpenWebUI to get bearer token"
-    local payload_file="$TMP_DIR/signin.payload.json"
-    local output_file="$TMP_DIR/signin.response.json"
-    local code=""
-
-    jq -n --arg email "$OPENWEBUI_SIGNIN_EMAIL" --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-        '{email:$email, password:$password}' >"$payload_file"
-
-    code="$(request_api "POST" "$OPENWEBUI_SIGNIN_PATH" "$payload_file" "$output_file")"
-    if [ "$code" != "200" ]; then
-        local detail
-        detail="$(jq -r '.detail // .error.message // .message // "signin failed"' "$output_file" 2>/dev/null || true)"
-        print_warning "Signin failed (HTTP $code): $detail"
-        return 0
-    fi
-
-    API_TOKEN="$(jq -r '.token // empty' "$output_file" 2>/dev/null || true)"
+    API_TOKEN="$(
+        openwebui_signin_token \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "$CURL_TIMEOUT" \
+            "$OPENWEBUI_SIGNIN_PATH" || true
+    )"
     if [ -n "$API_TOKEN" ]; then
         print_success "OpenWebUI bearer token acquired"
         return 0
     fi
 
-    print_warning "Signin response did not include token; continuing unauthenticated"
+    print_warning "Unable to acquire OpenWebUI bearer token via signin; continuing unauthenticated"
     return 0
 }
 
