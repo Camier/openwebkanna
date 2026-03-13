@@ -39,6 +39,7 @@ Do not use these as canonical desired-state truth:
 - Runtime truth and supported topology: `docs/ssot/stack.md`
 - Repository layout and entrypoints: `docs/REPO_MAP.md`
 - Config edit targets and compatibility copies: `config/README.md`
+- Documentation authoring and review: `docs/guides/DOCUMENTATION_STYLE.md`
 
 ## Local Directory Maps
 
@@ -62,7 +63,7 @@ These live at the repo root on purpose, but they are not runtime SSOT files:
 ## Directory Roles
 
 - `docs/runbooks/`: active operator procedures for prerequisites, setup, operations, troubleshooting, and embedding-profile workflows.
-- `docs/guides/`: narrower task guides that complement, but do not replace, the runbooks.
+- `docs/guides/`: narrower task guides that complement, but do not replace, the runbooks, including documentation conventions in [docs/guides/DOCUMENTATION_STYLE.md](guides/DOCUMENTATION_STYLE.md).
 - `docs/ssot/`: current-state runtime truth for topology, service registry, and drift notes.
 - `docs/status/`: point-in-time local runtime observations, not desired-state topology.
 - `docs/reviews/`: audit and technical review outputs.

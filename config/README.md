@@ -12,10 +12,8 @@ Use this file when you need to know:
 - which root files are compatibility copies
 - which checks to rerun after changing runtime behavior
 
-Use this file when you need to answer:
-- which file actually owns a runtime behavior
-- whether a root file is canonical or only a compatibility copy
-- which checks to rerun after a config change
+Do not use this file as the runtime topology reference or as a troubleshooting manual.
+Use `docs/ssot/stack.md` for supported topology and `docs/runbooks/*.md` for procedures.
 
 Common config tasks:
 - change Docker topology, ports, profiles, or healthchecks: `compose/docker-compose.yml`
