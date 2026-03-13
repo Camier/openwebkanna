@@ -36,7 +36,7 @@ All KB collections queried by that runtime must be indexed with the same model f
 
 Use:
 ```bash
-./manage-openwebui-embedding-profiles.sh <command>
+./scripts/rag/manage-openwebui-embedding-profiles.sh <command>
 ```
 
 Commands:
@@ -64,18 +64,18 @@ This repo standard is now:
 
 1. Check runtime and lane map
 ```bash
-./manage-openwebui-embedding-profiles.sh list
-./manage-openwebui-embedding-profiles.sh lanes
+./scripts/rag/manage-openwebui-embedding-profiles.sh list
+./scripts/rag/manage-openwebui-embedding-profiles.sh lanes
 ```
 
 2. Activate the Sceletium lane
 ```bash
-./manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
+./scripts/rag/manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
 ```
 
 3. If a KB has no lane key yet, bind it once
 ```bash
-./manage-openwebui-embedding-profiles.sh bind-kb \
+./scripts/rag/manage-openwebui-embedding-profiles.sh bind-kb \
   --kb-id <KB_UUID> \
   --profile biomed_pubmed_msmarco \
   --lane sceletium \
@@ -84,7 +84,7 @@ This repo standard is now:
 
 4. Diagnose compatibility before querying
 ```bash
-./manage-openwebui-embedding-profiles.sh diagnose
+./scripts/rag/manage-openwebui-embedding-profiles.sh diagnose
 ```
 
 This pattern avoids manual UUID copy/paste and keeps the profile switch explicit.
@@ -110,7 +110,7 @@ Pattern B: Multiple OpenWebUI instances (recommended for concurrent domains)
 - Do not assume old chunks remain semantically compatible after profile switch.
 - Validate with:
 ```bash
-./manage-openwebui-embedding-profiles.sh diagnose --kb-id <KB_UUID>
+./scripts/rag/manage-openwebui-embedding-profiles.sh diagnose --kb-id <KB_UUID>
 ```
 
 ## Notes

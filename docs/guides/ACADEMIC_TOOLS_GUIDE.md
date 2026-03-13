@@ -198,7 +198,7 @@ VECTOR_DB=pgvector
 ENABLE_RAG_WEB_SEARCH=false
 
 # Tune document retrieval intentionally rather than assuming an old profile:
-./tune-openwebui-documents.sh
+./scripts/rag/tune-openwebui-documents.sh
 ```
 
 ### Configure Memory for Long Research Sessions

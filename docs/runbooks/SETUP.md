@@ -73,14 +73,14 @@ What this does:
 ```bash
 ./status.sh
 docker compose ps
-./audit-no-mock.sh
+./scripts/testing/audit-no-mock.sh
 ```
 
 Optional legacy checks (only if `CLIPROXYAPI_ENABLED=true`):
 
 ```bash
-./check-cliproxyapi.sh
-./test-openwebui-cliproxy-routing.sh
+./scripts/cliproxyapi/check-cliproxyapi.sh
+./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
 ```
 
 Baseline validation (fast checks):
@@ -121,5 +121,5 @@ Advanced and optional flows intentionally live outside this setup runbook:
 - archived `vLLM` fallback: `archive/`
 
 If you see an empty model list, a pending activation screen, or repeated `401`/`502` issues:
-- take a DB snapshot with `./backup-openwebui-db.sh`
-- then use `./openwebui-user-admin.sh --email you@example.com` or the troubleshooting runbook, depending on whether the issue is account state or runtime drift
+- take a DB snapshot with `./scripts/admin/backup-openwebui-db.sh`
+- then use `./scripts/admin/openwebui-user-admin.sh --email you@example.com` or the troubleshooting runbook, depending on whether the issue is account state or runtime drift

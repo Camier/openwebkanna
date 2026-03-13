@@ -77,7 +77,7 @@ show_summary() {
     echo ""
     echo "Tips to reduce costs:"
     echo "  1. Use local embeddings (already enabled: sentence-transformers)"
-    echo "  2. Batch PDF imports: ./import-pdfs-to-kb.sh --parallel 2"
+    echo "  2. Batch PDF imports: ./scripts/rag/import-pdfs-to-kb.sh --parallel 2"
     echo "  3. Reuse generated embeddings across multiple queries"
     echo "  4. Use cheaper models for background tasks (TASK_MODEL_EXTERNAL)"
 }

@@ -21,7 +21,7 @@ Start here before deeper symptom branches:
 - `./test-rag.sh --baseline`
 
 If those baseline checks fail, fix the first failing baseline signal before applying symptom-specific workarounds.
-Before DB or role edits, take a backup with `./backup-openwebui-db.sh`.
+Before DB or role edits, take a backup with `./scripts/admin/backup-openwebui-db.sh`.
 
 ## Quick triage checklist (2 minutes)
 
@@ -47,8 +47,8 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 
 Optional legacy sidecar route checks (only if `CLIPROXYAPI_ENABLED=true`):
 ```bash
-./check-cliproxyapi.sh
-./test-openwebui-cliproxy-routing.sh
+./scripts/cliproxyapi/check-cliproxyapi.sh
+./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
 ```
 
 If those pass, your "models disappeared" problem is almost always browser auth state (cookies/localStorage) or user role state in OpenWebUI DB.
@@ -75,8 +75,8 @@ If it returns `401`, you are not correctly authenticated.
 ### Fix (server-side, when you cannot sign in)
 Promote/activate the user and optionally reset password (this edits SQLite DB inside the container and restarts OpenWebUI):
 ```bash
-./openwebui-user-admin.sh --email you@example.com --role admin
-./openwebui-user-admin.sh --email you@example.com --reset-password
+./scripts/admin/openwebui-user-admin.sh --email you@example.com --role admin
+./scripts/admin/openwebui-user-admin.sh --email you@example.com --reset-password
 ```
 
 Before edits, it auto-creates a DB backup under `./backups/`.
@@ -89,12 +89,12 @@ OpenWebUI thinks the account role is not active (often `pending`), even if the a
 ### Fix
 Promote the account role explicitly:
 ```bash
-./openwebui-user-admin.sh --email you@example.com --role user
+./scripts/admin/openwebui-user-admin.sh --email you@example.com --role user
 ```
 
 If you want admin UI access:
 ```bash
-./openwebui-user-admin.sh --email you@example.com --role admin
+./scripts/admin/openwebui-user-admin.sh --email you@example.com --role admin
 ```
 
 Then clear site data and sign in again.
@@ -136,7 +136,7 @@ docker compose logs --tail 200 openwebui
 ### Recovery steps
 1. Backup DB:
 ```bash
-./backup-openwebui-db.sh
+./scripts/admin/backup-openwebui-db.sh
 ```
 2. Restart:
 ```bash
@@ -236,17 +236,17 @@ sudo firewall-cmd --reload
 ### Triage
 1. Check if tools are registered:
 ```bash
-./audit-openwebui-plugins.sh
+./scripts/testing/audit-openwebui-plugins.sh
 ```
 
 2. Repair tool registrations:
 ```bash
-./repair-openwebui-tools.sh
+./scripts/admin/repair-openwebui-tools.sh
 ```
 
 3. Verify tool endpoints are reachable:
 ```bash
-./test-openwebui-tools-endpoints.sh
+./scripts/testing/test-openwebui-tools-endpoints.sh
 ```
 
 ### Common causes
@@ -262,7 +262,7 @@ sudo firewall-cmd --reload
 ### Fix
 1. Rotate the CLIProxyAPI local key:
 ```bash
-./rotate-cliproxyapi-local-key.sh
+./scripts/cliproxyapi/rotate-cliproxyapi-local-key.sh
 ```
 
 2. Update any services or scripts that use the old key:
@@ -276,7 +276,7 @@ docker compose up -d --force-recreate
 ### After rotation
 - Verify the new key works:
 ```bash
-./check-cliproxyapi.sh
+./scripts/cliproxyapi/check-cliproxyapi.sh
 ```
 
 ## Symptom: Code execution not working
@@ -319,7 +319,7 @@ docker compose up -d --force-recreate jupyter openwebui
 ### Triage
 1. Run the smoke test suite:
 ```bash
-./test-update-smoke.sh
+./scripts/testing/test-update-smoke.sh
 ```
 
 2. Check container logs for errors:
@@ -337,7 +337,7 @@ docker compose logs --tail 200 openwebui
 - If smoke tests fail, check the specific test output for guidance.
 - For DB issues, restore from backup:
 ```bash
-./backup-openwebui-db.sh  # Create fresh backup first
+./scripts/admin/backup-openwebui-db.sh  # Create fresh backup first
 # Then restore from a known-good backup
 ```
 
@@ -347,5 +347,5 @@ docker compose logs --tail 200 openwebui
 - Do not paste API keys, tokens, or DB URLs containing credentials into logs/issues.
 - Before touching OpenWebUI SQLite DB, take a backup:
 ```bash
-./backup-openwebui-db.sh
+./scripts/admin/backup-openwebui-db.sh
 ```

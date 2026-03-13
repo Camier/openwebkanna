@@ -171,8 +171,8 @@ show_document_tips() {
    Step 1: Organize PDFs into topic folders
    Step 2: Process one topic at a time:
 
-   ./import-pdfs-to-kb.sh --parallel 2 data/pdfs/sceletium-pharmacology/
-   ./import-pdfs-to-kb.sh --parallel 2 data/pdfs/sceletium-traditional-use/
+   ./scripts/rag/import-pdfs-to-kb.sh --parallel 2 data/pdfs/sceletium-pharmacology/
+   ./scripts/rag/import-pdfs-to-kb.sh --parallel 2 data/pdfs/sceletium-traditional-use/
 
    Step 3: Verify embeddings in OpenWebUI admin panel
 

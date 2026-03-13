@@ -50,11 +50,11 @@ Editing rule:
 
 Operationally relevant roots:
 
-- `*.sh`: canonical operator entrypoints.
+- root `*.sh`: small daily operator surface for deploy, status, logs, cleanup, update, and baseline validation.
 - `config/`: canonical runtime configuration.
 - `docs/`: runbooks, SSOT, guides, status notes, plans, reviews, and reference snapshots.
 - `lib/`: shared shell helpers used by root scripts.
-- `scripts/`: narrower maintenance, hygiene, backup, and data utilities.
+- `scripts/`: secondary maintenance, admin, testing, ingest, and optional-sidecar workflows.
 - `cliproxyapi/`: optional legacy sidecar config, local overlay, and auth state.
 - `local/`: local-only helper namespace for sidecar binaries, optional tool payloads, and separate workspaces that should not clutter the repo root.
 - `certs/`: local TLS material and placeholders; real certificate/key files stay ignored by default.
@@ -71,24 +71,26 @@ Local helper layout under `local/`:
 
 ## 4. Operator entrypoints
 
-Canonical operator commands live at the repo root.
+The root now keeps only the daily operator surface. Secondary tooling lives under `scripts/*`.
 
 Primary daily surface:
 
 - Deploy and status: `deploy.sh`, `status.sh`, `logs.sh`, `cleanup.sh`, `update.sh`
-- Baseline validation: `audit-no-mock.sh`, `test-rag.sh --baseline`, `test-api.sh --baseline`, `verify-scripts.sh`
-- Admin and repair: `openwebui-user-admin.sh`, `repair-openwebui-tools.sh`, `sync-openwebui-openai-config.sh`, `sync-openwebui-web-search-config.sh`
-- Ingest and retrieval tuning: `import-pdfs-to-kb.sh`, `tune-openwebui-documents.sh`, `manage-openwebui-embedding-profiles.sh`
+- Baseline validation: `test-rag.sh --baseline`, `test-api.sh --baseline`
+
+Secondary scripts under `scripts/`:
+
+- `scripts/testing/`: audit and script-validation helpers such as `scripts/testing/audit-no-mock.sh`, `scripts/testing/audit-openwebui-plugins.sh`, `scripts/testing/test-openwebui-tools-endpoints.sh`, `scripts/testing/test-update-smoke.sh`, `scripts/testing/verify-scripts.sh`
+- `scripts/admin/`: OpenWebUI admin, repair, config-sync, and backup helpers such as `scripts/admin/openwebui-user-admin.sh`, `scripts/admin/repair-openwebui-tools.sh`, `scripts/admin/sync-openwebui-openai-config.sh`, `scripts/admin/sync-openwebui-web-search-config.sh`, `scripts/admin/backup-openwebui-db.sh`, `scripts/admin/apply-openwebui-tool-patches.sh`
+- `scripts/rag/`: ingest and retrieval-tuning flows such as `scripts/rag/import-pdfs-to-kb.sh`, `scripts/rag/tune-openwebui-documents.sh`, `scripts/rag/manage-openwebui-embedding-profiles.sh`, `scripts/rag/llm-council.sh`
 
 Optional sidecar/tool flows:
 
-- CLIProxyAPI lifecycle/bootstrap/auth: `setup-cliproxyapi.sh`, `start-cliproxyapi.sh`, `stop-cliproxyapi.sh`, `restart-cliproxyapi.sh`, `check-cliproxyapi.sh`, `configure-cliproxyapi-oauth.sh`, `test-cliproxyapi-oauth.sh`, `import-qwen-auth.sh`, `cli-proxy-api.sh`, `local/bin/cliproxyapi`
-- Indigo: `start-indigo-service.sh`, `stop-indigo-service.sh`, `restart-indigo-service.sh`, `check-indigo-service.sh`, `enable-indigo-live.sh`, `local/plugins/indigo_chemistry_tool.py`
-- Open Terminal: `test-openwebui-open-terminal.sh`
-- OpenWebUI tool repair/admin helpers: `audit-openwebui-plugins.sh`, `test-openwebui-tools-endpoints.sh`, `repair-openwebui-tools.sh`, `apply-openwebui-tool-patches.sh`
+- CLIProxyAPI lifecycle/bootstrap/auth: `scripts/cliproxyapi/setup-cliproxyapi.sh`, `scripts/cliproxyapi/start-cliproxyapi.sh`, `scripts/cliproxyapi/stop-cliproxyapi.sh`, `scripts/cliproxyapi/restart-cliproxyapi.sh`, `scripts/cliproxyapi/check-cliproxyapi.sh`, `scripts/cliproxyapi/configure-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/test-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/import-qwen-auth.sh`, `scripts/cliproxyapi/cli-proxy-api.sh`, `local/bin/cliproxyapi`
+- Indigo: `scripts/indigo/start-indigo-service.sh`, `scripts/indigo/stop-indigo-service.sh`, `scripts/indigo/restart-indigo-service.sh`, `scripts/indigo/check-indigo-service.sh`, `scripts/indigo/enable-indigo-live.sh`, `local/plugins/indigo_chemistry_tool.py`
+- Open Terminal: `scripts/open-terminal/test-openwebui-open-terminal.sh`
+- MCP-specific helpers: `scripts/mcp/configure-mcpo-openapi-servers.sh`, `scripts/mcp/test-mcp.sh`
 - Entity-maintenance workspace when present: `local/entities/README.md`, `local/entities/pipelines/`
-
-Use `scripts/` only when you need narrower support tooling or audits.
 
 ## 5. Configuration roots
 

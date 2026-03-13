@@ -32,8 +32,8 @@ echo "=== Thesis Backup Started: ${DATE} ==="
 # 1. OpenWebUI Database Backup
 echo "[1/4] Backing up OpenWebUI database..."
 cd "${OPENWEBUI_DIR}"
-if [[ -x ./backup-openwebui-db.sh ]]; then
-    ./backup-openwebui-db.sh
+if [[ -x ./scripts/admin/backup-openwebui-db.sh ]]; then
+    ./scripts/admin/backup-openwebui-db.sh
     # Copy latest backup to thesis directory
     LATEST_BACKUP=$(
         find backups -maxdepth 1 -type f -name 'webui.db.backup_*' -printf '%T@ %p\n' 2>/dev/null |

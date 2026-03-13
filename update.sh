@@ -20,9 +20,9 @@ OPENWEBUI_VOLUME="${OPENWEBUI_VOLUME:-openwebui_data}"
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-false}"
 CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
-CLIPROXYAPI_START_SCRIPT="./start-cliproxyapi.sh"
-CLIPROXYAPI_RESTART_SCRIPT="./restart-cliproxyapi.sh"
-CLIPROXYAPI_CHECK_SCRIPT="./check-cliproxyapi.sh"
+CLIPROXYAPI_START_SCRIPT="./scripts/cliproxyapi/start-cliproxyapi.sh"
+CLIPROXYAPI_RESTART_SCRIPT="./scripts/cliproxyapi/restart-cliproxyapi.sh"
+CLIPROXYAPI_CHECK_SCRIPT="./scripts/cliproxyapi/check-cliproxyapi.sh"
 OPENWEBUI_RELEASES_URL="${OPENWEBUI_RELEASES_URL:-https://api.github.com/repos/open-webui/open-webui/releases/latest}"
 
 ###############################################################################
@@ -431,13 +431,13 @@ show_update_summary() {
 }
 
 sync_openwebui_web_search_config() {
-    if [ ! -x "./sync-openwebui-web-search-config.sh" ]; then
-        print_warning "Web-search sync script missing or not executable: ./sync-openwebui-web-search-config.sh"
+    if [ ! -x "./scripts/admin/sync-openwebui-web-search-config.sh" ]; then
+        print_warning "Web-search sync script missing or not executable: ./scripts/admin/sync-openwebui-web-search-config.sh"
         return 0
     fi
 
     print_step "Syncing OpenWebUI retrieval web-search config"
-    ./sync-openwebui-web-search-config.sh
+    ./scripts/admin/sync-openwebui-web-search-config.sh
     print_success "OpenWebUI retrieval web-search config synced"
 }
 

@@ -264,7 +264,7 @@ check_mcpo() {
 check_cliproxyapi() {
     print_section "CLIProxyAPI (optional sidecar)"
     # CLIProxyAPI is no longer the primary upstream; report informational status only.
-    local check_script="${SCRIPT_DIR}/check-cliproxyapi.sh"
+    local check_script="${SCRIPT_DIR}/scripts/cliproxyapi/check-cliproxyapi.sh"
     if [ "${CLIPROXYAPI_ENABLED:-false}" = "false" ]; then
         print_info "CLIProxyAPI disabled (CLIPROXYAPI_ENABLED=false)"
         return 0
@@ -304,7 +304,7 @@ check_indigo_service() {
     fi
 
     local url="${INDIGO_SERVICE_BASE_URL%/}"
-    local check_script="${SCRIPT_DIR}/check-indigo-service.sh"
+    local check_script="${SCRIPT_DIR}/scripts/indigo/check-indigo-service.sh"
     if [ -x "$check_script" ] && "$check_script" --quiet &>/dev/null 2>&1; then
         print_svc "Indigo Service" "running" "(${url})"
         return 0
@@ -476,7 +476,7 @@ print_summary() {
 
     # Indigo Service (optional)
     if is_true "$INDIGO_SERVICE_ENABLED"; then
-        if [ -x "${SCRIPT_DIR}/check-indigo-service.sh" ] && "${SCRIPT_DIR}/check-indigo-service.sh" --quiet &>/dev/null 2>&1; then
+        if [ -x "${SCRIPT_DIR}/scripts/indigo/check-indigo-service.sh" ] && "${SCRIPT_DIR}/scripts/indigo/check-indigo-service.sh" --quiet &>/dev/null 2>&1; then
             echo -e "  ${GREEN}●${NC} Indigo:     ${GREEN}OK${NC}"
         else
             echo -e "  ${YELLOW}◐${NC} Indigo:     ${YELLOW}Not reachable${NC}"

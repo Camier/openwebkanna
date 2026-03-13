@@ -52,7 +52,7 @@ Normal post-change validation loop:
 ```bash
 ./status.sh
 # Optional legacy sidecar check (only if CLIPROXYAPI_ENABLED=true):
-./check-cliproxyapi.sh
+./scripts/cliproxyapi/check-cliproxyapi.sh
 ```
 
 #### View Logs
@@ -67,7 +67,7 @@ docker compose logs --tail=100 openwebui
 ```bash
 docker compose restart openwebui
 # Optional legacy sidecar restart (only if CLIPROXYAPI_ENABLED=true):
-./restart-cliproxyapi.sh
+./scripts/cliproxyapi/restart-cliproxyapi.sh
 ```
 
 #### Stop Stack
@@ -84,26 +84,26 @@ docker compose down
 
 **Serial (default):**
 ```bash
-./import-pdfs-to-kb.sh --dir data/pdfs --kb-name "My Papers"
+./scripts/rag/import-pdfs-to-kb.sh --dir data/pdfs --kb-name "My Papers"
 ```
 
 **Parallel (faster for large batches):**
 ```bash
 # 3 workers
-IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
+IMPORT_PDFS_PARALLELISM=3 ./scripts/rag/import-pdfs-to-kb.sh
 
 # Or via command line
-./import-pdfs-to-kb.sh --parallel 3
+./scripts/rag/import-pdfs-to-kb.sh --parallel 3
 ```
 
 **Limit to first N PDFs:**
 ```bash
-./import-pdfs-to-kb.sh --limit 5
+./scripts/rag/import-pdfs-to-kb.sh --limit 5
 ```
 
 **Custom directory:**
 ```bash
-./import-pdfs-to-kb.sh --dir /path/to/pdfs --kb-name "Research Papers"
+./scripts/rag/import-pdfs-to-kb.sh --dir /path/to/pdfs --kb-name "Research Papers"
 ```
 
 ### Tune RAG Settings
@@ -123,25 +123,25 @@ curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
 TUNE_TOP_K=8 \
 TUNE_CHUNK_SIZE=1800 \
 TUNE_CHUNK_OVERLAP=200 \
-./tune-openwebui-documents.sh --apply
+./scripts/rag/tune-openwebui-documents.sh --apply
 
 # For broader conceptual retrieval
 TUNE_TOP_K=15 \
 TUNE_CHUNK_SIZE=3000 \
 TUNE_CHUNK_OVERLAP=600 \
-./tune-openwebui-documents.sh --apply
+./scripts/rag/tune-openwebui-documents.sh --apply
 ```
 
 These are intentional tuning examples, not hidden baseline defaults. The committed baseline remains `RAG_TOP_K=15`, `CHUNK_SIZE=3000`, `CHUNK_OVERLAP=600`, and `RAG_EMBEDDING_MODEL=pritamdeka/S-PubMedBert-MS-MARCO`.
 
 **Snapshot current config to a custom directory:**
 ```bash
-./tune-openwebui-documents.sh --snapshot-dir backups/rag-snapshots
+./scripts/rag/tune-openwebui-documents.sh --snapshot-dir backups/rag-snapshots
 ```
 
 **Restore retrieval/embedding settings from a snapshot:**
 ```bash
-./tune-openwebui-documents.sh \
+./scripts/rag/tune-openwebui-documents.sh \
   --restore backups/rag-snapshots/openwebui-documents-snapshot-YYYYMMDD-HHMMSS.json
 ```
 
@@ -155,14 +155,14 @@ Daily operator flow:
 
 ```bash
 # Inspect runtime and available lanes
-./manage-openwebui-embedding-profiles.sh list
-./manage-openwebui-embedding-profiles.sh lanes
+./scripts/rag/manage-openwebui-embedding-profiles.sh list
+./scripts/rag/manage-openwebui-embedding-profiles.sh lanes
 
 # Activate biomedical text lane
-./manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
+./scripts/rag/manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
 
 # Diagnose compatibility/drift
-./manage-openwebui-embedding-profiles.sh diagnose
+./scripts/rag/manage-openwebui-embedding-profiles.sh diagnose
 ```
 
 ### Test RAG
@@ -192,7 +192,7 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 
 **Backup vector data:**
 ```bash
-./backup-openwebui-db.sh
+./scripts/admin/backup-openwebui-db.sh
 ```
 
 ---
@@ -201,25 +201,25 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 
 ### Quick Evaluation
 ```bash
-./llm-council.sh --prompt "Compare RAG vs fine-tuning for academic papers"
+./scripts/rag/llm-council.sh --prompt "Compare RAG vs fine-tuning for academic papers"
 ```
 
 ### Multi-Model Benchmark
 ```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" \
+./scripts/rag/llm-council.sh --models "glm-5 minimax/chat-elite" \
   --prompt "Explain the mechanism of action of Sceletium tortuosum"
 ```
 
 ### Batch Evaluation
 ```bash
-./llm-council.sh --prompts-file data/notes/evaluation_prompts.txt \
+./scripts/rag/llm-council.sh --prompts-file data/notes/evaluation_prompts.txt \
   --models "glm-5 minimax/chat-elite" \
   --output-dir logs/llm-council/batch-1
 ```
 
 ### Anti-Position-Bias Testing
 ```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" \
+./scripts/rag/llm-council.sh --models "glm-5 minimax/chat-elite" \
   --prompt "Which response is more accurate: A or B?" \
   --position-swap
 ```
@@ -230,15 +230,15 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 
 ### Start/Stop
 ```bash
-./start-cliproxyapi.sh
-./stop-cliproxyapi.sh
-./restart-cliproxyapi.sh
+./scripts/cliproxyapi/start-cliproxyapi.sh
+./scripts/cliproxyapi/stop-cliproxyapi.sh
+./scripts/cliproxyapi/restart-cliproxyapi.sh
 ```
 
 ### Health Check
 ```bash
-./check-cliproxyapi.sh
-./check-cliproxyapi.sh --models
+./scripts/cliproxyapi/check-cliproxyapi.sh
+./scripts/cliproxyapi/check-cliproxyapi.sh --models
 ```
 
 ### Configure Providers
@@ -247,18 +247,18 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 ./configure-cliproxyapi-providers.sh
 
 # Setup OAuth (interactive)
-./configure-cliproxyapi-oauth.sh
+./scripts/cliproxyapi/configure-cliproxyapi-oauth.sh
 ```
 
 ### Rotate API Key
 ```bash
-./rotate-cliproxyapi-local-key.sh
+./scripts/cliproxyapi/rotate-cliproxyapi-local-key.sh
 ```
 
 ### Test OAuth Aliases
 ```bash
-./test-cliproxyapi-oauth.sh
-./test-openwebui-cliproxy-routing.sh
+./scripts/cliproxyapi/test-cliproxyapi-oauth.sh
+./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
 ```
 
 ---
@@ -268,15 +268,15 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 ### Configure MCP Servers
 ```bash
 # Verify MCPO endpoints
-./configure-mcpo-openapi-servers.sh --verify
+./scripts/mcp/configure-mcpo-openapi-servers.sh --verify
 
 # Apply configuration
-./configure-mcpo-openapi-servers.sh
+./scripts/mcp/configure-mcpo-openapi-servers.sh
 ```
 
 ### Test MCP Integration
 ```bash
-./test-mcp.sh
+./scripts/mcp/test-mcp.sh
 ```
 
 ### Available MCP Servers
@@ -292,7 +292,7 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 
 ### Create Backup
 ```bash
-./backup-openwebui-db.sh
+./scripts/admin/backup-openwebui-db.sh
 # Creates: backups/webui.db.YYYYMMDD-HHMMSS.sqlite
 ```
 
@@ -302,7 +302,7 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 BACKUP_FILE="backups/webui.db.YYYYMMDD-HHMMSS.sqlite"
 
 # 2. Optional but recommended: take a pre-restore safety backup
-./backup-openwebui-db.sh --output "backups/webui.db.pre-restore.$(date +%Y%m%d-%H%M%S).sqlite"
+./scripts/admin/backup-openwebui-db.sh --output "backups/webui.db.pre-restore.$(date +%Y%m%d-%H%M%S).sqlite"
 
 # 3. Stop OpenWebUI to avoid writes during restore
 docker compose stop openwebui
@@ -348,7 +348,7 @@ docker compose exec postgres pg_isready -U openwebui
 ### Model Availability
 ```bash
 # From CLIProxyAPI (only if enabled)
-./check-cliproxyapi.sh --models
+./scripts/cliproxyapi/check-cliproxyapi.sh --models
 
 # From OpenWebUI (advanced debug; requires an admin bearer token)
 OPENWEBUI_API_KEY="<admin-bearer-token>" \
@@ -394,21 +394,21 @@ Use that runbook for auth drift, empty model lists, `502` recovery, SSL issues, 
 
 ### Promote to Admin
 ```bash
-./openwebui-user-admin.sh --email user@example.com --role admin
+./scripts/admin/openwebui-user-admin.sh --email user@example.com --role admin
 ```
 
 ### Activate User
 ```bash
-./openwebui-user-admin.sh --email user@example.com --role user
+./scripts/admin/openwebui-user-admin.sh --email user@example.com --role user
 ```
 
 ### Reset User Password
 ```bash
-./openwebui-user-admin.sh --email user@example.com --reset-password
+./scripts/admin/openwebui-user-admin.sh --email user@example.com --reset-password
 ```
 
 ### List Users (SQLite)
-Advanced debug only. Prefer `./openwebui-user-admin.sh --email ...` for normal account management.
+Advanced debug only. Prefer `./scripts/admin/openwebui-user-admin.sh --email ...` for normal account management.
 
 ```bash
 docker compose exec -T openwebui python3 - <<'PY'
@@ -461,8 +461,8 @@ docker image prune -a
 
 ### Verify Scripts
 ```bash
-./verify-scripts.sh
-./test-update-smoke.sh
+./scripts/testing/verify-scripts.sh
+./scripts/testing/test-update-smoke.sh
 ```
 
 ---

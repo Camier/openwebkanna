@@ -62,6 +62,9 @@ OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 OPENWEBUI_TEST_MODEL="${OPENWEBUI_TEST_MODEL:-}"
 OPENWEBUI_SMOKE_MODEL_CANDIDATES="${OPENWEBUI_SMOKE_MODEL_CANDIDATES:-$(default_openwebui_smoke_model_candidates)}"
+CLIPROXY_BIN="${CLIPROXY_BIN:-./scripts/cliproxyapi/cli-proxy-api.sh}"
+CLIPROXYAPI_CHECK_SCRIPT="${CLIPROXYAPI_CHECK_SCRIPT:-./scripts/cliproxyapi/check-cliproxyapi.sh}"
+NO_MOCK_AUDIT_SCRIPT="${NO_MOCK_AUDIT_SCRIPT:-./scripts/testing/audit-no-mock.sh}"
 VERBOSE="${VERBOSE:-false}"
 OUTPUT_DIR="/tmp/openwebui_api_tests_$(date +%Y%m%d_%H%M%S)"
 TEST_MODE="full"
@@ -140,7 +143,7 @@ test_repo_real_integration_guard() {
     test_start "Repository Real Integration Guard"
 
     local response
-    if response=$(./audit-no-mock.sh 2>&1); then
+    if response=$("$NO_MOCK_AUDIT_SCRIPT" 2>&1); then
         test_pass
         return 0
     fi
@@ -271,7 +274,7 @@ test_cli_proxy_api_smoke() {
     fi
 
     test_start "CliProxyApi Disabled Lifecycle Negative Check"
-    if response=$(CLIPROXYAPI_ENABLED=false ./check-cliproxyapi.sh 2>&1); then
+    if response=$(CLIPROXYAPI_ENABLED=false "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
         save_response "cliproxyapi_disabled_lifecycle_check" "$response"
         test_fail "check-cliproxyapi.sh unexpectedly passed with CLIPROXYAPI_ENABLED=false"
     else
@@ -284,7 +287,7 @@ test_cli_proxy_api_smoke() {
     fi
 
     test_start "CliProxyApi Managed Health Check"
-    if response=$(CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false CLIPROXYAPI_API_KEY="$wrapper_upstream_api_key" ./check-cliproxyapi.sh 2>&1); then
+    if response=$(CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false CLIPROXYAPI_API_KEY="$wrapper_upstream_api_key" "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
         save_response "cliproxyapi_managed_health" "$response"
         if echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
             test_fail "check-cliproxyapi.sh reported disabled lifecycle; real runtime check did not run"
@@ -329,7 +332,7 @@ test_cli_proxy_api_smoke() {
     fi
 
     test_start "CliProxyApi Wrapper Help"
-    if response=$(./cli-proxy-api.sh --help 2>&1); then
+    if response=$("$CLIPROXY_BIN" --help 2>&1); then
         save_response "cli_proxy_api_help" "$response"
         if echo "$response" | grep -Fq "models [openwebui|webui|vllm|all]" &&
             echo "$response" | grep -Fq "chat --model <id> --message <text>"; then
@@ -339,11 +342,11 @@ test_cli_proxy_api_smoke() {
         fi
     else
         save_response "cli_proxy_api_help" "$response"
-        test_fail "Command failed: ./cli-proxy-api.sh --help"
+        test_fail "Command failed: $CLIPROXY_BIN --help"
     fi
 
     test_start "CliProxyApi Wrapper URL Override (models upstream via legacy 'vllm' command)"
-    if response=$(VLLM_API_KEY="$wrapper_upstream_api_key" ./cli-proxy-api.sh --raw --url "$cliproxy_base" models vllm 2>&1); then
+    if response=$(VLLM_API_KEY="$wrapper_upstream_api_key" "$CLIPROXY_BIN" --raw --url "$cliproxy_base" models vllm 2>&1); then
         save_response "cli_proxy_api_models_vllm_override" "$response"
         if has_non_empty_models_array "$response"; then
             test_pass
@@ -352,7 +355,7 @@ test_cli_proxy_api_smoke() {
         fi
     else
         save_response "cli_proxy_api_models_vllm_override" "$response"
-        test_fail "Command failed: ./cli-proxy-api.sh --raw --url \"$cliproxy_base\" models vllm"
+        test_fail "Command failed: $CLIPROXY_BIN --raw --url \"$cliproxy_base\" models vllm"
     fi
 
     return 0

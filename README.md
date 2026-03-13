@@ -16,14 +16,15 @@ Do not use this file as the full procedure reference:
 
 Layout note:
 - Root `docker-compose.yml`, `docker-compose.rg.yml`, `.env.example`, `mcp/`, `jupyter/`, and `searxng/` are compatibility copies of the canonical files under `config/`.
-- Canonical config paths live under `config/`, canonical runbooks/references live under `docs/`, and canonical operator scripts live at the repo root.
+- Canonical config paths live under `config/`, canonical runbooks/references live under `docs/`, the small daily operator surface lives at the repo root, and secondary maintenance or optional workflows live under `scripts/`.
 - Local directory maps now exist for the main subtrees: `config/README.md`, `scripts/README.md`, `artifacts/README.md`, `cliproxyapi/README.md`, `research/README.md`, and `local/README.md`.
 - Local-only helper assets now live under `local/` instead of cluttering the repo root. This includes sidecar binaries under `local/bin/`, optional tool payloads under `local/plugins/`, and the separate entity-maintenance workspace under `local/entities/`.
 - `certs/` is reserved for local TLS material and placeholders such as `.gitkeep`; certificate files remain ignored by default.
 
 Editing rule:
 - Change `config/*` first for runtime behavior.
-- Use the root copies as operator entrypoints and compatibility surfaces.
+- Use the root copies as daily operator entrypoints and compatibility surfaces.
+- Use `scripts/*` for narrower admin, testing, ingest, and optional-sidecar workflows.
 - Treat `docs/reference/openwebui/*` as upstream snapshot material, not live repo truth.
 
 ## Fast navigation
@@ -91,7 +92,8 @@ Not part of the baseline:
 ## Quick start
 
 Entrypoint note:
-- Root `*.sh` scripts are the canonical operator surface.
+- Root `*.sh` scripts are the primary daily operator surface.
+- Secondary workflows live under `scripts/`.
 
 1. Copy env file:
 ```bash
@@ -134,7 +136,7 @@ docker compose ps
 
 Optional legacy sidecar check (only if `CLIPROXYAPI_ENABLED=true`):
 ```bash
-./check-cliproxyapi.sh
+./scripts/cliproxyapi/check-cliproxyapi.sh
 ```
 
 ## Daily operations
@@ -145,7 +147,7 @@ Use the root scripts directly.
 ./deploy.sh --no-logs
 ./status.sh
 ./logs.sh
-./audit-no-mock.sh
+./scripts/testing/audit-no-mock.sh
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
 ```
@@ -169,10 +171,10 @@ Use these local documents instead of treating this file as a dump of every proce
 
 Advanced optional flows:
 
-- CLIProxyAPI legacy OAuth sidecar: `setup-cliproxyapi.sh`, `start-cliproxyapi.sh`, `configure-cliproxyapi-oauth.sh`, `test-cliproxyapi-oauth.sh`, `import-qwen-auth.sh`, `cli-proxy-api.sh`, `local/bin/`, `docs/runbooks/OPERATIONS.md`
-- Open Terminal smoke/integration flow: `test-openwebui-open-terminal.sh`
-- Indigo sidecar and tool registration: `start-indigo-service.sh`, `check-indigo-service.sh`, `enable-indigo-live.sh`, local tool source under `local/plugins/`
-- OpenWebUI tool repair/admin helpers: `audit-openwebui-plugins.sh`, `test-openwebui-tools-endpoints.sh`, `repair-openwebui-tools.sh`, `apply-openwebui-tool-patches.sh`
+- CLIProxyAPI legacy OAuth sidecar: `scripts/cliproxyapi/setup-cliproxyapi.sh`, `scripts/cliproxyapi/start-cliproxyapi.sh`, `scripts/cliproxyapi/configure-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/test-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/import-qwen-auth.sh`, `scripts/cliproxyapi/cli-proxy-api.sh`, `local/bin/`, `docs/runbooks/OPERATIONS.md`
+- Open Terminal smoke/integration flow: `scripts/open-terminal/test-openwebui-open-terminal.sh`
+- Indigo sidecar and tool registration: `scripts/indigo/start-indigo-service.sh`, `scripts/indigo/check-indigo-service.sh`, `scripts/indigo/enable-indigo-live.sh`, local tool source under `local/plugins/`
+- OpenWebUI tool repair/admin helpers: `scripts/testing/audit-openwebui-plugins.sh`, `scripts/testing/test-openwebui-tools-endpoints.sh`, `scripts/admin/repair-openwebui-tools.sh`, `scripts/admin/apply-openwebui-tool-patches.sh`
 - Entity-maintenance workspace, when present locally: `local/entities/README.md`
 - archived `vLLM` fallback scripts: `archive/`
 
@@ -181,10 +183,10 @@ Advanced optional flows:
 Embedding profile flow:
 
 ```bash
-./manage-openwebui-embedding-profiles.sh list
-./manage-openwebui-embedding-profiles.sh lanes
-./manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
-./manage-openwebui-embedding-profiles.sh diagnose
+./scripts/rag/manage-openwebui-embedding-profiles.sh list
+./scripts/rag/manage-openwebui-embedding-profiles.sh lanes
+./scripts/rag/manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
+./scripts/rag/manage-openwebui-embedding-profiles.sh diagnose
 ```
 
 Validation loop:
@@ -197,14 +199,14 @@ Validation loop:
 Legacy sidecar OAuth flow, only if you intentionally enable `cliproxyapi`:
 
 ```bash
-./configure-cliproxyapi-oauth.sh
-./test-cliproxyapi-oauth.sh
+./scripts/cliproxyapi/configure-cliproxyapi-oauth.sh
+./scripts/cliproxyapi/test-cliproxyapi-oauth.sh
 ```
 
 LLM Council quick run:
 
 ```bash
-./llm-council.sh --prompt "Compare RAG vs fine-tuning for this local stack."
+./scripts/rag/llm-council.sh --prompt "Compare RAG vs fine-tuning for this local stack."
 ```
 
 ## Maintenance
@@ -214,7 +216,7 @@ Use the local maintenance surface, not this README, for detailed policy and edge
 ```bash
 ./scripts/check-image-versions.sh
 ./scripts/audit-dependencies.sh
-./backup-openwebui-db.sh
+./scripts/admin/backup-openwebui-db.sh
 ./update.sh
 ```
 

@@ -21,7 +21,7 @@ VLLM_PID_FILE_LEGACY=".vllm_pid"
 OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
 CLIPROXYAPI_LOG_FILE="${CLIPROXYAPI_LOG_FILE:-logs/cliproxyapi.log}"
 CLIPROXYAPI_PID_FILE="${CLIPROXYAPI_PID_FILE:-.cliproxyapi.pid}"
-CLIPROXYAPI_STOP_SCRIPT="./stop-cliproxyapi.sh"
+CLIPROXYAPI_STOP_SCRIPT="./scripts/cliproxyapi/stop-cliproxyapi.sh"
 
 ###############################################################################
 # Cleanup Functions

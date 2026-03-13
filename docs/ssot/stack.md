@@ -184,11 +184,11 @@ Evidence:
 
 ### Ingest
 
-`import-pdfs-to-kb.sh` -> OpenWebUI APIs -> OpenWebUI data store`
+`scripts/rag/import-pdfs-to-kb.sh` -> OpenWebUI APIs -> OpenWebUI data store`
 
 Evidence:
 
-- `import-pdfs-to-kb.sh`
+- `scripts/rag/import-pdfs-to-kb.sh`
 - `README.md`
 
 ### Eval / regression

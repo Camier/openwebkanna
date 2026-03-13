@@ -17,7 +17,7 @@ OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 COMPOSE_FILE="docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 PLUGIN_AUDIT_ENABLED="${PLUGIN_AUDIT_ENABLED:-true}"
-PLUGIN_AUDIT_SCRIPT="${PLUGIN_AUDIT_SCRIPT:-./audit-openwebui-plugins.sh}"
+PLUGIN_AUDIT_SCRIPT="${PLUGIN_AUDIT_SCRIPT:-./scripts/testing/audit-openwebui-plugins.sh}"
 PLUGIN_AUDIT_FOCUS="${PLUGIN_AUDIT_FOCUS:-all}"
 INDIGO_TOOL_AUTOCONFIGURE="${INDIGO_TOOL_AUTOCONFIGURE:-true}"
 # shellcheck disable=SC2034
@@ -207,24 +207,24 @@ configure_indigo_tool() {
         return 0
     fi
 
-    if [ ! -x "./enable-indigo-live.sh" ]; then
-        print_error "Indigo tool setup script is missing or not executable: ./enable-indigo-live.sh"
+    if [ ! -x "./scripts/indigo/enable-indigo-live.sh" ]; then
+        print_error "Indigo tool setup script is missing or not executable: ./scripts/indigo/enable-indigo-live.sh"
         return 1
     fi
 
     print_step "Provisioning Indigo tool in OpenWebUI"
-    ./enable-indigo-live.sh
+    ./scripts/indigo/enable-indigo-live.sh
     print_success "Indigo tool provisioned"
 }
 
 sync_openwebui_web_search_config() {
-    if [ ! -x "./sync-openwebui-web-search-config.sh" ]; then
-        print_warning "Web-search sync script missing or not executable: ./sync-openwebui-web-search-config.sh"
+    if [ ! -x "./scripts/admin/sync-openwebui-web-search-config.sh" ]; then
+        print_warning "Web-search sync script missing or not executable: ./scripts/admin/sync-openwebui-web-search-config.sh"
         return 0
     fi
 
     print_step "Syncing OpenWebUI retrieval web-search config"
-    ./sync-openwebui-web-search-config.sh
+    ./scripts/admin/sync-openwebui-web-search-config.sh
     print_success "OpenWebUI retrieval web-search config synced"
 }
 

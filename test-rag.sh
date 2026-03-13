@@ -55,7 +55,9 @@ OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 OPENWEBUI_SMOKE_MODEL_CANDIDATES="${OPENWEBUI_SMOKE_MODEL_CANDIDATES:-$(default_openwebui_smoke_model_candidates)}"
 VERBOSE="${VERBOSE:-false}"
 CHAT_MODEL="${RAG_CHAT_MODEL:-}"
-CLIPROXY_BIN="${CLIPROXY_BIN:-./cli-proxy-api.sh}"
+CLIPROXY_BIN="${CLIPROXY_BIN:-./scripts/cliproxyapi/cli-proxy-api.sh}"
+CLIPROXYAPI_CHECK_SCRIPT="${CLIPROXYAPI_CHECK_SCRIPT:-./scripts/cliproxyapi/check-cliproxyapi.sh}"
+NO_MOCK_AUDIT_SCRIPT="${NO_MOCK_AUDIT_SCRIPT:-./scripts/testing/audit-no-mock.sh}"
 CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
 UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}}"
 RAG_UPSTREAM_MODE="${RAG_UPSTREAM_MODE:-auto}"
@@ -137,7 +139,7 @@ test_repo_real_integration_guard() {
     test_start "Repository Real Integration Guard"
 
     local response
-    if response=$(./audit-no-mock.sh 2>&1); then
+    if response=$("$NO_MOCK_AUDIT_SCRIPT" 2>&1); then
         test_pass
         return 0
     fi
@@ -1138,7 +1140,7 @@ test_cli_proxy_api_managed_runtime() {
         cliproxy_headers=(-H "Authorization: Bearer $CLIPROXYAPI_API_KEY")
     fi
 
-    if response=$(CLIPROXYAPI_ENABLED=false ./check-cliproxyapi.sh 2>&1); then
+    if response=$(CLIPROXYAPI_ENABLED=false "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
         test_fail "Disabled lifecycle negative check unexpectedly passed (CLIPROXYAPI_ENABLED=false)"
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
@@ -1150,7 +1152,7 @@ test_cli_proxy_api_managed_runtime() {
         return 1
     fi
 
-    if ! response=$(CLIPROXYAPI_ENABLED=true ./check-cliproxyapi.sh 2>&1); then
+    if ! response=$(CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
         test_fail "Managed health check failed (set CLIPROXYAPI_ENABLED=true and start CLIProxyAPI)"
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1

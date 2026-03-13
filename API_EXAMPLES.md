@@ -183,22 +183,22 @@ In this repo, `vllm` resolves to `OPENAI_API_BASE_URL` (LiteLLM by default).
 
 List models via wrapper against configured OpenAI-compatible endpoint:
 ```bash
-./cli-proxy-api.sh --raw models vllm | jq .
+./scripts/cliproxyapi/cli-proxy-api.sh --raw models vllm | jq .
 ```
 
 Force wrapper to LiteLLM explicitly:
 ```bash
-./cli-proxy-api.sh --raw --url "$LITELLM_BASE_URL" models vllm | jq .
+./scripts/cliproxyapi/cli-proxy-api.sh --raw --url "$LITELLM_BASE_URL" models vllm | jq .
 ```
 
 Force wrapper to CLIProxyAPI explicitly (legacy sidecar):
 ```bash
-./cli-proxy-api.sh --raw --url "$CLIPROXYAPI_BASE_URL" models vllm | jq .
+./scripts/cliproxyapi/cli-proxy-api.sh --raw --url "$CLIPROXYAPI_BASE_URL" models vllm | jq .
 ```
 
 Health all services:
 ```bash
-./cli-proxy-api.sh health all
+./scripts/cliproxyapi/cli-proxy-api.sh health all
 ```
 
 ## Regression test commands
@@ -211,17 +211,17 @@ LiteLLM-first baseline:
 
 OAuth alias regression (legacy sidecar):
 ```bash
-./test-cliproxyapi-oauth.sh
+./scripts/cliproxyapi/test-cliproxyapi-oauth.sh
 ```
 
 OpenWebUI-to-CLIProxy routing regression (legacy sidecar):
 ```bash
-./test-openwebui-cliproxy-routing.sh
+./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
 ```
 
 LLM council evaluation (candidate + judge pass):
 ```bash
-./llm-council.sh \
+./scripts/rag/llm-council.sh \
   --models "glm-5 minimax/chat-elite" \
   --judges "glm-5 minimax/chat-elite" \
   --prompt "Summarize retrieval quality risks in one paragraph."
@@ -229,7 +229,7 @@ LLM council evaluation (candidate + judge pass):
 
 LLM council with stricter judge retries (useful for reasoning-heavy models):
 ```bash
-./llm-council.sh \
+./scripts/rag/llm-council.sh \
   --models "glm-5 minimax/chat-elite" \
   --judges "glm-5 minimax/chat-elite" \
   --prompt "Reply with exactly council-ok" \
@@ -238,7 +238,7 @@ LLM council with stricter judge retries (useful for reasoning-heavy models):
 
 LLM council anti-position-bias mode (A/B then B/A):
 ```bash
-./llm-council.sh \
+./scripts/rag/llm-council.sh \
   --models "glm-5 minimax/chat-elite" \
   --judges "glm-5 minimax/chat-elite" \
   --prompt "Pick the stronger incident response plan." \
@@ -247,7 +247,7 @@ LLM council anti-position-bias mode (A/B then B/A):
 
 LLM council with strict JSON judge output:
 ```bash
-./llm-council.sh \
+./scripts/rag/llm-council.sh \
   --models "glm-5 minimax/chat-elite" \
   --judges "glm-5 minimax/chat-elite" \
   --prompt "Reply with exactly council-ok" \

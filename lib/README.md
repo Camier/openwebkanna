@@ -815,7 +815,7 @@ Many root scripts have inline copies of `load_env_defaults()`. To use the librar
 Always test library changes with the verification script:
 
 ```bash
-./verify-scripts.sh
+./scripts/testing/verify-scripts.sh
 ```
 
 Or test individual components:
