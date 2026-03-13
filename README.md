@@ -4,6 +4,16 @@ Last updated: 2026-03-13 (UTC)
 
 This repository is an orchestration layer for an academic-papers RAG workflow in OpenWebUI with LiteLLM as the reference OpenAI-compatible backend.
 
+Use this file when you need:
+- the shortest path to a healthy local deploy
+- the canonical daily command surface
+- routing to the right source-of-truth document before editing or debugging
+
+Do not use this file as the full procedure reference:
+- use `docs/runbooks/*.md` for step-by-step operator flows
+- use `docs/ssot/stack.md` for runtime truth
+- use `config/README.md` before changing config files
+
 Layout note:
 - Root `docker-compose.yml`, `docker-compose.rg.yml`, `.env.example`, `mcp/`, `jupyter/`, and `searxng/` are compatibility copies of the canonical files under `config/`.
 - Canonical config paths live under `config/`, canonical runbooks/references live under `docs/`, and canonical operator scripts live at the repo root.
@@ -60,13 +70,10 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
                            - Indigo Service (chemistry REST APIs)
 ```
 
-## What is production-relevant here
+## Operational constraints
 
 - No mock, dummy, or monkey fallback path for integration checks.
-- OAuth aliases validated for:
-1. `openai-codex`
-2. `qwen-cli`
-3. `kimi-cli`
+- OAuth aliases validated in this repo: `openai-codex`, `qwen-cli`, `kimi-cli`.
 - Manual OAuth login is expected and supported.
 
 ## Prerequisites
@@ -121,6 +128,8 @@ docker compose config >/dev/null
 ```bash
 ./status.sh
 docker compose ps
+./test-rag.sh --baseline
+./test-api.sh --baseline
 ```
 
 Optional legacy sidecar check (only if `CLIPROXYAPI_ENABLED=true`):

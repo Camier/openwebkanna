@@ -1,8 +1,29 @@
 # Configuration Map
 
+Last updated: 2026-03-13 (UTC)
+
 Canonical runtime configuration lives under `config/`.
 
 This document owns the config edit surface only. Runtime topology and service criticality live in `docs/ssot/stack.md`.
+
+Use this file when you need to know:
+
+- which config path is canonical
+- which root files are compatibility copies
+- which checks to rerun after changing runtime behavior
+
+Use this file when you need to answer:
+- which file actually owns a runtime behavior
+- whether a root file is canonical or only a compatibility copy
+- which checks to rerun after a config change
+
+Common config tasks:
+- change Docker topology, ports, profiles, or healthchecks: `compose/docker-compose.yml`
+- change committed env defaults: `env/.env.example`
+- change Jupyter behavior: `jupyter/jupyter_server_config.py`
+- change MCPO server exposure: `mcp/config.json`
+- change SearXNG behavior: `searxng/settings.yml`
+- change embedding lanes or KB bindings: `embeddings/`
 
 Compatibility entrypoints at the repo root remain intentionally available as regular files/directories:
 
@@ -36,4 +57,21 @@ Editing rule:
 - Change files in `config/` first.
 - Use `./scripts/sync-compatibility-copies.sh` when you need to refresh the root compatibility copies from the canonical `config/` files.
 - Treat root compatibility copies as operator convenience, not the canonical edit surface.
-- Re-run the relevant baseline checks after config changes: `./status.sh`, `./test-rag.sh --baseline`, `./test-api.sh --baseline`.
+
+After changing config, prefer this validation order:
+
+```bash
+docker compose config -q
+./scripts/check-doc-consistency.sh
+./status.sh
+./test-rag.sh --baseline
+./test-api.sh --baseline
+```
+
+Minimal safe workflow:
+
+1. Edit the canonical file under `config/`.
+2. Run `./scripts/sync-compatibility-copies.sh` if the matching root compatibility copy exists.
+3. Run `docker compose config -q` when compose or env behavior changed.
+4. Run `./scripts/check-doc-consistency.sh` if docs or defaults changed.
+5. Run `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline` for runtime-impacting changes.

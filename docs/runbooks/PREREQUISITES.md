@@ -1,11 +1,14 @@
 # OpenWebUI + LiteLLM Deployment Prerequisites
 
-Last verified: 2026-03-12 (UTC)
+Last verified: 2026-03-13 (UTC)
 
 This checklist reflects the current default deployment mode in this repo:
 - LiteLLM as primary OpenAI-compatible upstream
 - Docker-managed OpenWebUI
 - optional sidecars disabled by default
+
+Use this checklist before the first deploy or before rebuilding a machine from scratch.
+If a required item fails, fix it before running `./deploy.sh`.
 
 ## Required
 
@@ -46,6 +49,18 @@ do
 done
 ```
 
+6. Jupyter auth tokens aligned
+```bash
+test "$(grep '^JUPYTER_TOKEN=' .env | cut -d= -f2-)" = "$(grep '^CODE_EXECUTION_JUPYTER_AUTH_TOKEN=' .env | cut -d= -f2-)" &&
+test "$(grep '^JUPYTER_TOKEN=' .env | cut -d= -f2-)" = "$(grep '^CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=' .env | cut -d= -f2-)"
+```
+
+7. Secret and credential placeholders replaced
+```bash
+test "$(grep '^WEBUI_SECRET_KEY=' .env | cut -d= -f2- | wc -c)" -ge 33 &&
+! grep -Eq '^POSTGRES_PASSWORD=<|^OPENAI_API_KEY=<' .env
+```
+
 Expected values for LiteLLM-first mode:
 - `WEBUI_SECRET_KEY=<stable-random-secret-at-least-32-chars>`
 - `JUPYTER_TOKEN=<random-jupyter-token>`
@@ -55,8 +70,11 @@ Expected values for LiteLLM-first mode:
 - `OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1`
 - `OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1`
 - `OPENAI_API_KEY=<litellm-master-key>`
-- `CLIPROXYAPI_DOCKER_MANAGED=true`
 - `CLIPROXYAPI_ENABLED=false`
+- `OPEN_TERMINAL_ENABLED=false`
+- `INDIGO_SERVICE_ENABLED=false`
+
+For the complete committed baseline and image defaults, use `config/env/.env.example`.
 
 Advanced optional prerequisites are not required for the baseline runtime.
 
@@ -91,16 +109,13 @@ docker compose config >/dev/null
 bash -n deploy.sh status.sh test-rag.sh test-api.sh
 ```
 
-## Launch and validate
+Expected outcome:
+- no missing required env keys
+- Jupyter auth tokens match
+- placeholder secrets have been replaced with real values
+- `docker compose config` renders successfully
+- the operator scripts parse cleanly
 
-```bash
-./deploy.sh --no-logs
-./status.sh
-./test-rag.sh --baseline
-./test-api.sh --baseline
-```
+## Handoff to setup
 
-Passing criteria:
-- LiteLLM reachable at `http://localhost:4000/v1/models` (200 or 401 is acceptable reachability signal)
-- OpenWebUI reachable on `http://localhost:${WEBUI_PORT:-3000}`
-- Baseline RAG/API checks pass
+If the checks above pass, continue with `docs/runbooks/SETUP.md`.

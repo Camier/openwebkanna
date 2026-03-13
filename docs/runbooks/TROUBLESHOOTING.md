@@ -1,5 +1,7 @@
 # Troubleshooting: OpenWebUI + LiteLLM (Auth, Models, RAG/Vector DB)
 
+Last updated: 2026-03-13 (UTC)
+
 This repository runs:
 - OpenWebUI in Docker (`openwebui`)
 - LiteLLM as the primary OpenAI-compatible upstream
@@ -8,6 +10,18 @@ This repository runs:
 - Optional Docker SearXNG sidecar and archived host-side `vLLM` fallback
 
 When something looks "gone" in the UI (models, settings), the most common root cause is auth/session drift, not data loss.
+
+Use this runbook when:
+- baseline deploy already exists
+- a user-visible symptom or runtime regression needs triage
+
+Start here before deeper symptom branches:
+- `./status.sh`
+- `./test-api.sh --baseline`
+- `./test-rag.sh --baseline`
+
+If those baseline checks fail, fix the first failing baseline signal before applying symptom-specific workarounds.
+Before DB or role edits, take a backup with `./backup-openwebui-db.sh`.
 
 ## Quick triage checklist (2 minutes)
 
@@ -129,8 +143,8 @@ docker compose logs --tail 200 openwebui
 docker compose restart openwebui
 ```
 3. If it keeps failing, restore from a known-good backup:
-- Stop OpenWebUI.
-- Copy a backup sqlite file back into the volume location.
+- follow the canonical restore steps in `docs/runbooks/OPERATIONS.md`
+- keep the fresh pre-restore backup you just created so rollback stays reversible
 
 Note: This repo defaults to a named Docker volume `openwebui_data` mapped to `/app/backend/data` inside the container.
 The DB file is `/app/backend/data/webui.db`.

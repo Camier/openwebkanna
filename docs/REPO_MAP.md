@@ -1,9 +1,14 @@
-# REPO_MAP
+# Repository Map
 
 Last refreshed: 2026-03-13 (UTC)
 Scope: `/LAB/@thesis/openwebui`
 
 This file owns repository shape and operator navigation. It is intentionally not a second runtime spec.
+
+Use this file when you need to know:
+- where a file should live
+- whether a path is canonical or only a compatibility surface
+- which root commands and local namespaces are operator-facing
 
 ## 1. Fast routing
 

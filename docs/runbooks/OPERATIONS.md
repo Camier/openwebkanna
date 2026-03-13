@@ -1,10 +1,20 @@
 # OpenWebUI Operations Quick Reference
 
-**For detailed setup:** See [SETUP.md](SETUP.md)
-**For troubleshooting:** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-**For prerequisites:** See [PREREQUISITES.md](PREREQUISITES.md)
+Last updated: 2026-03-13 (UTC)
 
----
+Use this runbook when:
+
+- the baseline stack already exists
+- you need day-2 operator commands and validation loops
+
+Use other docs for:
+
+- first deploy: [SETUP.md](SETUP.md)
+- machine and env readiness: [PREREQUISITES.md](PREREQUISITES.md)
+- symptom-led recovery: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+Use this runbook only after the baseline stack has already been configured.
+If you are still preparing `.env` or the first deploy, go back to `SETUP.md`.
 
 ## Entrypoint Policy
 
@@ -20,12 +30,18 @@ Common daily commands:
 ./test-api.sh --baseline
 ```
 
----
-
 ## Daily Operations
 
 First-time environment preparation lives in `SETUP.md`.
 Use this runbook for routine operator actions after the baseline stack has already been configured.
+
+Normal post-change validation loop:
+
+```bash
+./status.sh
+./test-rag.sh --baseline
+./test-api.sh --baseline
+```
 
 #### Start Stack
 ```bash
@@ -92,9 +108,13 @@ IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
 
 ### Tune RAG Settings
 
-**View current settings:**
+Prefer `./test-rag.sh --baseline` for the normal health signal.
+Use the raw retrieval endpoint only for advanced debugging when you already have an admin bearer token:
+
 ```bash
-curl -s "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/" | jq
+OPENWEBUI_API_KEY="<admin-bearer-token>" \
+curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
+  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/" | jq
 ```
 
 **Apply optimized settings (env overrides + `--apply`):**
@@ -164,9 +184,9 @@ Daily operator flow:
 
 ### Vector Database
 
-**Check pgvector status:**
+**Check pgvector status (advanced debug):**
 ```bash
-docker exec openwebui_postgres psql -U openwebui -d openwebui -c \
+docker compose exec postgres psql -U openwebui -d openwebui -c \
   "SELECT COUNT(*) FROM collection_embeddings"
 ```
 
@@ -288,7 +308,7 @@ BACKUP_FILE="backups/webui.db.YYYYMMDD-HHMMSS.sqlite"
 docker compose stop openwebui
 
 # 4. Restore SQLite DB file inside the OpenWebUI container
-docker cp "${BACKUP_FILE}" openwebui:/app/backend/data/webui.db
+docker cp "${BACKUP_FILE}" "$(docker compose ps -q openwebui)":/app/backend/data/webui.db
 
 # 5. Start OpenWebUI and verify health
 docker compose start openwebui
@@ -308,7 +328,11 @@ curl -fsS "http://127.0.0.1:${WEBUI_PORT:-3000}/health" >/dev/null && echo "open
 
 ### Service Health
 ```bash
-# OpenWebUI
+# Prefer the script surface first
+./status.sh
+./test-api.sh --baseline
+
+# Raw probes for advanced debugging
 curl "http://127.0.0.1:${WEBUI_PORT:-3000}/health"
 
 # CLIProxyAPI (only if enabled)
@@ -318,7 +342,7 @@ curl http://localhost:8317/health
 curl http://localhost:8000/docs
 
 # PostgreSQL
-docker exec openwebui_postgres pg_isready -U openwebui
+docker compose exec postgres pg_isready -U openwebui
 ```
 
 ### Model Availability
@@ -326,14 +350,17 @@ docker exec openwebui_postgres pg_isready -U openwebui
 # From CLIProxyAPI (only if enabled)
 ./check-cliproxyapi.sh --models
 
-# From OpenWebUI
-curl -s -H "Authorization: Bearer $API_KEY" \
+# From OpenWebUI (advanced debug; requires an admin bearer token)
+OPENWEBUI_API_KEY="<admin-bearer-token>" \
+curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
   "http://127.0.0.1:${WEBUI_PORT:-3000}/api/models" | jq '.data[].id'
 ```
 
 ### Check RAG Settings
 ```bash
-curl -s "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/" | jq '
+OPENWEBUI_API_KEY="<admin-bearer-token>" \
+curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
+  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/" | jq '
   {
     model: .RAG_EMBEDDING_MODEL,
     top_k: .RAG_TOP_K,
@@ -381,8 +408,10 @@ Use that runbook for auth drift, empty model lists, `502` recovery, SSL issues, 
 ```
 
 ### List Users (SQLite)
+Advanced debug only. Prefer `./openwebui-user-admin.sh --email ...` for normal account management.
+
 ```bash
-docker exec -i openwebui python3 - <<'PY'
+docker compose exec -T openwebui python3 - <<'PY'
 import sqlite3
 
 con = sqlite3.connect("/app/backend/data/webui.db")

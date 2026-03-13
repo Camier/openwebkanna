@@ -5,6 +5,16 @@ Last updated: 2026-03-13 (UTC)
 This is the canonical setup path for this repository.
 Default mode is LiteLLM-first with Docker-managed services.
 
+Use this runbook when:
+- you are setting up a fresh local clone
+- you want to rebuild the baseline from scratch
+
+Exit criteria for this runbook:
+- `docker compose config >/dev/null` passes
+- `./status.sh` shows the core services healthy
+- `./test-rag.sh --baseline` passes
+- `./test-api.sh --baseline` passes
+
 ## 1. Prepare environment
 
 ```bash
@@ -26,6 +36,12 @@ OPENAI_API_KEY=<litellm-master-key>
 VECTOR_DB=pgvector
 CLIPROXYAPI_ENABLED=false
 ```
+
+For the full committed baseline, use `config/env/.env.example`. Keep this runbook list as the minimum first-deploy contract, not the exhaustive env reference.
+
+Optional sidecars stay off for the baseline unless you intentionally enable them later:
+- `OPEN_TERMINAL_ENABLED=false`
+- `INDIGO_SERVICE_ENABLED=false`
 
 ## 2. Configure LiteLLM access
 
@@ -74,19 +90,14 @@ Baseline validation (fast checks):
 ./test-api.sh --baseline
 ```
 
+If any of these fail, stop here and use `docs/runbooks/TROUBLESHOOTING.md` before enabling optional flows.
+
 If you enable web search, `test-rag.sh --baseline` probes SearXNG from both the host and the OpenWebUI container.
 
 If `/api/models` is healthy but one chat model is flaky, pin a known-good model for API baseline:
 
 ```bash
 OPENWEBUI_TEST_MODEL="openrouter/openai/gpt-5-mini" ./test-api.sh --baseline
-```
-
-If you want to align your pinned image to the latest upstream tag:
-
-```bash
-OPENWEBUI_TAG="$(curl -s https://api.github.com/repos/open-webui/open-webui/releases/latest | jq -r '.tag_name')"
-sed -i "s|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:${OPENWEBUI_TAG}|" .env
 ```
 
 Baseline note:
@@ -96,72 +107,18 @@ Baseline note:
 - `CODE_EXECUTION_JUPYTER_AUTH_TOKEN` and `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN` must match `JUPYTER_TOKEN`.
 - Use `./test-rag.sh --baseline` after deploy to validate the full default lane.
 
-## Tune "Documents" Settings (Manual-Only)
-
-OpenWebUI stores "Documents" (retrieval) settings persistently in its DB. For reproducible tuning and rollback, use:
-
-```bash
-# Snapshot only (dry-run)
-OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh
-
-# Apply the tuned values
-OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh --apply
-
-# Restore from a snapshot JSON written under logs/
-OPENWEBUI_API_KEY="<admin-bearer-token>" ./tune-openwebui-documents.sh --restore logs/openwebui-documents-snapshot-<timestamp>.json
-```
-
-Notes:
-- This is intentionally manual-token only (no auto sign-in), to avoid hidden credential assumptions.
-- UI path for the same settings: `http://localhost:<WEBUI_PORT>/admin/settings/documents`
-
-### LiteLLM multimodal full validation
-
-When running with LiteLLM (port `4000`), validate multimodal ingestion with a local PDF fixture.
-
-```bash
-# 1) Apply multimodal-friendly retrieval settings
-OPENWEBUI_API_KEY="<admin-bearer-token>" \
-TUNE_CONTENT_EXTRACTION_ENGINE=docling \
-TUNE_PDF_EXTRACT_IMAGES=true \
-./tune-openwebui-documents.sh --apply
-
-# 2) Run full RAG test suite in LiteLLM mode with a local PDF
-OPENWEBUI_URL=http://localhost:${WEBUI_PORT:-3000} \
-RAG_UPSTREAM_MODE=litellm \
-VLLM_URL=http://localhost:4000 \
-RAG_MULTIMODAL_TEST_PDF="data/pdfs/<your-paper>.pdf" \
-./test-rag.sh --full
-```
-
-If you need strict enforcement (no skip on missing fixture or prereqs), set:
-
-```bash
-RAG_MULTIMODAL_STRICT=true
-```
-
-## 5. Advanced optional flows
-
-These are not part of the normal baseline setup:
-
-- Legacy CLIProxyAPI OAuth aliases:
-```bash
-./test-cliproxyapi-oauth.sh
-```
-
-- Archived `vLLM` fallback:
-```bash
-./archive/start-vllm.sh
-./archive/check-vllm.sh
-```
-
-Use `docs/runbooks/OPERATIONS.md` for the full optional/legacy procedures.
-
-## 6. After setup
+## 5. After setup
 
 For routine operations after the first deploy:
 - use `docs/runbooks/OPERATIONS.md` for start/stop, logs, backups, MCP, RAG tuning, and maintenance
 - use `docs/runbooks/TROUBLESHOOTING.md` for auth, model, vector-store, SSL, and sidecar recovery flows
+- use `docs/runbooks/EMBEDDING_PROFILES.md` for lane selection and KB/profile lifecycle
+
+Advanced and optional flows intentionally live outside this setup runbook:
+- image updates and version review: `./scripts/check-image-versions.sh`, `./update.sh`
+- manual document-tuning and multimodal validation: `docs/runbooks/OPERATIONS.md`
+- legacy CLIProxyAPI OAuth workflows: `docs/runbooks/OPERATIONS.md`
+- archived `vLLM` fallback: `archive/`
 
 If you see an empty model list, a pending activation screen, or repeated `401`/`502` issues:
 - take a DB snapshot with `./backup-openwebui-db.sh`
