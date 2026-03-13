@@ -21,7 +21,8 @@ OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
-OPENWEBUI_CONTAINER="${OPENWEBUI_CONTAINER:-openwebui}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_CONTAINER:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-openwebui_postgres}"
 POSTGRES_DB="${POSTGRES_DB:-openwebui}"
 POSTGRES_USER="${POSTGRES_USER:-openwebui}"
@@ -116,70 +117,6 @@ ensure_files() {
     ensure_json_file "$BINDINGS_FILE" '{"schema_version":1,"bindings":[]}'
 }
 
-openwebui_signin() {
-    local payload_file="$1"
-    local output_file="$2"
-    local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
-
-    curl -sS -m 30 \
-        -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" \
-        "$signin_url" -d @"$payload_file" 2>/dev/null || true
-}
-
-mint_local_admin_jwt() {
-    if ! command -v docker >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-        return 1
-    fi
-    if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
-        return 1
-    fi
-    if ! docker ps --format '{{.Names}}' | grep -qx "$OPENWEBUI_CONTAINER"; then
-        return 1
-    fi
-
-    local admin_id=""
-    admin_id="$(docker exec "$OPENWEBUI_CONTAINER" python3 -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-    if [ -z "$admin_id" ]; then
-        return 1
-    fi
-
-    API_KEY="$(
-        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" python3 - <<'PY'
-import base64
-import hashlib
-import hmac
-import json
-import os
-import time
-import uuid
-
-secret = os.environ.get("WEBUI_SECRET_KEY", "")
-user_id = os.environ.get("OPENWEBUI_ADMIN_ID", "")
-if not secret or not user_id:
-    raise SystemExit(1)
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-
-header = {"alg": "HS256", "typ": "JWT"}
-payload = {
-    "id": user_id,
-    "exp": int(time.time()) + (60 * 60 * 24 * 30),
-    "jti": str(uuid.uuid4()),
-}
-
-header_b64 = b64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-payload_b64 = b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-print(f"{header_b64}.{payload_b64}.{b64url(sig)}")
-PY
-    )"
-
-    [ -n "$API_KEY" ]
-}
-
 ensure_api_key() {
     if [ -n "$API_KEY" ]; then
         return 0
@@ -190,36 +127,22 @@ ensure_api_key() {
         exit 1
     fi
 
-    local tmp_out payload_file signin_code token
-    tmp_out="$(mktemp)"
-    payload_file="$(mktemp)"
+    API_KEY="$(
+        resolve_openwebui_api_token \
+            "" \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "30" \
+            "$OPENWEBUI_SERVICE" \
+            "$OPENWEBUI_CONTAINER_NAME" \
+            "$OPENWEBUI_SIGNIN_PATH" || true
+    )"
 
-    cat >"$payload_file" <<EOF
-{"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
-EOF
-
-    signin_code="$(openwebui_signin "$payload_file" "$tmp_out")"
-    if [ "$signin_code" != "200" ]; then
-        rm -f "$tmp_out" "$payload_file"
-        if mint_local_admin_jwt; then
-            return 0
-        fi
-        print_error "Signin failed (HTTP $signin_code) at ${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
+    if [ -z "$API_KEY" ]; then
+        print_error "Unable to authenticate to OpenWebUI at ${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
         exit 1
     fi
-
-    token="$(jq -r '.token // empty' "$tmp_out" 2>/dev/null || true)"
-    rm -f "$tmp_out" "$payload_file"
-
-    if [ -z "$token" ]; then
-        if mint_local_admin_jwt; then
-            return 0
-        fi
-        print_error "Signin succeeded but token is empty"
-        exit 1
-    fi
-
-    API_KEY="$token"
 }
 
 try_api_key() {
@@ -354,8 +277,22 @@ cmd_prewarm() {
         exit 1
     fi
 
-    print_step "Prewarming model in container '$OPENWEBUI_CONTAINER': $model_id"
-    docker exec -e MODEL_ID="$model_id" "$OPENWEBUI_CONTAINER" python - <<'PY'
+    local openwebui_container_id=""
+    local openwebui_python=""
+
+    init_compose_cmd >/dev/null
+    openwebui_container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
+    if [ -z "$openwebui_container_id" ]; then
+        print_error "OpenWebUI container is not running"
+        exit 1
+    fi
+    if ! openwebui_python="$(resolve_container_python "$openwebui_container_id")"; then
+        print_error "No python interpreter found inside OpenWebUI container"
+        exit 1
+    fi
+
+    print_step "Prewarming model in container '$OPENWEBUI_CONTAINER_NAME': $model_id"
+    docker exec -e MODEL_ID="$model_id" "$openwebui_container_id" "$openwebui_python" - <<'PY'
 import os
 from sentence_transformers import SentenceTransformer
 

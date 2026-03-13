@@ -61,106 +61,19 @@ to_nonneg_int_or_sentinel() {
     fi
 }
 
-mint_local_admin_jwt() {
-    local container_id=""
-    local container_python=""
-    local host_python=""
-
-    if ! command_exists docker; then
-        return 1
-    fi
-    if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
-        return 1
-    fi
-    if ! host_python="$(resolve_host_python)"; then
-        return 1
-    fi
-
-    init_compose_cmd >/dev/null
-    container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
-    if [ -z "$container_id" ]; then
-        return 1
-    fi
-
-    if ! container_python="$(resolve_container_python "$container_id")"; then
-        return 1
-    fi
-
-    local admin_id=""
-    admin_id="$(docker exec "$container_id" "$container_python" -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-    if [ -z "$admin_id" ]; then
-        return 1
-    fi
-
-    API_TOKEN="$(
-        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" "$host_python" - <<'PY'
-import base64
-import hashlib
-import hmac
-import json
-import os
-import time
-import uuid
-
-secret = os.environ.get("WEBUI_SECRET_KEY", "")
-user_id = os.environ.get("OPENWEBUI_ADMIN_ID", "")
-if not secret or not user_id:
-    raise SystemExit(1)
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-
-header = {"alg": "HS256", "typ": "JWT"}
-payload = {
-    "id": user_id,
-    "exp": int(time.time()) + (60 * 60 * 24 * 30),
-    "jti": str(uuid.uuid4()),
-}
-
-header_b64 = b64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-payload_b64 = b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-print(f"{header_b64}.{payload_b64}.{b64url(sig)}")
-PY
-    )"
-
-    [ -n "$API_TOKEN" ]
-}
-
 resolve_token() {
-    if [ -n "$OPENWEBUI_TOKEN_INPUT" ]; then
-        API_TOKEN="$OPENWEBUI_TOKEN_INPUT"
-        return 0
-    fi
-
-    local signin_payload signin_out signin_err signin_code
-    signin_payload="$(mktemp)"
-    signin_out="$(mktemp)"
-    signin_err="$(mktemp)"
-
-    jq -n \
-        --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-        --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-        '{email: $email, password: $password}' >"$signin_payload"
-
-    signin_code="$(curl -sS -m "$CURL_TIMEOUT" -X POST \
-        -H "Content-Type: application/json" \
-        --data @"$signin_payload" \
-        -o "$signin_out" -w "%{http_code}" \
-        "${OPENWEBUI_URL%/}/api/v1/auths/signin" 2>"$signin_err" || true)"
-
-    if [ "$signin_code" = "200" ]; then
-        API_TOKEN="$(jq -r '.token // empty' "$signin_out" 2>/dev/null || true)"
-    fi
-
-    rm -f "$signin_payload" "$signin_out" "$signin_err"
-
-    if [ -n "$API_TOKEN" ]; then
-        return 0
-    fi
-
-    mint_local_admin_jwt
+    API_TOKEN="$(
+        resolve_openwebui_api_token \
+            "$OPENWEBUI_TOKEN_INPUT" \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "$CURL_TIMEOUT" \
+            "$OPENWEBUI_SERVICE" \
+            "$OPENWEBUI_CONTAINER_NAME" \
+            "/api/v1/auths/signin" || true
+    )"
+    [ -n "$API_TOKEN" ]
 }
 
 main() {

@@ -1,81 +1,7 @@
 #!/bin/bash
 
-openwebui_signin() {
-    local output_file="$1"
-    local payload_file="$2"
-    local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
-
-    if command -v jq >/dev/null 2>&1; then
-        jq -n \
-            --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-            --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-            '{email: $email, password: $password}' >"$payload_file"
-    else
-        cat >"$payload_file" <<EOF
-{"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
-EOF
-    fi
-
-    curl -sS -m 45 -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" "$signin_url" -d @"$payload_file" 2>/dev/null || true
-}
-
 default_openwebui_smoke_model_candidates() {
     printf "%s" "gpt-oss:20b,kimi-k2-thinking,gemini-3-flash-preview,ministral-3:3b,gemma3:4b"
-}
-
-mint_local_admin_jwt() {
-    local container_name="${OPENWEBUI_CONTAINER:-openwebui}"
-    if ! command -v docker >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-        return 1
-    fi
-    if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
-        return 1
-    fi
-    if ! docker ps --format '{{.Names}}' | grep -qx "$container_name"; then
-        return 1
-    fi
-
-    local admin_id=""
-    admin_id="$(docker exec "$container_name" python3 -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-    if [ -z "$admin_id" ]; then
-        return 1
-    fi
-
-    API_KEY="$(
-        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" python3 - <<'PY'
-import base64
-import hashlib
-import hmac
-import json
-import os
-import time
-import uuid
-
-secret = os.environ.get("WEBUI_SECRET_KEY", "")
-user_id = os.environ.get("OPENWEBUI_ADMIN_ID", "")
-if not secret or not user_id:
-    raise SystemExit(1)
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-
-header = {"alg": "HS256", "typ": "JWT"}
-payload = {
-    "id": user_id,
-    "exp": int(time.time()) + (60 * 60 * 24 * 30),
-    "jti": str(uuid.uuid4()),
-}
-
-header_b64 = b64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-payload_b64 = b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-print(f"{header_b64}.{payload_b64}.{b64url(sig)}")
-PY
-    )"
-
-    [ -n "$API_KEY" ]
 }
 
 ensure_openwebui_api_key() {
@@ -87,27 +13,22 @@ ensure_openwebui_api_key() {
         return 0
     fi
 
-    local tmp_file payload_file signin_code token
-    tmp_file="$(mktemp)"
-    payload_file="$(mktemp)"
-
-    signin_code="$(openwebui_signin "$tmp_file" "$payload_file")"
-    if [ "$signin_code" = "200" ]; then
-        token="$(jq -r '.token // empty' "$tmp_file" 2>/dev/null || true)"
-        if [ -n "$token" ]; then
-            API_KEY="$token"
-            print_info "OpenWebUI bearer token acquired via signin"
-        fi
-    fi
-
-    rm -f "$tmp_file" "$payload_file"
+    local service="${OPENWEBUI_SERVICE:-openwebui}"
+    local container_name="${OPENWEBUI_CONTAINER:-${OPENWEBUI_CONTAINER_NAME:-$service}}"
+    API_KEY="$(
+        resolve_openwebui_api_token \
+            "" \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "45" \
+            "$service" \
+            "$container_name" \
+            "$OPENWEBUI_SIGNIN_PATH" || true
+    )"
 
     if [ -n "$API_KEY" ]; then
-        return 0
-    fi
-
-    if mint_local_admin_jwt; then
-        print_info "OpenWebUI bearer token acquired via local JWT mint"
+        print_info "OpenWebUI bearer token acquired"
         return 0
     fi
 }

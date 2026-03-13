@@ -71,17 +71,6 @@ Environment:
 EOF
 }
 
-openwebui_signin() {
-    local payload_file="$1"
-    local output_file="$2"
-    local signin_url="${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
-
-    curl -sS -m 30 \
-        -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" \
-        "$signin_url" -d @"$payload_file" 2>/dev/null || true
-}
-
 ensure_api_key() {
     if [ -n "$API_KEY" ]; then
         return 0
@@ -92,30 +81,19 @@ ensure_api_key() {
         exit 1
     fi
 
-    local tmp_out payload_file signin_code token
-    tmp_out="$(mktemp)"
-    payload_file="$(mktemp)"
+    API_KEY="$(
+        openwebui_signin_token \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "30" \
+            "$OPENWEBUI_SIGNIN_PATH" || true
+    )"
 
-    cat >"$payload_file" <<EOF
-{"email":"$OPENWEBUI_SIGNIN_EMAIL","password":"$OPENWEBUI_SIGNIN_PASSWORD"}
-EOF
-
-    signin_code="$(openwebui_signin "$payload_file" "$tmp_out")"
-    if [ "$signin_code" != "200" ]; then
-        print_error "Signin failed (HTTP $signin_code) to ${OPENWEBUI_URL%/}${OPENWEBUI_SIGNIN_PATH}"
-        rm -f "$tmp_out" "$payload_file"
+    if [ -z "$API_KEY" ]; then
+        print_error "Unable to acquire OpenWebUI token via signin"
         exit 1
     fi
-
-    token="$(jq -r '.token // empty' "$tmp_out" 2>/dev/null || true)"
-    rm -f "$tmp_out" "$payload_file"
-
-    if [ -z "$token" ]; then
-        print_error "Signin succeeded but no token returned"
-        exit 1
-    fi
-
-    API_KEY="$token"
     export API_KEY
 }
 

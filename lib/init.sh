@@ -45,6 +45,8 @@ source "${_LIB_DIR}/env-loader.sh"
 # shellcheck disable=SC1091
 source "${_LIB_DIR}/docker-helpers.sh"
 # shellcheck disable=SC1091
+source "${_LIB_DIR}/openwebui-auth-helpers.sh"
+# shellcheck disable=SC1091
 source "${_LIB_DIR}/cliproxyapi-helpers.sh"
 # shellcheck disable=SC1091
 source "${_LIB_DIR}/http-helpers.sh"

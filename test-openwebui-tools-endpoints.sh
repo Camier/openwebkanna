@@ -81,83 +81,6 @@ skip_test() {
     print_info "Skipped: $CURRENT_TEST :: $reason"
 }
 
-try_mint_openwebui_admin_jwt() {
-    local cid=""
-    local admin_id=""
-    local host_python=""
-    local container_python=""
-
-    if ! command_exists docker; then
-        return 1
-    fi
-
-    if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
-        return 1
-    fi
-
-    if ! host_python="$(resolve_host_python)"; then
-        return 1
-    fi
-
-    init_compose_cmd >/dev/null
-    cid="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
-    if [ -z "$cid" ]; then
-        return 1
-    fi
-
-    if ! container_python="$(resolve_container_python "$cid")"; then
-        return 1
-    fi
-
-    admin_id="$(docker exec "$cid" "$container_python" -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
-    if [ -z "$admin_id" ]; then
-        return 1
-    fi
-
-    local token=""
-    token="$(
-        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" "$host_python" - <<'PY'
-import base64
-import hashlib
-import hmac
-import json
-import os
-import time
-import uuid
-
-secret = os.environ.get("WEBUI_SECRET_KEY", "")
-user_id = os.environ.get("OPENWEBUI_ADMIN_ID", "")
-if not secret or not user_id:
-    raise SystemExit(1)
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-
-header = {"alg": "HS256", "typ": "JWT"}
-payload = {
-    "id": user_id,
-    "exp": int(time.time()) + 60 * 60 * 24 * 30,
-    "jti": str(uuid.uuid4()),
-}
-
-header_b64 = b64url(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-payload_b64 = b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-token = f"{header_b64}.{payload_b64}.{b64url(sig)}"
-print(token)
-PY
-    )"
-
-    if [ -z "$token" ]; then
-        return 1
-    fi
-
-    API_TOKEN="$token"
-    print_info "Authenticated via locally minted admin JWT (WEBUI_SECRET_KEY)"
-    return 0
-}
-
 response_detail() {
     local detail
     detail="$(jq -r '.detail // empty' "$RESPONSE_FILE" 2>/dev/null || true)"
@@ -263,7 +186,9 @@ sign_in() {
         print_warning "OPENWEBUI_AUTO_AUTH=false and no token provided; trying local JWT fallback"
     fi
 
-    if try_mint_openwebui_admin_jwt; then
+    API_TOKEN="$(mint_openwebui_admin_jwt "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
+    if [ -n "$API_TOKEN" ]; then
+        print_info "Authenticated via locally minted admin JWT (WEBUI_SECRET_KEY)"
         return 0
     fi
 

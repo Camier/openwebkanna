@@ -151,22 +151,6 @@ openwebui_chat_probe() {
         "$url" -d @"$payload_file" 2>/dev/null || true
 }
 
-openwebui_signin() {
-    local output_file="$1"
-    local signin_url="${OPENWEBUI_URL}${OPENWEBUI_SIGNIN_PATH}"
-    local payload_file="$TMP_DIR/openwebui_signin_payload.json"
-
-    jq -n \
-        --arg email "$OPENWEBUI_SIGNIN_EMAIL" \
-        --arg password "$OPENWEBUI_SIGNIN_PASSWORD" \
-        '{email: $email, password: $password}' >"$payload_file"
-
-    curl -sS -m "$ROUTING_REQUEST_TIMEOUT" \
-        -H "Content-Type: application/json" \
-        -o "$output_file" -w "%{http_code}" \
-        "$signin_url" -d @"$payload_file" 2>/dev/null || true
-}
-
 ensure_openwebui_auth_token() {
     if [ -n "$OPENWEBUI_API_KEY" ]; then
         OPENWEBUI_AUTH_TOKEN="$OPENWEBUI_API_KEY"
@@ -180,18 +164,14 @@ ensure_openwebui_auth_token() {
     fi
 
     print_step "Acquiring OpenWebUI bearer token via signin"
-    local signin_file="$TMP_DIR/openwebui_signin.json"
-    local signin_code
-    local signin_error=""
-
-    signin_code="$(openwebui_signin "$signin_file")"
-    if [ "$signin_code" != "200" ]; then
-        signin_error="$(jq -r '.detail // .error.message // .message // "signin failed"' "$signin_file" 2>/dev/null || true)"
-        print_warning "OpenWebUI signin failed (HTTP $signin_code: $signin_error)"
-        return 0
-    fi
-
-    OPENWEBUI_AUTH_TOKEN="$(jq -r '.token // empty' "$signin_file" 2>/dev/null || true)"
+    OPENWEBUI_AUTH_TOKEN="$(
+        openwebui_signin_token \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "$ROUTING_REQUEST_TIMEOUT" \
+            "$OPENWEBUI_SIGNIN_PATH" || true
+    )"
     if [ -n "$OPENWEBUI_AUTH_TOKEN" ]; then
         print_success "OpenWebUI bearer token acquired"
         return 0
