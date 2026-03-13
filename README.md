@@ -1,16 +1,53 @@
 # OpenWebUI + LiteLLM RAG Deployment
 
-Last updated: 2026-03-03 (UTC)
+Last updated: 2026-03-13 (UTC)
 
 This repository is an orchestration layer for an academic-papers RAG workflow in OpenWebUI with LiteLLM as the reference OpenAI-compatible backend.
 
-## Current architecture
+Layout note:
+- Root `docker-compose.yml`, `docker-compose.rg.yml`, `.env.example`, `mcp/`, `jupyter/`, and `searxng/` are compatibility copies of the canonical files under `config/`.
+- Canonical config paths live under `config/`, canonical runbooks/references live under `docs/`, and canonical operator scripts live at the repo root.
+- Local directory maps now exist for the main subtrees: `config/README.md`, `scripts/README.md`, `artifacts/README.md`, `cliproxyapi/README.md`, `research/README.md`, and `local/README.md`.
+- Local-only helper assets now live under `local/` instead of cluttering the repo root. This includes sidecar binaries under `local/bin/`, optional tool payloads under `local/plugins/`, and the separate entity-maintenance workspace under `local/entities/`.
 
-- OpenWebUI runs in Docker (`openwebui` service).
-- LiteLLM is the primary OpenAI-compatible upstream (`http://host.docker.internal:4000/v1`).
-- CLIProxyAPI is an optional/deprecated sidecar (`cliproxyapi` service) for legacy OAuth alias workflows.
-- Open Terminal is an optional sidecar (`open-terminal` profile) for terminal/file server integration.
-- OpenWebUI reaches LiteLLM through host-gateway bridge (`host.docker.internal` from container context).
+Editing rule:
+- Change `config/*` first for runtime behavior.
+- Use the root copies as operator entrypoints and compatibility surfaces.
+- Treat `docs/reference/openwebui/*` as upstream snapshot material, not live repo truth.
+
+## Fast navigation
+
+Use these first before exploring the rest of the tree:
+
+- `docs/ssot/stack.md`: canonical runtime topology, run modes, service registry, and drift protocol.
+- `docs/REPO_MAP.md`: repo-wide layout, operator entrypoints, config roots, and port inventory.
+- `docs/README.md`: doc routing so runbooks, guides, plans, and reference snapshots do not compete.
+- `config/README.md`: canonical config tree and root compatibility copies.
+- `scripts/README.md`: secondary utilities and maintenance helpers.
+
+## Canonical edit targets
+
+When you need to change behavior, use these paths first:
+
+- Compose topology: `config/compose/docker-compose.yml`
+- Env defaults: `config/env/.env.example`
+- MCP registry: `config/mcp/config.json`
+- Jupyter config: `config/jupyter/jupyter_server_config.py`
+- SearXNG config: `config/searxng/settings.yml`
+- Embedding lanes/bindings: `config/embeddings/`
+
+## Document ownership
+
+- `README.md` is the operator front door: quick start, high-signal commands, and the main workflow.
+- `docs/ssot/stack.md` owns runtime truth: run modes, critical services, critical paths, and drift gaps.
+- `docs/REPO_MAP.md` owns repository shape: where config, scripts, subprojects, and entrypoints live.
+- `config/README.md` owns the canonical edit surface under `config/` and the root compatibility-copy map.
+
+## Runtime summary
+
+- Default supported mode is Docker Compose with OpenWebUI in containers and LiteLLM as the primary host-assisted upstream at `http://host.docker.internal:4000/v1`.
+- `searxng`, `cliproxyapi`, `open-terminal`, and `indigo-service` remain optional sidecars gated by profiles or env flags.
+- For the full runtime model, service registry, and drift notes, use `docs/ssot/stack.md`.
 
 ```text
 OpenWebUI (container) --> LiteLLM (host/container) --> providers
@@ -18,6 +55,7 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
                       \--> optional sidecars:
                            - CLIProxyAPI (legacy OAuth workflows)
                            - Open Terminal (terminal/file integration)
+                           - Indigo Service (chemistry REST APIs)
 ```
 
 ## What is production-relevant here
@@ -35,12 +73,16 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
 - `curl`, `jq`
 - LiteLLM credentials and reachable LiteLLM endpoint
 
-Optional:
-- CLIProxyAPI OAuth credentials (legacy sidecar workflows)
-- Open Terminal API key (only if you enable `OPEN_TERMINAL_ENABLED=true`)
-- vLLM Python environment (only if you intentionally enable fallback)
+Not part of the baseline:
+- CLIProxyAPI OAuth credentials
+- Open Terminal API key
+- Indigo Service enablement
+- archived `vLLM` fallback tooling
 
 ## Quick start
+
+Entrypoint note:
+- Root `*.sh` scripts are the canonical operator surface.
 
 1. Copy env file:
 ```bash
@@ -51,8 +93,10 @@ cp .env.example .env
 ```bash
 OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
+VECTOR_DB=pgvector
 CLIPROXYAPI_ENABLED=false
 OPEN_TERMINAL_ENABLED=false
+INDIGO_SERVICE_ENABLED=false
 ```
 
 3. Start stack:
@@ -66,633 +110,100 @@ OPEN_TERMINAL_ENABLED=false
 docker compose ps
 ```
 
-Optional sidecar check (only if `CLIPROXYAPI_ENABLED=true`):
+Optional legacy sidecar check (only if `CLIPROXYAPI_ENABLED=true`):
 ```bash
 ./check-cliproxyapi.sh
 ```
 
-Optional Open Terminal enablement:
-```bash
-# .env
-OPEN_TERMINAL_ENABLED=true
-OPEN_TERMINAL_API_KEY=<strong-random-key>
-TERMINAL_SERVER_CONNECTIONS=[{"id":"open-terminal","name":"Open Terminal","enabled":true,"url":"http://open-terminal:8000","path":"/openapi.json","key":"<strong-random-key>","auth_type":"bearer","config":{"access_grants":[{"principal_type":"user","principal_id":"*","permission":"read"}]}}]
+## Daily operations
 
-# deploy with optional profile start/stop handling
-./deploy.sh --no-logs
+Use the root scripts directly.
 
-# verify optional sidecar + OpenWebUI health
-./status.sh
-OPENWEBUI_API_KEY=<openwebui-admin-api-key> ./test-openwebui-open-terminal.sh
-```
-
-Smoke test notes:
-- `test-openwebui-open-terminal.sh` requires OpenWebUI API auth (`OPENWEBUI_API_KEY` or `OPENWEBUI_TOKEN`, or signin credentials).
-- WebSocket checks are enabled by default (`OPEN_TERMINAL_SMOKE_WS=true`); disable with `OPEN_TERMINAL_SMOKE_WS=false` if Node runtime WS support is unavailable.
-- Test default behavior restores previous terminal configuration after execution. Set `OPEN_TERMINAL_SMOKE_RESTORE_CONFIG=false` if you intentionally want smoke-applied config to remain.
-
-## Troubleshooting
-
-If the UI shows "no models", "pending activation", or you get 401/502 surprises, use:
-- `TROUBLESHOOTING.md`
-- `./backup-openwebui-db.sh` (DB snapshot)
-- `./openwebui-user-admin.sh` (promote/activate/reset user)
-
-## OpenWebUI baseline enhancements (as of 2026-02-17)
-
-Before enabling advanced features, baseline defaults now include:
-
-- Local SearXNG via host bridge (`host.docker.internal:${SEARXNG_PORT}`).
-- Code execution + code-interpreter bootstrap enabled using Pyodide.
-- OpenWebUI image aligned with current upstream release reference:
-  `ghcr.io/open-webui/open-webui:v0.8.8`.
-
-If you need a current release tag from upstream manually:
-
-```bash
-curl -s https://api.github.com/repos/open-webui/open-webui/releases/latest | jq -r '.tag_name'
-```
-
-Update `.env` / `.env.example` only after reviewing compatibility.
-
-To pin your current env to that tag quickly (optional):
-
-```bash
-OPENWEBUI_TAG="$(curl -s https://api.github.com/repos/open-webui/open-webui/releases/latest | jq -r '.tag_name')"
-sed -i "s|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:${OPENWEBUI_TAG}|" .env
-```
-
-Use this baseline workflow before enabling advanced features:
-
-1. Deploy baseline stack:
 ```bash
 ./deploy.sh --no-logs
-```
-
-2. Validate runtime baseline:
-```bash
 ./status.sh
-```
-
-3. Enforce real-integration guard (no mock-like markers):
-```bash
+./logs.sh
 ./audit-no-mock.sh
-```
-
-4. Run fast baseline RAG checks:
-```bash
 ./test-rag.sh --baseline
-```
-
-5. Run fast baseline API checks:
-```bash
 ./test-api.sh --baseline
 ```
 
-If your provider matrix is volatile, pin a known-good model for baseline chat checks:
+High-signal local checks:
 
 ```bash
+curl -fsS "http://127.0.0.1:${MCPO_PORT:-8000}/docs" >/dev/null && echo "mcpo up"
 OPENWEBUI_TEST_MODEL="openrouter/openai/gpt-5-mini" ./test-api.sh --baseline
 ```
 
-`--baseline` keeps tests reproducible and quick by validating health, models, retrieval, and web-search wiring without running heavier full regression flows.
+## Local workflow guides
 
-If local SearXNG is temporarily unavailable, baseline checks continue by default.
-Host-side baseline probes automatically try `127.0.0.1` when `SEARXNG_QUERY_URL` uses `host.docker.internal`.
-To enforce strict web-search readiness, run:
+Use these local documents instead of treating this file as a dump of every procedure:
+
+- [docs/runbooks/PREREQUISITES.md](docs/runbooks/PREREQUISITES.md): first-time setup and local prerequisites.
+- [docs/runbooks/OPERATIONS.md](docs/runbooks/OPERATIONS.md): day-to-day operations, updates, LLM Council, MCP setup, and maintenance flows.
+- [docs/runbooks/TROUBLESHOOTING.md](docs/runbooks/TROUBLESHOOTING.md): account, model, RAG, proxy, and web-search triage.
+- [docs/runbooks/EMBEDDING_PROFILES.md](docs/runbooks/EMBEDDING_PROFILES.md): embedding lanes, model switching, and KB bindings.
+- [scripts/README.md](scripts/README.md): utility/audit helpers such as `check-image-versions.sh` and `audit-dependencies.sh`.
+
+Advanced optional flows:
+
+- CLIProxyAPI legacy OAuth sidecar: `setup-cliproxyapi.sh`, `start-cliproxyapi.sh`, `configure-cliproxyapi-oauth.sh`, `test-cliproxyapi-oauth.sh`, `import-qwen-auth.sh`, `cli-proxy-api.sh`, `local/bin/`, `docs/runbooks/OPERATIONS.md`
+- Open Terminal smoke/integration flow: `test-openwebui-open-terminal.sh`
+- Indigo sidecar and tool registration: `start-indigo-service.sh`, `check-indigo-service.sh`, `enable-indigo-live.sh`, local tool source under `local/plugins/`
+- OpenWebUI tool repair/admin helpers: `audit-openwebui-plugins.sh`, `test-openwebui-tools-endpoints.sh`, `repair-openwebui-tools.sh`, `apply-openwebui-tool-patches.sh`
+- Entity-maintenance workspace, when present locally: `local/entities/README.md`
+- archived `vLLM` fallback scripts: `archive/`
+
+## Focused local tasks
+
+Embedding profile flow:
 
 ```bash
-BASELINE_REQUIRE_WEB_SEARCH=true ./test-rag.sh --baseline
+./manage-openwebui-embedding-profiles.sh list
+./manage-openwebui-embedding-profiles.sh lanes
+./manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
+./manage-openwebui-embedding-profiles.sh diagnose
 ```
 
-Note: OpenWebUI runs in Docker, so web-search must work from the container path too.
-`./test-rag.sh --baseline` now probes both host-local and `docker exec openwebui` connectivity; strict mode enforces both.
+Validation loop:
 
-## Dependency Management
+```bash
+./test-rag.sh --baseline
+./test-api.sh --baseline
+```
 
-### Checking for Updates
+Legacy sidecar OAuth flow, only if you intentionally enable `cliproxyapi`:
 
-Check which Docker images have newer versions available:
+```bash
+./configure-cliproxyapi-oauth.sh
+./test-cliproxyapi-oauth.sh
+```
+
+LLM Council quick run:
+
+```bash
+./llm-council.sh --prompt "Compare RAG vs fine-tuning for this local stack."
+```
+
+## Maintenance
+
+Use the local maintenance surface, not this README, for detailed policy and edge cases:
 
 ```bash
 ./scripts/check-image-versions.sh
-```
-
-This compares locally pinned versions against upstream registry tags for:
-- OpenWebUI (`ghcr.io/open-webui/open-webui`)
-- Open Terminal (`ghcr.io/open-webui/open-terminal`)
-- CLIProxyAPI (if using a versioned image)
-- Any other images defined in `docker-compose.yml`
-
-To check a specific image manually:
-
-```bash
-docker run --rm quay.io/skopeo/stable list-tags docker://ghcr.io/open-webui/open-webui | jq '.Tags[-10:]'
-```
-
-### Security Scanning
-
-Run vulnerability scans on container images:
-
-```bash
 ./scripts/audit-dependencies.sh
+./backup-openwebui-db.sh
+./update.sh
 ```
 
-This wrapper runs Trivy against all images in the compose stack. For a single image:
-
-```bash
-trivy image ghcr.io/open-webui/open-webui:v0.8.8
-```
-
-For a deeper SBOM-based scan:
-
-```bash
-trivy image --format spdx-json --output sbom.json ghcr.io/open-webui/open-webui:v0.8.8
-trivy sbom sbom.json
-```
-
-Review CVE severity levels and prioritize:
-- CRITICAL/HIGH: patch or upgrade promptly
-- MEDIUM/LOW: assess exploitability in your context
-
-### Updating Docker Images
-
-1. Check for updates:
-   ```bash
-   ./scripts/check-image-versions.sh
-   ```
-
-2. Review changelog for breaking changes:
-   - OpenWebUI: https://github.com/open-webui/open-webui/releases
-   - Open Terminal: https://github.com/open-webui/open-terminal/releases
-   - CLIProxyAPI: check upstream release notes
-
-3. Update image tags in `.env` or `docker-compose.yml`:
-   ```bash
-   # Example: pin to a specific OpenWebUI release
-   sed -i 's|^OPENWEBUI_IMAGE=.*|OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.8.8|' .env
-   ```
-
-4. Pull and restart:
-   ```bash
-   docker compose pull && docker compose up -d
-   ```
-
-5. Validate baseline:
-   ```bash
-   ./status.sh
-   ./test-api.sh --baseline
-   ./test-rag.sh --baseline
-   ```
-
-6. If issues occur, rollback:
-   ```bash
-   # Revert to previous tag in .env, then:
-   docker compose pull && docker compose up -d
-   ```
-
-### Version Pinning Policy
-
-**When to pin versions:**
-- Production deployments: always pin to specific tags (e.g., `v0.8.8`, not `latest`)
-- After validated upgrades: update the pinned version in `.env.example`
-- When reproducibility matters: CI/CD pipelines, shared environments
-
-**When `latest` is acceptable:**
-- Local development with frequent rebuilds
-- Throwaway test environments
-- When you explicitly want auto-updates on pull
-
-**Recommended pattern in `.env`:**
-```bash
-# Pinned versions (update after validation)
-OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:v0.8.8
-OPEN_TERMINAL_IMAGE=ghcr.io/open-webui/open-terminal:0.8.2
-CLIPROXYAPI_IMAGE=your-registry/cliproxyapi:1.2.0
-```
-
-**Avoid:**
-- Unpinned `latest` in production
-- Digest pinning (`@sha256:...`) unless you have automated digest updates
-- Mixing pinned and unpinned images in the same stack
-
-## OAuth setup flow (manual)
-
-If you already completed OAuth locally, keep using the existing auth state under `cliproxyapi/auth/`.
-
-If you need to (re)configure:
-```bash
-./configure-cliproxyapi-oauth.sh
-```
-
-Then validate aliases and chat routing:
-```bash
-./test-cliproxyapi-oauth.sh
-```
-
-## OpenWebUI routing verification
-
-Run end-to-end routing check from OpenWebUI to LiteLLM:
-
-```bash
-./test-rag.sh --baseline
-```
-
-Optional legacy route verification (only when sidecar is enabled):
-```bash
-./test-openwebui-cliproxy-routing.sh
-```
-
-## Consolidated SMILES + RAG runbook
-
-Use the consolidated operational document for text + SMILES retrieval profile, activation commands, and validation matrix:
-
-- `SMILES_RAG_CONSOLIDATION.md`
-
-Quick path:
-
-```bash
-source /home/miko/miniforge3/etc/profile.d/conda.sh
-conda activate smiles-extraction
-mise run smiles:eval-retrieval
-./test-rag.sh --baseline
-./test-api.sh --baseline
-```
-
-Model cache operations:
-
-- Refresh OpenWebUI model cache: `./refresh-models.sh --wait`
-- Validate model list/API path: `./test-api.sh --baseline`
-
-## LLM Council
-
-LLM Council is a multi-model evaluation system with candidate/judge pattern:
-- **Candidates** generate responses to prompts
-- **Judges** evaluate and vote on the best response
-- Reports are generated in `logs/llm-council/`
-
-### Configuration
-
-Set defaults in `.env` (see `.env.example` for all options):
-
-```bash
-COUNCIL_MODELS=glm-5 minimax/chat-elite
-COUNCIL_JUDGES=glm-5 minimax/chat-elite
-COUNCIL_JUDGE_OUTPUT_FORMAT=json
-COUNCIL_JUDGE_RETRIES=2
-COUNCIL_POSITION_SWAP=false
-```
-
-### CLI Usage
-
-Run multi-model council evaluation through CLIProxyAPI:
-
-```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" --judges "glm-5 minimax/chat-elite" \
-  --prompt "Propose a robust rollout plan for OpenWebUI upgrades."
-```
-
-For reasoning-heavy judges (for example `minimax/chat-elite`), increase strict vote retries:
-
-```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" --judges "glm-5 minimax/chat-elite" \
-  --prompt "Reply with exactly council-ok" \
-  --judge-max-tokens 256 --judge-retries 3 --judge-force-max-tokens 96
-```
-
-Enable anti-position-bias voting (A/B then B/A consistency check):
-
-```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" --judges "glm-5 minimax/chat-elite" \
-  --prompt "Compare two rollout plans and pick the better one." \
-  --position-swap
-```
-
-Use strict JSON judge output with schema-like validation:
-
-```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" --judges "glm-5 minimax/chat-elite" \
-  --prompt "Reply with exactly council-ok" \
-  --judge-output-format json --judge-retries 3
-```
-
-Run a prompt set from file (one prompt per line):
-
-```bash
-./llm-council.sh --models "glm-5 minimax/chat-elite" --prompts-file ./data/notes/council_prompts.txt
-```
-
-### OpenWebUI Tool
-
-To use LLM Council as an in-chat tool:
-
-1. Apply the tool patch:
-   ```bash
-   ./apply-openwebui-tool-patches.sh
-   ```
-
-2. In chat, use the `council` function:
-   ```
-   Use the council tool to answer: What are the tradeoffs of RAG vs fine-tuning?
-   ```
-
-3. Configure via Valves in OpenWebUI admin:
-   - `MODELS`: Comma-separated model IDs
-   - `API_BASE_URLS`: Provider endpoints (semicolon-separated)
-   - `TIMEOUT`: Request timeout in seconds
-
-### Outputs
-
-- Console summary with per-model vote totals
-- Markdown report in `logs/llm-council/` with:
-  - CLIProxyAPI version and configuration
-  - Per-prompt votes and winners
-  - Full candidate responses (optional)
-  - Judge validation statistics
-
-## Service commands
-
-- Deploy everything:
-```bash
-./deploy.sh
-```
-
-- CLIProxyAPI lifecycle:
-```bash
-./start-cliproxyapi.sh
-./check-cliproxyapi.sh
-./stop-cliproxyapi.sh
-./restart-cliproxyapi.sh
-```
-
-- vLLM lifecycle (archived fallback scripts):
-```bash
-./archive/start-vllm.sh
-./archive/check-vllm.sh
-./archive/stop-vllm.sh
-./archive/restart-vllm.sh
-```
-
-- Runtime visibility:
-```bash
-./status.sh
-./logs.sh
-```
-
-## MCP integration (official)
-
-This stack now includes `mcpo` (MCP-to-OpenAPI proxy) as a Docker service.
-
-1. Ensure these env values are set in `.env` (or keep defaults from `.env.example`):
-```bash
-WEBUI_SECRET_KEY=<strong-random-secret-at-least-32-bytes>
-MCPO_IMAGE=ghcr.io/open-webui/mcpo:v0.0.19
-MCPO_PORT=8000
-MCPO_CONFIG=./mcp/config.json
-ZOTERO_DATA_DIR=/home/miko/Zotero
-```
-
-2. Start/restart the stack:
-```bash
-./deploy.sh --no-logs
-```
-
-3. In OpenWebUI, add tool servers:
-   - Admin Settings -> External Tools -> Add Server
-   - For MCPO endpoints, use Type: `OpenAPI`
-   - URL examples:
-     - `http://mcpo:8000/filesystem`
-     - `http://mcpo:8000/memory`
-     - `http://mcpo:8000/fetch`
-     - `http://mcpo:8000/time`
-     - `http://mcpo:8000/zotero`
-   - For native Streamable HTTP MCP servers (without MCPO), use Type: `MCP (Streamable HTTP)`
-
-   **Automated configuration** (alternative to manual UI):
-   ```bash
-   # First, set your admin API key in .env:
-   echo "OPENWEBUI_API_KEY=your-admin-key" >> .env
-
-   # Verify MCPO endpoints are accessible:
-   ./configure-mcpo-openapi-servers.sh --verify
-
-   # Apply configuration (dry-run first):
-   ./configure-mcpo-openapi-servers.sh --dry-run
-   ./configure-mcpo-openapi-servers.sh
-   ```
-
-4. Verify MCPO endpoint:
-```bash
-curl -sS http://127.0.0.1:8000/docs >/dev/null && echo "mcpo up"
-```
-
-Important:
-- Keep `WEBUI_SECRET_KEY` stable. Changing it invalidates encrypted stored credentials.
-- Use `OpenAPI` type for MCPO proxied endpoints.
-- Use `MCP (Streamable HTTP)` type for native MCP servers.
-- For stdio/SSE MCP servers, configure them in `mcp/config.json` and expose through MCPO.
-
-Preconfigured thesis MCP servers in `mcp/config.json`:
-- `filesystem` (read/write under `/thesis-exports`, read-only access to `/data`)
-- `memory` (session memory/knowledge graph helper)
-- `fetch` (web page fetching for paper/URL extraction)
-- `zotero` (local Zotero library via `/zotero/zotero.sqlite`, read-only)
-- `time` (time/date utilities)
-
-Optional external-research template:
-- `mcp/config.research.optional.json` (example streamable-http endpoints for Zotero plugin MCP at `23120` and remote services)
-
-- PDF import with optional bounded parallelism (default is serial):
-```bash
-./import-pdfs-to-kb.sh --parallel 3
-# or via env:
-IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
-```
-
-## SMILES Extraction Pipeline v2.0
-
-This repository now includes a production-ready SMILES extraction pipeline for chemical structure recognition (OCSR) from academic papers.
-
-### What is SMILES Pipeline v2.0
-
-A complete end-to-end system for extracting chemical structures (as SMILES strings) from paper images:
-
-- **OCSR Backends** (fully installed and tested):
-  - **MolScribe**: Robust molecular structure recognition via PyTorch (1.7M parameters)
-  - **DECIMER 2.7**: Deep learning OCSR using TensorFlow (U-Net + Transformer)
-  - **VLM Fallback**: Vision-LLM extraction when OCSR fails
-
-- **Validation Pipeline**:
-  - RDKit syntax validation
-  - Chemical validity checks (Sanitize, Stereo centers, Valence errors)
-  - Domain validation (atomic number limits, ring size constraints)
-
-- **Gold Standards**: Publications that have been manually validated for SMILES correctness
-
-### Quick Start
-
-1. Activate the conda environment:
-```bash
-conda activate smiles-extraction
-```
-
-2. Run extraction on a paper:
-```bash
-cd smiles-pipeline
-python -m scripts.extract_smiles_from_images \
-  --paper-id "2024_Smith_TotalSynthesis" \
-  --backend-order "molscribe,decimer" \
-  --output-dir ../data/extractions
-```
-
-3. Validate results:
-```bash
-python -m scripts.smiles_qa_summary \
-  --input ../data/extractions/2024_Smith_TotalSynthesis/rag/molecules.jsonl
-```
-
-### Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [`smiles-pipeline/README.md`](smiles-pipeline/README.md) | Main overview, quick start |
-| [`smiles-pipeline/INSTALLATION.md`](smiles-pipeline/INSTALLATION.md) | Setup guide, conda env, troubleshooting |
-| [`smiles-pipeline/docs/ARCHITECTURE_v2.md`](smiles-pipeline/docs/ARCHITECTURE_v2.md) | System design, APIs, performance |
-| [`smiles-pipeline/docs/USAGE_GUIDE.md`](smiles-pipeline/docs/USAGE_GUIDE.md) | Operational procedures, examples |
-| [`smiles-pipeline/docs/SMILES_PIPELINE.md`](smiles-pipeline/docs/SMILES_PIPELINE.md) | End-to-end operator guide |
-
-### Gold Standards
-
-Validated papers with confirmed SMILES correctness:
-- `2024_Smith_TotalSynthesis` - Total synthesis of Sceletium alkaloids
-- `2023_Jones_Phytochemistry` - Phytochemical analysis methods
-- `2022_Doe_NaturalProducts` - Natural product isolation
-
-See [`smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md`](smiles-pipeline/docs/SMILES_OCSR_REFERENCE_MATRIX.md) for full validation status.
-
-### Test Results (2026-02-24)
-
-- MolScribe: ✅ Extracted `C=CCc1ccccc1` from sample image
-- DECIMER: ✅ Extracted `C=CCC1=CC=CC=C1` from sample image
-- Full pipeline: 5/5 extractions successful, 4/5 fully validated
-
-## Integration and regression tests
-
-- API coverage:
-```bash
-./test-api.sh
-./test-api.sh --baseline
-```
-
-- RAG flow:
-```bash
-./test-rag.sh
-./test-rag.sh --baseline
-```
-
-- OAuth alias regression:
-```bash
-./test-cliproxyapi-oauth.sh
-```
-
-- OpenWebUI routing regression:
-```bash
-./test-openwebui-cliproxy-routing.sh
-```
-
-- Open Terminal integration smoke:
-```bash
-OPENWEBUI_API_KEY=<openwebui-admin-api-key> ./test-openwebui-open-terminal.sh
-# optional: skip ws leg
-OPENWEBUI_API_KEY=<openwebui-admin-api-key> OPEN_TERMINAL_SMOKE_WS=false ./test-openwebui-open-terminal.sh
-```
-
-## Important behavior in `deploy.sh`
-
-- `deploy.sh` does not auto-start or auto-stop host-side vLLM/LiteLLM processes.
-- vLLM fallback automation knobs (`AUTO_SKIP_VLLM_IF_CLIPROXYAPI_HEALTHY`, `AUTO_START_VLLM_ON_CLIPROXYAPI_FAILURE`) are not active in current scripts.
-- Docker-managed CLIProxyAPI is controlled by:
-1. `CLIPROXYAPI_DOCKER_MANAGED`
-2. `CLIPROXYAPI_DOCKER_SERVICE`
-
-## Utility scripts
-
-### Provider configuration
-
-- `configure-ollama-cloud.sh`: Configure OpenWebUI to use Ollama Cloud (https://ollama.com). Reads API key from `~/.007` (OLLAMA_CLOUD_API_KEY or OLLAMA_API_KEY), signs into OpenWebUI, and updates the Ollama connection via the admin API.
-
-- `configure-cliproxyapi-providers.sh`: Generate a local `cliproxyapi/config.local.yaml` with real provider keys (Z.ai, MiniMax) sourced from `~/.007`. Keeps secrets out of the tracked config.
-
-### Key rotation
-
-- `rotate-cliproxyapi-local-key.sh`: Rotate the local API key used between OpenWebUI and CLIProxyAPI. Generates a new random key, updates `.env` and CLIProxyAPI config, syncs OpenWebUI's persistent DB config, and restarts containers.
-
-### Tool management
-
-- `audit-openwebui-plugins.sh`: Audit tool/function Python code stored in `webui.db`. Verifies syntax compilation and checks for missing import dependencies. Use `--focus tool|function|all` to scope the audit.
-
-- `repair-openwebui-tools.sh`: Repair common tool issues (missing Valves exposure, drifted specs). Patches tool content in-place, recomputes specs, and restarts OpenWebUI to clear caches.
-
-- `apply-openwebui-tool-patches.sh`: Apply patches to OpenWebUI tools via the admin API. Ensures only intended public functions are exposed (hides private `_` helpers from specs).
-
-- `sync-openwebui-openai-config.sh`: Sync OpenWebUI's persistent OpenAI config (in `webui.db`) with local `.env` values. Use after rotating `OPENAI_API_KEY` to keep the DB in sync.
-
-### Testing and verification
-
-- `verify-scripts.sh`: Run script quality verification for all shell scripts. Validates bash syntax, runs shellcheck (if installed), and executes targeted smoke tests for `update.sh`.
-
-- `test-update-smoke.sh`: Lightweight smoke tests for `update.sh` argument and restore flows. Uses command stubs so no real Docker/Compose calls are made.
-
-- `test-openwebui-tools-endpoints.sh`: Tool-by-tool functional audit of OpenWebUI endpoints (tools, functions, code execution, web search). Validates valves/specs schemas and endpoint responses.
-
-- `test-openwebui-tools-invocation.sh`: End-to-end integration test proving tools actually execute through `POST /api/chat/completions`. Uses local HTTP servers with nonces to verify real tool execution.
-
-### Molecular retrieval pipeline
-
-- `scripts/extract_smiles_from_images.py`: Extract SMILES candidates from paper images with backend order control (`molscribe,decimer`), RDKit validation, and optional `molecules.jsonl` output.
-- `scripts/embed_images_in_chunks.py`: Build multimodal chunk JSONL and optionally include molecule hints for matching image blocks.
-- `scripts/filter_high_confidence_smiles.py`: Keep only high-confidence molecule rows in `molecules_high_confidence.jsonl`.
-- `scripts/smiles_qa_summary.py`: Generate per-paper and aggregate QA metrics (`smiles_qa_summary.json`).
-- `import-smiles-to-kb.sh`: Upload high-confidence molecule artifacts to an OpenWebUI Knowledge Base.
-- `dedupe-smiles-kb.sh`: Remove duplicate same-name Knowledge Bases and keep one target ID.
-- `smiles-pipeline/docs/SMILES_PIPELINE.md`: End-to-end operator guide for commands, environments, and task flow.
-
-## Key files
-
-- `docker-compose.yml`: OpenWebUI + LiteLLM-oriented services (SearXNG is host-local)
-- `.env.example`: canonical configuration template
-- `OPENWEBUI_ADVANCED_FEATURES_PLAYBOOK.md`: phased advanced-feature rollout and hardening guide
-- `cliproxyapi/config.yaml`: CLIProxyAPI provider and alias mapping
-- `deploy.sh`: orchestrated startup logic with health gates
-- `test-openwebui-cliproxy-routing.sh`: Optional OpenWebUI-to-CLIProxyAPI E2E validation
-- `test-openwebui-open-terminal.sh`: Open Terminal integration smoke test (REST + optional WS)
-
-## Known constraints
-
-- `OPENWEBUI_URL` and `VLLM_URL` in `.env` are used by wrapper scripts, not Docker service discovery.
-- `cli-proxy-api.sh` command namespace still uses `vllm` as the OpenAI-compatible service label.
-  In this repository, that label should point to LiteLLM through `OPENAI_API_BASE_URL`.
-
-## Troubleshooting
-
-- If optional `cliproxyapi` is unhealthy in compose:
-```bash
-docker compose logs --tail=200 cliproxyapi
-```
-
-- If OpenWebUI does not list aliases:
-```bash
-curl -sS -H "Authorization: Bearer ${CLIPROXYAPI_API_KEY}" http://127.0.0.1:8317/v1/models | jq
-curl -sS -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" http://localhost:${WEBUI_PORT:-3000}/api/models | jq
-```
-
-- If port 8317 is busy from an old host process:
-```bash
-lsof -nP -iTCP:8317 -sTCP:LISTEN
-```
+When updating runtime behavior:
+
+- edit `config/` first, not the root compatibility copies
+- run `./scripts/sync-compatibility-copies.sh` if the root compatibility copies need to be refreshed
+- re-run `./scripts/check-doc-consistency.sh`
+- re-run `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline`
 
 ## Scope note
 
-This README is the source of truth for the current deployment mode as of 2026-03-03.
-Legacy sidecar-first documentation has been intentionally replaced with LiteLLM-first operations.
-The SMILES Extraction Pipeline v2.0 (OCSR backends) is now fully installed and tested.
+This README is intentionally the local front page, not the full operator manual.
+Runtime truth lives in `docs/ssot/stack.md`; repo shape lives in `docs/REPO_MAP.md`; procedure detail lives in the linked runbooks and subproject docs.

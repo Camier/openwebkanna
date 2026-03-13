@@ -1,0 +1,8 @@
+# Minimal botdetection config for a private/local instance.
+#
+# We explicitly set trusted_proxies to an empty list so SearXNG does not try to
+# derive client IP from X-Forwarded-For / X-Real-IP when accessed directly over
+# the Docker bridge network.
+
+[botdetection]
+trusted_proxies = []

@@ -13,7 +13,7 @@ load_env_defaults
 cd "$SCRIPT_DIR"
 
 # Configuration
-CLIPROXYAPI_CMD="${CLIPROXYAPI_CMD:-./bin/cliproxyapi}"
+CLIPROXYAPI_CMD="${CLIPROXYAPI_CMD:-./local/bin/cliproxyapi}"
 CLIPROXYAPI_CONFIG="${CLIPROXYAPI_CONFIG:-./cliproxyapi/config.yaml}"
 CLIPROXYAPI_CONFIG_FLAG="${CLIPROXYAPI_CONFIG_FLAG:---config}"
 CLIPROXYAPI_OAUTH_NO_BROWSER="${CLIPROXYAPI_OAUTH_NO_BROWSER:-false}"

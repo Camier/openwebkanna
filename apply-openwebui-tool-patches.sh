@@ -703,7 +703,7 @@ PY_WEB_SCRAPER
 
 main() {
     require_cmds
-    print_header
+    print_header "Patch OpenWebUI Tools"
 
     TMP_DIR="$(mktemp -d)"
 

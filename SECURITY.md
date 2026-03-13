@@ -1,6 +1,10 @@
 # Security Documentation
 
-Last updated: 2026-02-27 (UTC)
+Last updated: 2026-03-12 (UTC)
+
+Scope note:
+- This file owns security policy and the last documented scan posture.
+- Runtime topology, service defaults, and operator workflows live elsewhere: `README.md`, `docs/ssot/stack.md`, `config/env/.env.example`, and `config/compose/docker-compose.yml`.
 
 ## Security Policy
 
@@ -24,7 +28,7 @@ When reporting, please provide:
 
 | Component | Current Version | Support Status |
 |-----------|-----------------|----------------|
-| OpenWebUI | v0.8.3 | Active |
+| OpenWebUI | v0.8.10 | Active |
 | CLIProxyAPI | v6.8.18 | Active |
 | pgvector (PostgreSQL 16) | pg16 | Active |
 | Jupyter | Latest | Active |
@@ -35,17 +39,18 @@ When reporting, please provide:
 
 | Image | Version | CRITICAL | HIGH | MEDIUM | LOW | Status |
 |-------|---------|----------|------|--------|-----|--------|
-| OpenWebUI | v0.8.3 | 5 | 178 | - | - | Under Review |
+| OpenWebUI | v0.8.3 scan baseline | 5 | 178 | - | - | Historical baseline; rescan required for current v0.8.10 image |
 | CLIProxyAPI | v6.8.18 | 0 | - | - | - | Updated (was v6.2.38 with 2 CRITICAL) |
 | pgvector | pg16 | 2 | 6 | - | - | Under Review |
 | Jupyter | Latest | - | - | - | - | Updated |
 
 ### Detailed Findings
 
-#### OpenWebUI v0.8.3
+#### OpenWebUI scan baseline (v0.8.3)
 - **5 CRITICAL** CVEs pending remediation
 - **178 HIGH** CVEs pending triage
-- Action Required: Evaluate upstream patches or image rebuild
+- Current configured deployment image is **v0.8.10**
+- Action Required: rerun image scanning for v0.8.10 and evaluate upstream patches or image rebuild
 
 #### CLIProxyAPI v6.8.18
 - **Status**: Resolved
@@ -109,6 +114,7 @@ Definition of done for CRITICAL issue closure:
 
 | Date | Component | Action | Result |
 |------|-----------|--------|--------|
+| 2026-03-06 | SECURITY.md | Aligned configured OpenWebUI version and labeled CVE data as historical baseline | Current image version clarified; rescan required |
 | 2026-02-27 | SECURITY.md | Added CRITICAL triage label SOP | CI triage policy documented |
 | 2026-02-18 | CLIProxyAPI | v6.2.38 -> v6.8.18 | Resolved 2 CRITICAL CVEs |
 | 2026-02-18 | Jupyter | Updated to latest | Security hardening |
@@ -122,10 +128,10 @@ To scan current images for vulnerabilities:
 
 ```bash
 # Using Trivy (recommended)
-trivy image ghcr.io/open-webui/open-webui:0.8.3
+trivy image ghcr.io/open-webui/open-webui:v0.8.10
 
 # Using Docker Scout
-docker scout cves ghcr.io/open-webui/open-webui:0.8.3
+docker scout cves ghcr.io/open-webui/open-webui:v0.8.10
 ```
 
 ## References

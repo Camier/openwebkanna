@@ -34,9 +34,13 @@ Description:
   - .venvs/, .conda/ (local environment directories)
   - archive/ (deprecated but kept for reference)
   - data/milvus/ (runtime state)
-  - prod_max/ and prod_max_multimodal/ (processing outputs)
+  - data/processing/prod_max/ and data/processing/prod_max_multimodal/ (processing outputs)
   - logs/, backups/, certs/ (runtime directories)
   - Any directory containing .gitkeep files
+
+  Targeted cleanup inside processing outputs:
+  - Empty per-paper `data/processing/prod_max/*/images/` directories
+  - Empty per-paper `data/processing/prod_max_multimodal/*/images/` directories
 
 Examples:
   # Show empty directories without removing
@@ -74,21 +78,20 @@ fi
 print_header "Empty Directory Cleanup"
 
 # Directories to always exclude
-export EXCLUDE_PATTERN="\.git|\.venvs|\.conda|archive|data/milvus|prod_max|prod_max_multimodal|logs|backups|certs|data/pdfs|data/extractions|data/corpus|jupyter|cliproxyapi|searxng|thesis-exports"
+export EXCLUDE_PATTERN="\.git|\.venvs|\.conda|archive|data/milvus|logs|backups|certs|data/pdfs|data/extractions|data/corpus|data/processing|jupyter|cliproxyapi|searxng|thesis-exports"
 
 print_step "Finding empty directories..."
-print_info "Excluded: .git, .venvs/.conda, archive, data/milvus, prod_max*, logs, backups, certs, runtime dirs"
+print_info "Excluded: .git, .venvs/.conda, archive, data/milvus, data/processing, logs, backups, certs, runtime dirs"
 print_info ""
 
-# Find empty directories, excluding special dirs
-empty_dirs=$(find . -type d -empty \
+# Find empty directories, excluding special dirs. Processing outputs stay excluded
+# except for per-paper empty images/ placeholders, which are safe generated residue.
+general_empty_dirs=$(find . -type d -empty \
     ! -path "./.git*" \
     ! -path "./.venvs*" \
     ! -path "./.conda*" \
     ! -path "./archive*" \
     ! -path "./data/milvus*" \
-    ! -path "./prod_max*" \
-    ! -path "./prod_max_multimodal*" \
     ! -path "./logs*" \
     ! -path "./backups*" \
     ! -path "./certs*" \
@@ -101,6 +104,12 @@ empty_dirs=$(find . -type d -empty \
     ! -path "./searxng*" \
     ! -path "./thesis-exports*" \
     2>/dev/null | sort)
+
+targeted_processing_empty_dirs=$(find ./data/processing \
+    \( -path "./data/processing/prod_max/*/images" -o -path "./data/processing/prod_max_multimodal/*/images" \) \
+    -type d -empty 2>/dev/null | sort)
+
+empty_dirs=$(printf '%s\n%s\n' "${general_empty_dirs}" "${targeted_processing_empty_dirs}" | sed '/^$/d' | sort -u)
 
 if [ -z "$empty_dirs" ]; then
     print_success "No empty directories found"

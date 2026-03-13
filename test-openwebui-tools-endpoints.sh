@@ -485,6 +485,7 @@ test_tools_endpoints() {
             pubmed) expected_specs="search_pubmed" ;;
             arxiv) expected_specs="search_arxiv" ;;
             github) expected_specs="search_repos" ;;
+            indigo_chemistry) expected_specs="info check convert calculate render aromatize dearomatize layout clean" ;;
         esac
 
         if [ -n "$expected_specs" ]; then

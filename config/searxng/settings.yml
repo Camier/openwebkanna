@@ -1,0 +1,16 @@
+use_default_settings: true
+
+server:
+  secret_key: "7bba336a0d250fbfd17fb2fb4869124165906ceab892b530e8ab99819dd60e3d"
+  # Disable rate limiter unless Valkey/Redis is configured.
+  limiter: false
+  image_proxy: true
+  public_instance: false
+  bind_address: "0.0.0.0"
+  port: 8080
+  base_url: "http://searxng:8080/"
+
+search:
+  formats:
+    - html
+    - json

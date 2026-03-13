@@ -1,14 +1,20 @@
 # OpenWebUI MCP Integration - Complete Guide
 
+Scope note:
+- This file is an operator guide for MCP setup patterns in this repo, not the canonical runtime spec.
+- Use `README.md`, `docs/ssot/stack.md`, `docs/REPO_MAP.md`, `config/mcp/config.json`, and `config/compose/docker-compose.yml` for current deployment truth.
+
 ## Executive Summary
 
-OpenWebUI v0.8.3 natively supports **MCP (Model Context Protocol)** via Streamable HTTP transport. This guide provides everything needed to integrate MCP servers with your thesis research setup.
+OpenWebUI v0.8.10 in this repository supports **MCP (Model Context Protocol)** through both native Streamable HTTP servers and MCPO-proxied OpenAPI endpoints. This guide maps to the current thesis stack layout.
 
 **Key Points:**
-- MCP support introduced in v0.6.31, fully stable in v0.8.3
-- **MCPO proxy required** for stdio-based MCP servers
+- MCP support introduced in v0.6.31 and is stable in v0.8.10
+- `mcpo` is already present in this repo's `docker-compose.yml`
+- MCP server config is mounted from `config/mcp/config.json`
 - **`WEBUI_SECRET_KEY` mandatory** for OAuth persistence
-- Use **MCP (Streamable HTTP)** connection type, not OpenAPI
+- For **MCPO-proxied** endpoints, use OpenWebUI type: **OpenAPI**
+- For **native MCP** endpoints, use OpenWebUI type: **MCP (Streamable HTTP)**
 
 ---
 
@@ -22,45 +28,25 @@ WEBUI_SECRET_KEY=your-32-byte-or-longer-secret-key  # REQUIRED
 OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1  # LiteLLM reference setup
 ```
 
-### Step 2: Add MCPO to Docker Compose
+### Step 2: Verify MCPO Compose Wiring (Already Included)
 
 ```yaml
-# Add to docker-compose.yml
+# Existing wiring in this repository
 services:
   openwebui:
-    # ... your existing config ...
     depends_on:
-      - mcpo  # Add this dependency
+      - mcpo
 
   mcpo:
-    image: ghcr.io/open-webui/mcpo:latest
-    container_name: mcpo
-    ports:
-      - "8000:8000"
     volumes:
-      - ./mcp-config.json:/app/config.json
-    environment:
-      - MCPO_HOST=0.0.0.0
-      - MCPO_PORT=8000
-      - MCPO_LOG_LEVEL=INFO
-    networks:
-      - openwebui_network
+      - ${MCPO_CONFIG:-./config/mcp/config.json}:/app/config.json:ro
 ```
 
-### Step 3: Create MCP Configuration
+### Step 3: Review/Update MCP Configuration
 
 ```bash
-# Create mcp-config.json
-cat > mcp-config.json << 'EOF'
-{
-  "mcpServers": {
-    "time": {
-      "command": "uvx",
-      "args": ["mcp-server-time", "--local-timezone=Europe/Paris"]
-    }
-  }
-}
-EOF
+# Edit the repo MCP server definitions used by MCPO
+nano config/mcp/config.json
 ```
 
 ### Step 4: Restart and Configure
@@ -77,10 +63,15 @@ sleep 30
 
 1. Open OpenWebUI → Admin Settings → External Tools
 2. Click **+ Add Server**
-3. **Type**: MCP (Streamable HTTP)
-4. **URL**: `http://mcpo:8000`
-5. **Auth**: None (for local MCPO)
-6. Save and test
+3. For MCPO endpoints, set **Type**: `OpenAPI`
+4. URL examples:
+   - `http://mcpo:8000/filesystem`
+   - `http://mcpo:8000/memory`
+   - `http://mcpo:8000/fetch`
+   - `http://mcpo:8000/time`
+   - `http://mcpo:8000/zotero`
+5. For non-MCPO native servers, set **Type**: `MCP (Streamable HTTP)` and use the native streamable URL
+6. Save and test each server
 
 ---
 
@@ -117,7 +108,7 @@ uvx mcp-zotero
 # 2. API Key: https://www.zotero.org/settings/keys/new
 ```
 
-**Configuration** (`mcp-config.json`):
+**Configuration** (`config/mcp/config.json`):
 ```json
 {
   "mcpServers": {
@@ -284,7 +275,7 @@ services:
     env_file:
       - .env.mcp
     volumes:
-      - ./mcp-config.json:/app/config.json
+      - ./config/mcp/config.json:/app/config.json
 ```
 
 ---
@@ -299,7 +290,7 @@ version: '3.8'
 services:
   # Your existing OpenWebUI service
   openwebui:
-    image: ghcr.io/open-webui/open-webui:v0.8.3
+    image: ghcr.io/open-webui/open-webui:v0.8.10
     container_name: openwebui
     ports:
       - "3000:8080"
@@ -328,14 +319,14 @@ services:
   #   networks:
   #     - openwebui_network
 
-  # NEW: MCPO for MCP servers
+  # MCPO for MCP servers (already part of this repo architecture)
   mcpo:
     image: ghcr.io/open-webui/mcpo:latest
     container_name: mcpo
     ports:
       - "8000:8000"
     volumes:
-      - ./mcp-config.json:/app/config.json:ro
+      - ./config/mcp/config.json:/app/config.json:ro
       - ./data:/data:ro  # Read-only access to your data
     environment:
       - MCPO_HOST=0.0.0.0
@@ -380,7 +371,9 @@ docker compose restart openwebui
 **Solutions**:
 1. Check MCPO is running: `docker compose logs mcpo`
 2. Verify URL: Should be `http://mcpo:8000` (not localhost)
-3. Check connection type: Must be "MCP (Streamable HTTP)"
+3. Check connection type:
+   - MCPO endpoint (`http://mcpo:8000/...`) => `OpenAPI`
+   - Native endpoint (direct MCP streamable URL) => `MCP (Streamable HTTP)`
 4. Test: `curl http://localhost:8000/openapi.json`
 
 ### Issue: MCP tools not appearing in chat
@@ -436,7 +429,6 @@ volumes:
    ```bash
    # Add to .gitignore
    echo ".env.mcp" >> .gitignore
-   echo "mcp-config.json" >> .gitignore
    ```
 
 2. **Use read-only mounts for filesystem**
@@ -498,8 +490,8 @@ volumes:
 
 ### Immediate Actions (Today)
 
-1. [ ] Add MCPO to docker-compose.yml
-2. [ ] Create mcp-config.json with time server (test)
+1. [ ] Verify MCPO service is running from existing docker-compose.yml
+2. [ ] Create config/mcp/config.json with time server (test)
 3. [ ] Restart and verify connection
 4. [ ] Get Zotero API credentials
 5. [ ] Add Zotero MCP server
@@ -534,7 +526,7 @@ docker compose restart mcpo
 curl http://localhost:8000/openapi.json
 
 # Edit MCP config
-nano mcp-config.json
+nano config/mcp/config.json
 docker compose restart mcpo
 
 # Update MCPO
@@ -562,7 +554,7 @@ docker compose up -d mcpo
 **Critical Requirements**:
 1. `WEBUI_SECRET_KEY` must be set
 2. MCPO proxy for stdio servers
-3. Use "MCP (Streamable HTTP)" connection type
+3. Use `OpenAPI` for MCPO endpoints and `MCP (Streamable HTTP)` for native endpoints
 4. Never commit API keys to git
 
 **Start with**: Zotero MCP + Filesystem MCP

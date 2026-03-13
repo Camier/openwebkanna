@@ -16,13 +16,16 @@ OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 COMPOSE_FILE="docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
-SMILES_STRUCTURE_API_HOST="${SMILES_STRUCTURE_API_HOST:-127.0.0.1}"
-SMILES_STRUCTURE_API_PORT="${SMILES_STRUCTURE_API_PORT:-8011}"
-SMILES_STRUCTURE_API_BASE_URL="${SMILES_STRUCTURE_API_BASE_URL:-http://${SMILES_STRUCTURE_API_HOST}:${SMILES_STRUCTURE_API_PORT}}"
 OPEN_TERMINAL_ENABLED="${OPEN_TERMINAL_ENABLED:-false}"
 OPEN_TERMINAL_BIND_ADDRESS="${OPEN_TERMINAL_BIND_ADDRESS:-127.0.0.1}"
 OPEN_TERMINAL_PORT="${OPEN_TERMINAL_PORT:-8320}"
 OPEN_TERMINAL_BASE_URL="${OPEN_TERMINAL_BASE_URL:-http://${OPEN_TERMINAL_BIND_ADDRESS}:${OPEN_TERMINAL_PORT}}"
+INDIGO_SERVICE_ENABLED="${INDIGO_SERVICE_ENABLED:-false}"
+INDIGO_SERVICE_BIND_ADDRESS="${INDIGO_SERVICE_BIND_ADDRESS:-127.0.0.1}"
+INDIGO_SERVICE_PORT="${INDIGO_SERVICE_PORT:-8012}"
+INDIGO_SERVICE_BASE_URL="${INDIGO_SERVICE_BASE_URL:-http://${INDIGO_SERVICE_BIND_ADDRESS}:${INDIGO_SERVICE_PORT}}"
+INDIGO_TOOL_ENABLED="${INDIGO_TOOL_ENABLED:-true}"
+INDIGO_TOOL_ID="${INDIGO_TOOL_ID:-indigo_chemistry}"
 # shellcheck disable=SC2034
 COMPOSE_CMD=()
 LITELLM_PROBE_SOURCE=""
@@ -63,14 +66,30 @@ check_docker_compose() {
         return 1
     fi
 
-    local services
-    services=$(docker_compose ps --services 2>/dev/null || echo "")
-    if [ -z "$services" ]; then
+    local -a profile_args=()
+    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
+        profile_args+=(--profile legacy-cliproxy)
+    fi
+    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
+        profile_args+=(--profile web-search)
+    fi
+    if is_true "${OPEN_TERMINAL_ENABLED:-false}"; then
+        profile_args+=(--profile open-terminal)
+    fi
+    if is_true "${INDIGO_SERVICE_ENABLED:-false}"; then
+        profile_args+=(--profile indigo-service)
+    fi
+
+    local services ps_json
+    services=$("${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" "${profile_args[@]}" config --services 2>/dev/null || echo "")
+    ps_json=$(docker_compose ps --format json 2>/dev/null | jq -sr '.' 2>/dev/null || echo "[]")
+
+    if [ -z "$services" ] && [ "$ps_json" = "[]" ]; then
         print_svc "Docker Compose" "stopped" "(no services)"
         return 1
     fi
 
-    echo -e "\n  ${BOLD}Services:${NC}"
+    echo -e "\n  ${BOLD}Configured Services:${NC}"
     for svc in $services; do
         local cid state health ports started
         cid=$(docker_compose ps -q "$svc" 2>/dev/null || true)
@@ -93,6 +112,40 @@ check_docker_compose() {
         else
             echo -e "    ${RED}○${NC} ${BOLD}${svc}${NC} (${state})"
         fi
+    done
+
+    local actual_services legacy_found=false
+    actual_services=$(printf '%s' "$ps_json" | jq -r '.[].Service' 2>/dev/null | sort -u)
+    for svc in $actual_services; do
+        if [ -z "$svc" ]; then
+            continue
+        fi
+        if printf '%s\n' "$services" | grep -qx "$svc"; then
+            continue
+        fi
+
+        if [ "$legacy_found" = false ]; then
+            echo -e "\n  ${BOLD}Legacy / Orphan Project Containers:${NC}"
+            legacy_found=true
+        fi
+
+        local cid state health ports started
+        cid=$(docker_compose ps -q "$svc" 2>/dev/null || true)
+        if [ -z "$cid" ]; then
+            cid=$(docker ps -aq -f "label=com.docker.compose.project=openwebui" -f "label=com.docker.compose.service=${svc}" | head -1)
+        fi
+
+        state=$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo "unknown")
+        health=$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null || true)
+        ports=$(docker port "$cid" 2>/dev/null | head -1 || echo "")
+        started=$(docker inspect -f '{{.State.StartedAt}}' "$cid" 2>/dev/null |
+            xargs -I{} date -d {} "+%Y-%m-%d %H:%M" 2>/dev/null || echo "")
+
+        local health_str=""
+        [ -n "$health" ] && health_str=" | health: ${health}"
+        echo -e "    ${YELLOW}◐${NC} ${BOLD}${svc}${NC} (${state}${health_str} | not in current compose config)"
+        [ -n "$ports" ] && echo -e "       port: ${ports}"
+        [ -n "$started" ] && echo -e "       started: ${started}"
     done
     echo
 }
@@ -208,22 +261,6 @@ check_mcpo() {
     return 1
 }
 
-check_smiles_structure_api() {
-    print_section "SMILES Structure API"
-    local url="${SMILES_STRUCTURE_API_BASE_URL%/}"
-    local check_script="${SCRIPT_DIR}/check-smiles-structure-api.sh"
-    if curl -sf -m 5 "${url}/health" &>/dev/null 2>&1; then
-        print_svc "SMILES API" "running" "(${url})"
-        return 0
-    fi
-    if [ -x "$check_script" ] && "$check_script" --quiet &>/dev/null 2>&1; then
-        print_svc "SMILES API" "running" "(reachable via Docker network)"
-        return 0
-    fi
-    print_svc "SMILES API" "warning" "(not reachable at ${url})"
-    return 1
-}
-
 check_cliproxyapi() {
     print_section "CLIProxyAPI (optional sidecar)"
     # CLIProxyAPI is no longer the primary upstream; report informational status only.
@@ -258,6 +295,96 @@ check_open_terminal() {
     return 1
 }
 
+check_indigo_service() {
+    print_section "Indigo Service (optional sidecar)"
+
+    if ! is_true "$INDIGO_SERVICE_ENABLED"; then
+        print_info "Indigo Service disabled (INDIGO_SERVICE_ENABLED=false)"
+        return 0
+    fi
+
+    local url="${INDIGO_SERVICE_BASE_URL%/}"
+    local check_script="${SCRIPT_DIR}/check-indigo-service.sh"
+    if [ -x "$check_script" ] && "$check_script" --quiet &>/dev/null 2>&1; then
+        print_svc "Indigo Service" "running" "(${url})"
+        return 0
+    fi
+
+    print_svc "Indigo Service" "warning" "(not reachable at ${url})"
+    return 1
+}
+
+check_indigo_tool_registration() {
+    print_section "Indigo Tool (OpenWebUI)"
+
+    if ! is_true "$INDIGO_SERVICE_ENABLED"; then
+        print_info "Indigo tool check skipped (INDIGO_SERVICE_ENABLED=false)"
+        return 0
+    fi
+
+    if ! is_true "$INDIGO_TOOL_ENABLED"; then
+        print_info "Indigo tool check skipped (INDIGO_TOOL_ENABLED=false)"
+        return 0
+    fi
+
+    local running
+    running="$(docker inspect -f '{{.State.Running}}' openwebui 2>/dev/null || echo "false")"
+    if [ "$running" != "true" ]; then
+        print_svc "Indigo Tool" "warning" "(openwebui container is not running)"
+        return 1
+    fi
+
+    local output
+    if ! output="$(
+        docker exec -i openwebui python - "$INDIGO_TOOL_ID" <<'PY'
+import sqlite3
+import sys
+
+tool_id = sys.argv[1]
+required = {
+    "info",
+    "check",
+    "convert",
+    "calculate",
+    "render",
+    "aromatize",
+    "dearomatize",
+    "layout",
+    "clean",
+}
+
+conn = sqlite3.connect("/app/backend/data/webui.db")
+cur = conn.cursor()
+cur.execute("SELECT id, name, is_active, specs FROM tool WHERE id = ?", (tool_id,))
+row = cur.fetchone()
+conn.close()
+if row is None:
+    raise SystemExit(f"missing:{tool_id}")
+
+specs_raw = row[3] or "[]"
+try:
+    import json
+    specs = json.loads(specs_raw)
+except Exception:
+    specs = []
+
+actual = {item.get("name") for item in specs if isinstance(item, dict) and isinstance(item.get("name"), str)}
+missing = sorted(required - actual)
+if missing:
+    raise SystemExit(f"missing_specs:{','.join(missing)}")
+
+print(f"id:{row[0]} name:{row[1]} active:{row[2]} specs:{','.join(sorted(actual))}")
+PY
+    )"; then
+        print_svc "Indigo Tool" "warning" "(not registered or incomplete: ${INDIGO_TOOL_ID})"
+        return 1
+    fi
+
+    print_svc "Indigo Tool" "running" "(${INDIGO_TOOL_ID})"
+    print_info "$output"
+    return 0
+}
+
 check_rag_profile() {
     print_section "RAG Profile"
     print_info "RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-<unset>}"
@@ -270,11 +397,18 @@ check_rag_profile() {
     if [ "$web_search" = true ]; then
         print_info "Web search: enabled (${SEARXNG_QUERY_URL:-<unset>})"
         local probe_url="${SEARXNG_QUERY_URL//\{query\}/status+probe}"
-        local host_probe="${probe_url//host.docker.internal/127.0.0.1}"
+        local host_probe="$probe_url"
+        if echo "$host_probe" | grep -q "host.docker.internal"; then
+            host_probe="${host_probe//host.docker.internal/127.0.0.1}"
+        fi
+
         if curl -sf -m 8 "$host_probe" 2>/dev/null | grep -q "results"; then
             print_svc "SearXNG (host)" "running"
+        elif docker ps -q -f "name=^openwebui$" | grep -q . &&
+            docker exec openwebui sh -lc "curl -sf -m 8 \"$probe_url\" 2>/dev/null | grep -q results"; then
+            print_svc "SearXNG (container route)" "running"
         else
-            print_svc "SearXNG (host)" "warning" "(probe failed — check port 8888)"
+            print_svc "SearXNG" "warning" "(probe failed from host and OpenWebUI container route)"
         fi
     else
         print_info "Web search: disabled"
@@ -331,20 +465,39 @@ print_summary() {
         echo -e "  ${YELLOW}◐${NC} MCPO:       ${YELLOW}Not reachable${NC}"
     fi
 
-    # SMILES API
-    if curl -sf -m 5 "${SMILES_STRUCTURE_API_BASE_URL%/}/health" &>/dev/null 2>&1 ||
-        [ -x "${SCRIPT_DIR}/check-smiles-structure-api.sh" ] && "${SCRIPT_DIR}/check-smiles-structure-api.sh" --quiet &>/dev/null 2>&1; then
-        echo -e "  ${GREEN}●${NC} SMILES API: ${GREEN}OK${NC}"
-    else
-        echo -e "  ${YELLOW}◐${NC} SMILES API: ${YELLOW}Not reachable${NC}"
-    fi
-
     # Open Terminal (optional)
     if is_true "$OPEN_TERMINAL_ENABLED"; then
         if curl -sf -m 5 "${OPEN_TERMINAL_BASE_URL%/}/health" &>/dev/null 2>&1; then
             echo -e "  ${GREEN}●${NC} OpenTerm:   ${GREEN}OK${NC}"
         else
             echo -e "  ${YELLOW}◐${NC} OpenTerm:   ${YELLOW}Not reachable${NC}"
+        fi
+    fi
+
+    # Indigo Service (optional)
+    if is_true "$INDIGO_SERVICE_ENABLED"; then
+        if [ -x "${SCRIPT_DIR}/check-indigo-service.sh" ] && "${SCRIPT_DIR}/check-indigo-service.sh" --quiet &>/dev/null 2>&1; then
+            echo -e "  ${GREEN}●${NC} Indigo:     ${GREEN}OK${NC}"
+        else
+            echo -e "  ${YELLOW}◐${NC} Indigo:     ${YELLOW}Not reachable${NC}"
+        fi
+
+        if is_true "$INDIGO_TOOL_ENABLED"; then
+            if docker exec -i openwebui python - "$INDIGO_TOOL_ID" <<'PY' >/dev/null 2>&1; then
+import sqlite3
+import sys
+tool_id = sys.argv[1]
+conn = sqlite3.connect("/app/backend/data/webui.db")
+cur = conn.cursor()
+cur.execute("SELECT 1 FROM tool WHERE id = ? AND is_active = 1", (tool_id,))
+row = cur.fetchone()
+conn.close()
+raise SystemExit(0 if row else 1)
+PY
+                echo -e "  ${GREEN}●${NC} IndigoTool: ${GREEN}OK${NC}"
+            else
+                echo -e "  ${YELLOW}◐${NC} IndigoTool: ${YELLOW}Missing in OpenWebUI${NC}"
+            fi
         fi
     fi
 
@@ -395,9 +548,10 @@ main() {
             check_openwebui || true
             check_litellm || true
             check_mcpo || true
-            check_smiles_structure_api || true
             check_cliproxyapi || true
             check_open_terminal || true
+            check_indigo_service || true
+            check_indigo_tool_registration || true
             check_rag_profile || true
             check_resources || true
         fi

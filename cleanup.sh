@@ -1,8 +1,8 @@
 #!/bin/bash
 
 ###############################################################################
-# OpenWebUI + vLLM RAG Cleanup Script
-# This script stops all services and performs cleanup
+# OpenWebUI + LiteLLM RAG Cleanup Script
+# This script stops all services, including any optional legacy vLLM fallback, and performs cleanup
 ###############################################################################
 
 set -e
@@ -18,122 +18,62 @@ COMPOSE_FILE="docker-compose.yml"
 VLLM_LOG_FILE="logs/vllm.log"
 VLLM_PID_FILE="vllm.pid"
 VLLM_PID_FILE_LEGACY=".vllm_pid"
-OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}"
+OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
 CLIPROXYAPI_LOG_FILE="${CLIPROXYAPI_LOG_FILE:-logs/cliproxyapi.log}"
 CLIPROXYAPI_PID_FILE="${CLIPROXYAPI_PID_FILE:-.cliproxyapi.pid}"
 CLIPROXYAPI_STOP_SCRIPT="./stop-cliproxyapi.sh"
-
-###############################################################################
-# Helper Functions
-###############################################################################
-
-# Note: print_header, print_step, print_success, print_error, print_warning, print_info
-# come from lib/print-utils.sh via lib/init.sh
-
-confirm_action() {
-    local message=$1
-    local default=${2:-n}
-
-    if [ "$FORCE" = true ]; then
-        return 0
-    fi
-
-    local prompt
-    if [ "$default" = "y" ]; then
-        prompt="$message [Y/n]"
-    else
-        prompt="$message [y/N]"
-    fi
-
-    while true; do
-        echo -en "${YELLOW}$prompt ${NC}"
-        read -r response
-        response=${response:-$default}
-
-        case $response in
-            [Yy] | [Yy][Ee][Ss])
-                return 0
-                ;;
-            [Nn] | [Nn][Oo])
-                return 1
-                ;;
-            *)
-                echo -e "${RED}Please respond with yes or no${NC}"
-                ;;
-        esac
-    done
-}
 
 ###############################################################################
 # Cleanup Functions
 ###############################################################################
 
 stop_vllm() {
-    print_step "Stopping vLLM..."
+    print_step "Stopping archived vLLM fallback (repo-managed only)..."
+
+    has_vllm_command() {
+        local pid="$1"
+        kill -0 "$pid" 2>/dev/null &&
+            ps -p "$pid" -o args= 2>/dev/null | grep -q "vllm.entrypoints.openai.api_server"
+    }
 
     local stopped=false
+    local pid=""
+    local pid_file=""
 
-    # Check PID file first
     if [ -f "$VLLM_PID_FILE" ]; then
-        local pid
-        pid=$(cat "$VLLM_PID_FILE")
-        if kill -0 "$pid" 2>/dev/null; then
-            print_info "Stopping vLLM process (PID: $pid)..."
-            kill "$pid"
-            sleep 2
-
-            # Force kill if still running
-            if kill -0 "$pid" 2>/dev/null; then
-                print_warning "Process still running, sending SIGKILL..."
-                kill -9 "$pid"
-                sleep 1
-            fi
-
-            stopped=true
-        fi
-        rm -f "$VLLM_PID_FILE" "$VLLM_PID_FILE_LEGACY"
+        pid_file="$VLLM_PID_FILE"
     elif [ -f "$VLLM_PID_FILE_LEGACY" ]; then
-        local pid
-        pid=$(cat "$VLLM_PID_FILE_LEGACY")
-        if kill -0 "$pid" 2>/dev/null; then
-            print_info "Stopping legacy vLLM process (PID: $pid)..."
-            kill "$pid"
-            sleep 2
-
-            # Force kill if still running
-            if kill -0 "$pid" 2>/dev/null; then
-                print_warning "Process still running, sending SIGKILL..."
-                kill -9 "$pid"
-                sleep 1
-            fi
-
-            stopped=true
-        fi
-        rm -f "$VLLM_PID_FILE_LEGACY" "$VLLM_PID_FILE"
+        pid_file="$VLLM_PID_FILE_LEGACY"
     fi
 
-    # Check for any vLLM processes
-    local pids
-    pids=$(pgrep -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        print_info "Stopping additional vLLM processes: $pids"
-        echo "$pids" | xargs kill
+    if [ -z "$pid_file" ]; then
+        print_info "No repo-managed archived vLLM PID file found; leaving unrelated host vLLM processes untouched"
+        return 0
+    fi
+
+    pid=$(cat "$pid_file" 2>/dev/null || true)
+    if [[ $pid =~ ^[0-9]+$ ]] && has_vllm_command "$pid"; then
+        print_info "Stopping archived vLLM fallback process (PID: $pid)..."
+        kill "$pid"
         sleep 2
 
-        # Force kill if needed
-        pids=$(pgrep -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            print_warning "Some processes still running, force killing..."
-            echo "$pids" | xargs kill -9
+        if has_vllm_command "$pid"; then
+            print_warning "Process still running, sending SIGKILL..."
+            kill -9 "$pid"
+            sleep 1
         fi
 
         stopped=true
+    elif [ -n "$pid" ]; then
+        print_warning "Ignoring stale archived vLLM PID file: $pid_file ($pid)"
     fi
 
+    rm -f "$VLLM_PID_FILE" "$VLLM_PID_FILE_LEGACY"
+
     if [ "$stopped" = true ]; then
-        print_success "vLLM stopped"
+        print_success "Archived vLLM fallback stopped"
     else
-        print_info "vLLM was not running"
+        print_info "Archived vLLM fallback was not running"
     fi
 }
 
@@ -185,16 +125,24 @@ stop_docker_compose() {
         return 0
     fi
 
+    if ! init_compose_cmd; then
+        print_error "Docker Compose is not available; cannot stop services"
+        return 1
+    fi
+
     # Check if any containers are running
     local running
-    running=$(docker-compose ps -q 2>/dev/null || true)
+    if ! running=$(docker_compose ps -q 2>/dev/null); then
+        print_error "Failed to query Docker Compose services"
+        return 1
+    fi
     if [ -z "$running" ]; then
         print_info "No Docker Compose containers are running"
         return 0
     fi
 
     print_info "Stopping Docker Compose..."
-    if docker-compose down; then
+    if docker_compose down; then
         print_success "Docker Compose services stopped"
     else
         print_error "Failed to stop Docker Compose services"
@@ -209,15 +157,24 @@ cleanup_docker() {
 
     print_step "Cleaning up Docker resources..."
 
+    if ! init_compose_cmd; then
+        print_error "Docker Compose is not available; cannot remove compose-managed resources"
+        return 1
+    fi
+
     # Remove containers
     print_info "Removing containers..."
-    docker-compose down -v --remove-orphans 2>/dev/null || true
+    if ! docker_compose down -v --remove-orphans; then
+        print_error "Failed to remove Docker Compose containers/volumes"
+        return 1
+    fi
 
     # Ask about images
     if confirm_action "Remove OpenWebUI Docker image as well?"; then
         print_info "Removing OpenWebUI image..."
         docker rmi "$OPENWEBUI_IMAGE" 2>/dev/null ||
-            docker rmi ghcr.io/open-webui/open-webui:v0.8.3 2>/dev/null ||
+            docker rmi ghcr.io/open-webui/open-webui:v0.8.10 2>/dev/null ||
+            docker rmi ghcr.io/open-webui/open-webui:v0.8.7 2>/dev/null ||
             docker rmi ghcr.io/open-webui/open-webui:main 2>/dev/null ||
             docker rmi ghcr.io/open-webui/open-webui:latest 2>/dev/null ||
             print_info "Image not found or already removed"
@@ -238,11 +195,11 @@ cleanup_logs() {
 
     print_step "Cleaning up log files..."
 
-    # Clear vLLM log
+    # Clear legacy vLLM fallback log
     if [ -f "$VLLM_LOG_FILE" ]; then
-        print_info "Clearing vLLM log file..."
+        print_info "Clearing vLLM fallback log file..."
         : >"$VLLM_LOG_FILE"
-        print_success "vLLM log cleared"
+        print_success "vLLM fallback log cleared"
     fi
 
     # Clear CLIProxyAPI log
@@ -286,7 +243,7 @@ show_cleanup_summary() {
 
     echo -e "${BOLD}Services Stopped:${NC}"
     echo -e "  ${CYAN}CLIProxyAPI:${NC}   Stopped"
-    echo -e "  ${CYAN}vLLM:${NC}          Stopped"
+    echo -e "  ${CYAN}vLLM fallback:${NC} Stopped"
     echo -e "  ${CYAN}Docker Compose:${NC} Stopped"
 
     echo -e "\n${BOLD}To restart services:${NC}"
@@ -303,7 +260,6 @@ main() {
     print_header
 
     # Parse command line arguments
-    FORCE=false
     CLEAN_DOCKER=false
     CLEAN_LOGS=false
     CLEAN_CACHE=false
@@ -311,7 +267,6 @@ main() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             -f | --force)
-                FORCE=true
                 shift
                 ;;
             --docker)
@@ -335,7 +290,7 @@ main() {
             -h | --help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
-                echo "Stop and cleanup OpenWebUI + vLLM RAG system."
+                echo "Stop and cleanup the OpenWebUI stack, including any optional legacy vLLM fallback."
                 echo ""
                 echo "Options:"
                 echo "  -f, --force    Skip confirmation prompts"
@@ -363,7 +318,7 @@ main() {
     # Show what will be done
     echo -e "${BOLD}This script will:${NC}"
     echo "  • Stop CLIProxyAPI service"
-    echo "  • Stop vLLM server"
+    echo "  • Stop optional legacy vLLM fallback"
     echo "  • Stop Docker Compose services"
 
     if [ "$CLEAN_DOCKER" = true ]; then

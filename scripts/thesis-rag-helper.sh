@@ -19,6 +19,44 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+resolve_default_biblio_file() {
+    if [[ -n ${CORPUS_BIBLIO_FILE:-} ]]; then
+        echo "${CORPUS_BIBLIO_FILE}"
+        return 0
+    fi
+    local curated="${PROJECT_ROOT}/data/corpus/biblio_corpus.curated.jsonl"
+    local raw="${PROJECT_ROOT}/data/corpus/biblio_corpus.jsonl"
+    if [[ -f ${curated} ]]; then
+        echo "${curated}"
+        return 0
+    fi
+    echo "${raw}"
+}
+
+current_openwebui_version() {
+    local image
+    image="$(current_config_value "OPENWEBUI_IMAGE" "")"
+    printf '%s\n' "${image}" | sed -n 's|.*:\(v[0-9][0-9.]*\)$|\1|p' | head -n 1
+}
+
+current_config_value() {
+    local key="$1"
+    local fallback="${2:-}"
+    local file=""
+    local value=""
+
+    for file in "${PROJECT_ROOT}/.env" "${PROJECT_ROOT}/config/env/.env.example"; do
+        [[ -f ${file} ]] || continue
+        value="$(sed -n "s/^${key}=//p" "${file}" | head -n 1)"
+        if [[ -n ${value} ]]; then
+            echo "${value}"
+            return 0
+        fi
+    done
+
+    echo "${fallback}"
+}
+
 show_query_templates() {
     cat <<'EOF'
 === Effective RAG Query Templates for Thesis Research ===
@@ -160,7 +198,13 @@ EOF
 }
 
 show_citation_guide() {
-    cat <<'EOF'
+    local openwebui_version
+    openwebui_version="$(current_openwebui_version)"
+    if [[ -z ${openwebui_version} ]]; then
+        openwebui_version="current configured version"
+    fi
+
+    cat <<EOF
 === Citing RAG Sources in Your Thesis ===
 
 1. ACADEMIC INTEGRITY GUIDELINES
@@ -181,7 +225,7 @@ show_citation_guide() {
    "OpenWebUI says mesembrine inhibits serotonin reuptake."
 
    Methodology section (example):
-   "Literature was analyzed using OpenWebUI v0.8.3 with a locally-hosted
+   "Literature was analyzed using OpenWebUI ${openwebui_version} with a locally-hosted
    RAG system. The knowledge base contained 47 papers on Sceletium tortuosum
    (see Appendix A for complete list). Queries were structured to extract
    specific pharmacological data with citation verification against original
@@ -239,11 +283,34 @@ EOF
 
 export_methodology() {
     local export_dir="${PROJECT_ROOT}/thesis-exports/methodology"
-    mkdir -p "${export_dir}"
+    local fallback_export_dir="${PROJECT_ROOT}/logs/thesis-methodology"
+
+    if ! mkdir -p "${export_dir}" 2>/dev/null; then
+        export_dir="${fallback_export_dir}"
+        mkdir -p "${export_dir}"
+        echo "Warning: thesis-exports/ is not writable; using ${export_dir} instead." >&2
+    fi
 
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
     local output_file="${export_dir}/rag-methodology-${timestamp}.md"
+    local openwebui_version
+    openwebui_version="$(current_openwebui_version)"
+    local embedding_model
+    embedding_model="$(current_config_value "RAG_EMBEDDING_MODEL" "pritamdeka/S-PubMedBert-MS-MARCO")"
+    local rag_top_k
+    rag_top_k="$(current_config_value "RAG_TOP_K" "15")"
+    local chunk_size
+    chunk_size="$(current_config_value "CHUNK_SIZE" "3000")"
+    local chunk_overlap
+    chunk_overlap="$(current_config_value "CHUNK_OVERLAP" "600")"
+    local vector_db
+    vector_db="$(current_config_value "VECTOR_DB" "pgvector")"
+    local openai_api_base_url
+    openai_api_base_url="$(current_config_value "OPENAI_API_BASE_URL" "http://host.docker.internal:4000/v1")"
+    if [[ -z ${openwebui_version} ]]; then
+        openwebui_version="current configured version"
+    fi
 
     cat >"${output_file}" <<EOF
 # RAG Research Methodology Documentation
@@ -255,18 +322,20 @@ export_methodology() {
 ## System Configuration
 
 ### Software Stack
-- OpenWebUI v0.8.3
+- OpenWebUI ${openwebui_version}
 - PostgreSQL with pgvector extension
-- CLIProxyAPI for model access
-- Sentence-transformers for embeddings
+- LiteLLM as the OpenAI-compatible upstream (${openai_api_base_url})
+- Embeddings via ${embedding_model}
 
 ### Knowledge Base Composition
 EOF
 
-    # Count documents in knowledge base if available
-    if [[ -f "${PROJECT_ROOT}/data/corpus/biblio_corpus.jsonl" ]]; then
+    # Count documents in knowledge base (curated corpus preferred when present)
+    local biblio_file
+    biblio_file="$(resolve_default_biblio_file)"
+    if [[ -f ${biblio_file} ]]; then
         local doc_count
-        doc_count=$(wc -l <"${PROJECT_ROOT}/data/corpus/biblio_corpus.jsonl" 2>/dev/null || echo "unknown")
+        doc_count=$(wc -l <"${biblio_file}" 2>/dev/null || echo "unknown")
         echo "- Total Documents: ${doc_count}" >>"${output_file}"
     fi
 
@@ -281,15 +350,16 @@ EOF
         fi
     done
 
-    cat >>"${output_file}" <<'EOF'
+    cat >>"${output_file}" <<EOF
 
 ## RAG Configuration
 
 ### Embedding Settings
-- Model: sentence-transformers/all-MiniLM-L6-v2
-- Chunk Size: 1500 characters
-- Chunk Overlap: 150 characters
-- Top-K Retrieval: 5 chunks
+- Model: ${embedding_model}
+- Vector Backend: ${vector_db}
+- Chunk Size: ${chunk_size} characters
+- Chunk Overlap: ${chunk_overlap} characters
+- Top-K Retrieval: ${rag_top_k} chunks
 
 ### Query Methodology
 - Structured queries with specific parameters

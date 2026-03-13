@@ -450,12 +450,14 @@ main() {
         OPENWEBUI_IMAGE=$(grep -E "^OPENWEBUI_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         CLIPROXYAPI_IMAGE=$(grep -E "^CLIPROXYAPI_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         JUPYTER_IMAGE=$(grep -E "^JUPYTER_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
+        INDIGO_SERVICE_IMAGE=$(grep -E "^INDIGO_SERVICE_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
     fi
 
-    RESOLVED_IMAGES["openwebui"]="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.3}"
+    RESOLVED_IMAGES["openwebui"]="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
     RESOLVED_IMAGES["cliproxyapi"]="${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}"
     RESOLVED_IMAGES["postgres"]="pgvector/pgvector:pg16"
     RESOLVED_IMAGES["jupyter"]="${JUPYTER_IMAGE:-jupyter/scipy-notebook:latest}"
+    RESOLVED_IMAGES["indigo-service"]="${INDIGO_SERVICE_IMAGE:-epmlsop/indigo-service:latest}"
 
     if [[ $OUTPUT_JSON == "true" ]]; then
         echo "["
@@ -480,7 +482,7 @@ main() {
                 "-------" "-----" "-------" "------" "---" "------"
         fi
 
-        for service in openwebui cliproxyapi postgres jupyter; do
+        for service in openwebui cliproxyapi postgres jupyter indigo-service; do
             check_image "$service" "${RESOLVED_IMAGES[$service]}" || true
         done
 

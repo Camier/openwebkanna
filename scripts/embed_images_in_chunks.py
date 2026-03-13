@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Transform prod_max to embed base64 images for multimodal RAG.
+Transform data/processing/prod_max to embed base64 images for multimodal RAG.
 Uses normalized.json which already contains base64 images.
 """
 
@@ -10,8 +10,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-PROD_MAX_DIR = Path("/LAB/@thesis/openwebui/prod_max")
-OUTPUT_DIR = Path("/LAB/@thesis/openwebui/prod_max_multimodal")
+PROD_MAX_DIR = Path("/LAB/@thesis/openwebui/data/processing/prod_max")
+OUTPUT_DIR = Path("/LAB/@thesis/openwebui/data/processing/prod_max_multimodal")
 
 
 def _looks_like_base64_image(value: object) -> bool:

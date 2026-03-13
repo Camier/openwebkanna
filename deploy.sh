@@ -59,6 +59,16 @@ start_docker_compose() {
         docker_compose --profile legacy-cliproxy rm -f -s cliproxyapi >/dev/null 2>&1 || true
     fi
 
+    # SearXNG is optional and only needed when OpenWebUI web search is enabled.
+    if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
+        print_step "Web search enabled; starting web-search profile"
+        docker_compose --profile web-search up -d searxng
+    else
+        print_info "Web search disabled; ensuring searxng sidecar is not running"
+        docker_compose --profile web-search stop searxng >/dev/null 2>&1 || true
+        docker_compose --profile web-search rm -f -s searxng >/dev/null 2>&1 || true
+    fi
+
     # Open Terminal sidecar is optional and explicitly opt-in.
     if is_true "${OPEN_TERMINAL_ENABLED:-false}"; then
         if [ -z "${OPEN_TERMINAL_API_KEY:-}" ]; then

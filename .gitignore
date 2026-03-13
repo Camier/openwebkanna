@@ -9,7 +9,6 @@ logs/
 vllm.log
 vllm.pid
 .vllm_pid
-bin/
 cliproxyapi/auth/
 cliproxyapi/logs/
 cliproxyapi/vendor/
@@ -54,8 +53,18 @@ __pycache__/
 .venvs/
 .tmpdocs_*/
 
+# Local-only helper surface
+local/*
+!local/README.md
+!local/entities/
+local/entities/*
+!local/entities/README.md
+
 # Large/local research data (keep repo lightweight)
 data/
 prod_max/
 prod_max_multimodal/
 research/
+thesis-exports/
+artifacts/*
+!artifacts/README.md

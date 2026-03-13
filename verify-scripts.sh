@@ -20,9 +20,14 @@ FAILED_TARGET=0
 
 mapfile -t SCRIPTS < <(rg --files -g '*.sh' "$SCRIPT_DIR" | sort)
 mapfile -t TARGET_SCRIPTS < <(printf "%s\n" \
+    "$SCRIPT_DIR/deploy.sh" \
+    "$SCRIPT_DIR/status.sh" \
+    "$SCRIPT_DIR/cleanup.sh" \
     "$SCRIPT_DIR/update.sh" \
     "$SCRIPT_DIR/test-update-smoke.sh" \
     "$SCRIPT_DIR/audit-openwebui-plugins.sh" \
+    "$SCRIPT_DIR/scripts/check-doc-consistency.sh" \
+    "$SCRIPT_DIR/scripts/sync-compatibility-copies.sh" \
     "$SCRIPT_DIR/verify-scripts.sh")
 
 is_target_script() {
@@ -82,6 +87,13 @@ print_info "Running update.sh smoke tests..."
 if ! "$SCRIPT_DIR/test-update-smoke.sh"; then
     print_error "update.sh smoke test failed"
     FAILED=1
+fi
+
+print_info "Running documentation consistency checks..."
+if ! "$SCRIPT_DIR/scripts/check-doc-consistency.sh"; then
+    print_error "documentation consistency check failed"
+    FAILED=1
+    FAILED_TARGET=1
 fi
 
 if ((STRICT_ALL == 1)); then

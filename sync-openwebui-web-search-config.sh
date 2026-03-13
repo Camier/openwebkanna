@@ -25,6 +25,7 @@ OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_DOCKER_SERVICE="${OPENWEBUI_DOCKER_SERVICE:-openwebui}"
+OPENWEBUI_DOCKER_CONTAINER="${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_DOCKER_SERVICE}"
 OPENWEBUI_TOKEN_INPUT="${OPENWEBUI_TOKEN:-${OPENWEBUI_API_KEY:-}}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-45}"
 
@@ -69,7 +70,10 @@ mint_local_admin_jwt() {
     fi
 
     local container_id=""
-    container_id="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_SERVICE}$" 2>/dev/null | head -n 1 || true)"
+    container_id="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_CONTAINER}$" 2>/dev/null | head -n 1 || true)"
+    if [ -z "$container_id" ]; then
+        container_id="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_SERVICE}$" 2>/dev/null | head -n 1 || true)"
+    fi
     if [ -z "$container_id" ]; then
         return 1
     fi

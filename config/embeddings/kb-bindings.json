@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "bindings": [
+    {
+      "kb_id": "346b4cc6-46b5-4b3e-8375-c3a6064ff121",
+      "kb_name": "Sceletium Research",
+      "kb_key": "sceletium",
+      "profile_id": "biomed_pubmed_msmarco",
+      "use_case": "ethnopharmacology",
+      "updated_at": "2026-03-05T17:19:39Z"
+    },
+    {
+      "kb_id": "90740d17-c98a-4dfc-b03e-8eb4afbad405",
+      "kb_name": "SMILES Corpus Datamol Curated 20260309-1254",
+      "kb_key": "smiles",
+      "profile_id": "chemberta_zinc_base_v1",
+      "use_case": "chemistry",
+      "updated_at": "2026-03-11T21:31:00Z"
+    }
+  ]
+}

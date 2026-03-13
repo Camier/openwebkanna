@@ -57,6 +57,10 @@ load_env_defaults() {
         # Trim whitespace from key
         key="$(printf "%s" "$key" | tr -d '[:space:]')"
 
+        # Trim only outer whitespace from value so common "KEY = value" edits work.
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+
         # Validate key format (must be valid shell variable name)
         [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
 

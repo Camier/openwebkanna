@@ -1,8 +1,8 @@
 #!/bin/bash
 
 ###############################################################################
-# OpenWebUI + vLLM RAG Update Script
-# This script updates OpenWebUI and restarts services
+# OpenWebUI + LiteLLM RAG Update Script
+# This script updates OpenWebUI and restarts services while leaving any optional legacy vLLM fallback untouched
 ###############################################################################
 
 set -e
@@ -12,8 +12,8 @@ source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
 
 # Configuration
-OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.8}"
-OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.7}"
+OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
+OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="backups"
 OPENWEBUI_VOLUME="${OPENWEBUI_VOLUME:-openwebui_data}"
@@ -23,6 +23,7 @@ CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
 CLIPROXYAPI_START_SCRIPT="./start-cliproxyapi.sh"
 CLIPROXYAPI_RESTART_SCRIPT="./restart-cliproxyapi.sh"
 CLIPROXYAPI_CHECK_SCRIPT="./check-cliproxyapi.sh"
+OPENWEBUI_RELEASES_URL="${OPENWEBUI_RELEASES_URL:-https://api.github.com/repos/open-webui/open-webui/releases/latest}"
 
 ###############################################################################
 # Helper Functions
@@ -245,6 +246,37 @@ check_current_version() {
     fi
 }
 
+resolve_latest_openwebui_image() {
+    print_step "Resolving latest official OpenWebUI release..."
+
+    local latest_tag=""
+    latest_tag=$(curl -fsSL "$OPENWEBUI_RELEASES_URL" | jq -r '.tag_name // empty')
+    if [ -z "$latest_tag" ] || [ "$latest_tag" = "null" ]; then
+        print_warning "Could not resolve latest release tag; keeping configured image"
+        print_info "Configured image: $OPENWEBUI_IMAGE"
+        return 0
+    fi
+
+    local current_ref current_suffix resolved_image
+    current_ref="${OPENWEBUI_IMAGE##*:}"
+    current_suffix=""
+
+    if [[ $current_ref =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(.+)$ ]]; then
+        current_suffix="-${BASH_REMATCH[1]}"
+    fi
+
+    resolved_image="ghcr.io/open-webui/open-webui:${latest_tag}${current_suffix}"
+
+    print_info "Latest release: $latest_tag"
+    if [ -n "$current_suffix" ]; then
+        print_info "Preserving image flavor suffix: $current_suffix"
+    fi
+    print_info "Resolved image: $resolved_image"
+
+    OPENWEBUI_ALT_IMAGE="$OPENWEBUI_IMAGE"
+    OPENWEBUI_IMAGE="$resolved_image"
+}
+
 pull_latest_image() {
     print_step "Pulling latest OpenWebUI image..."
     print_info "Image: $OPENWEBUI_IMAGE"
@@ -382,7 +414,7 @@ show_update_summary() {
 
     echo -e "${BOLD}Updated Services:${NC}"
     echo -e "  ${CYAN}OpenWebUI:${NC}    Updated image: ${OPENWEBUI_IMAGE}"
-    echo -e "  ${CYAN}vLLM:${NC}         Unchanged (still running)"
+    echo -e "  ${CYAN}Archived vLLM fallback:${NC} Not managed by update"
     if is_true "$CLIPROXYAPI_ENABLED"; then
         echo -e "  ${CYAN}CLIProxyAPI:${NC}  Checked/restarted as needed"
     else
@@ -512,8 +544,10 @@ main() {
     else
         echo "  • Skip CLIProxyAPI checks (CLIPROXYAPI_ENABLED=false)"
     fi
-    echo "  • vLLM will continue running (no interruption)"
+    echo "  • Archived vLLM fallback is outside the update flow"
     echo
+
+    resolve_latest_openwebui_image
 
     # Confirm before proceeding
     if ! confirm_action "Proceed with update?"; then

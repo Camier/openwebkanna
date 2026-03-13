@@ -39,9 +39,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^(data/|searxng/)
+        exclude: ^(data/|searxng/|config/searxng/)
       - id: end-of-file-fixer
-        exclude: ^(data/|searxng/)
+        exclude: ^(data/|searxng/|config/searxng/)
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json
@@ -60,6 +60,7 @@ repos:
       - id: bashate
         args: ["-i", "E003,E006,E043,E044"]
         files: \.sh$
+        exclude: ^(scripts/export-thesis-chats\.sh|scripts/curate-corpus-chunks\.sh)$
 
 # Global exclude patterns
 exclude: |

@@ -14,7 +14,7 @@ cd "$SCRIPT_DIR"
 
 # Configuration
 CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-true}"
-CLIPROXYAPI_CMD="${CLIPROXYAPI_CMD:-./bin/cliproxyapi}"
+CLIPROXYAPI_CMD="${CLIPROXYAPI_CMD:-./local/bin/cliproxyapi}"
 CLIPROXYAPI_CONFIG="${CLIPROXYAPI_CONFIG:-./cliproxyapi/config.yaml}"
 CLIPROXYAPI_CONFIG_FLAG="${CLIPROXYAPI_CONFIG_FLAG:---config}"
 CLIPROXYAPI_SETUP_SCRIPT="${CLIPROXYAPI_SETUP_SCRIPT:-./setup-cliproxyapi.sh}"
@@ -451,7 +451,7 @@ Usage: ./start-cliproxyapi.sh [--help]
 
 Environment variables:
   CLIPROXYAPI_ENABLED                Enable/disable lifecycle (must be true)
-  CLIPROXYAPI_CMD                    Binary path (default: ./bin/cliproxyapi)
+  CLIPROXYAPI_CMD                    Binary path (default: ./local/bin/cliproxyapi)
   CLIPROXYAPI_CONFIG                 Config path (default: ./cliproxyapi/config.yaml)
   CLIPROXYAPI_SETUP_SCRIPT           Installer script path (default: ./setup-cliproxyapi.sh)
   CLIPROXYAPI_INSTALL_ON_START       Install binary if missing (default: true)

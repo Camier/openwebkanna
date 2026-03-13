@@ -54,12 +54,12 @@ start_test() {
 
 pass_test() {
     echo -e "${GREEN}[PASS]${NC} $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 fail_test() {
     echo -e "${RED}[FAIL]${NC} $1"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 skip_test() {
@@ -139,10 +139,18 @@ test_openwebui_tool_servers_endpoint() {
 
 test_mcp_config_syntax() {
     start_test "MCP config files are valid JSON"
-    local config_files=(
-        "${SCRIPT_DIR}/mcp/config.json"
-        "${SCRIPT_DIR}/mcp/config.research.optional.json"
-    )
+    local config_files=()
+    if [[ -f "${SCRIPT_DIR}/config/mcp/config.json" ]]; then
+        config_files+=("${SCRIPT_DIR}/config/mcp/config.json")
+    else
+        config_files+=("${SCRIPT_DIR}/mcp/config.json")
+    fi
+
+    if [[ -f "${SCRIPT_DIR}/config/mcp/config.research.optional.json" ]]; then
+        config_files+=("${SCRIPT_DIR}/config/mcp/config.research.optional.json")
+    else
+        config_files+=("${SCRIPT_DIR}/mcp/config.research.optional.json")
+    fi
     local file
     local all_valid=true
 
@@ -211,7 +219,7 @@ main() {
     if [[ $FAILED -gt 0 ]]; then
         echo -e "Failed: ${RED}${FAILED}${NC}"
     else
-        echo -e "Failed: ${PASSED}${NC}"
+        echo -e "Failed: ${GREEN}${FAILED}${NC}"
     fi
 
     if [[ $FAILED -eq 0 ]]; then

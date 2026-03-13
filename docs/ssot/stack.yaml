@@ -1,0 +1,228 @@
+version: 2026-03-13
+run_modes:
+  - name: docker-primary
+    description: Default supported operator mode using root compatibility entrypoints backed by canonical config surfaces.
+    status: supported
+    evidence:
+      - deploy.sh
+      - status.sh
+      - docker-compose.yml
+      - config/README.md
+      - scripts/check-doc-consistency.sh
+  - name: docker-rg-build-variant
+    description: OpenWebUI-only build override that swaps the image build to Dockerfile.openwebui-rg.
+    status: supported
+    evidence:
+      - docker-compose.rg.yml
+      - Dockerfile.openwebui-rg
+  - name: host-assisted-upstreams
+    description: The Docker stack depends on host-provided resources such as LiteLLM and a host-mounted Zotero directory.
+    status: supported
+    evidence:
+      - .env.example
+      - docker-compose.yml
+      - README.md
+  - name: optional-profile-sidecars
+    description: Legacy or optional services that are started only when explicit feature flags or profiles are enabled.
+    status: supported
+    evidence:
+      - docker-compose.yml
+      - deploy.sh
+      - README.md
+  - name: archived-host-fallback
+    description: Archived host-side vLLM lifecycle scripts kept for fallback and reference only.
+    status: archived
+    evidence:
+      - archive/README.md
+      - archive/start-vllm.sh
+      - README.md
+  - name: kubernetes-or-system-services
+    description: No supported Kubernetes, Helm, Procfile, or systemd topology is currently evidenced in the tracked operator trees.
+    status: unsupported
+    evidence:
+      - "find config docs scripts archive -type f \\( -name 'Procfile' -o -name '*.service' -o -name 'Chart.yaml' -o -name 'values*.yaml' \\) -print"
+services:
+  - name: openwebui
+    critical: true
+    role: Primary UI and orchestration surface for RAG, tools, and user workflows.
+    critical_reason:
+      - user-entrypoint
+      - critical-path
+      - multi-dependent
+    run_mode: docker-primary
+    evidence:
+      - docker-compose.yml
+      - README.md
+  - name: litellm
+    critical: true
+    role: Primary OpenAI-compatible upstream for model discovery and generation.
+    critical_reason:
+      - critical-path
+      - external-adapter
+    run_mode: host-assisted-upstreams
+    evidence:
+      - .env.example
+      - README.md
+      - status.sh
+  - name: postgres
+    critical: true
+    role: Stateful Postgres and pgvector service for application data and the default OpenWebUI vector backend in this repo.
+    critical_reason:
+      - persistence
+      - critical-path
+      - multi-dependent
+    run_mode: docker-primary
+    notes:
+      - OpenWebUI now defaults to VECTOR_DB=pgvector in .env.example, so postgres backs the baseline retrieval path in this repo.
+    evidence:
+      - docker-compose.yml
+      - .env.example
+  - name: jupyter
+    critical: true
+    role: Code execution backend used by OpenWebUI.
+    critical_reason:
+      - critical-path
+      - multi-dependent
+    run_mode: docker-primary
+    evidence:
+      - docker-compose.yml
+      - .env.example
+      - jupyter/jupyter_server_config.py
+  - name: mcpo
+    critical: true
+    role: MCP-to-OpenAPI bridge for tool exposure into OpenWebUI.
+    critical_reason:
+      - critical-path
+      - external-adapter
+    run_mode: docker-primary
+    evidence:
+      - docker-compose.yml
+      - mcp/config.json
+  - name: docling
+    critical: true
+    role: Multimodal extraction backend used during document ingest.
+    critical_reason:
+      - critical-path
+      - multi-dependent
+    run_mode: docker-primary
+    evidence:
+      - docker-compose.yml
+      - README.md
+  - name: searxng
+    critical: false
+    role: Local web-search backend for OpenWebUI web search when enabled.
+    run_mode: optional-profile-sidecars
+    notes:
+      - Service is only needed when OpenWebUI web search is enabled, and ENABLE_WEB_SEARCH=false in .env.example keeps it off by default.
+    evidence:
+      - docker-compose.yml
+      - .env.example
+      - config/searxng/settings.yml
+  - name: cliproxyapi
+    critical: false
+    role: Optional legacy OAuth alias sidecar.
+    run_mode: optional-profile-sidecars
+    evidence:
+      - docker-compose.yml
+      - .env.example
+      - cliproxyapi/config.yaml
+  - name: open-terminal
+    critical: false
+    role: Optional terminal and file-server sidecar.
+    run_mode: optional-profile-sidecars
+    evidence:
+      - docker-compose.yml
+      - .env.example
+      - README.md
+  - name: indigo-service
+    critical: false
+    role: Optional Indigo-based chemistry REST sidecar.
+    run_mode: optional-profile-sidecars
+    evidence:
+      - docker-compose.yml
+      - .env.example
+      - README.md
+critical_paths:
+  - name: deploy-run-baseline
+    description: Baseline operator path from environment configuration into the compose-managed runtime.
+    path:
+      - operator
+      - .env
+      - deploy.sh
+      - docker-compose.yml
+      - postgres
+      - jupyter
+      - mcpo
+      - docling
+      - openwebui
+      - status.sh
+      - test scripts
+    evidence:
+      - README.md
+      - deploy.sh
+      - docker-compose.yml
+      - status.sh
+  - name: query-generation-default
+    description: Default committed OpenWebUI query path with pgvector as the vector backend.
+    path:
+      - browser
+      - openwebui
+      - postgres-pgvector
+      - litellm-host
+      - upstream-provider
+    evidence:
+      - .env.example
+      - docker-compose.yml
+      - README.md
+  - name: query-generation-chroma-fallback
+    description: Optional OpenWebUI query path when VECTOR_DB=chroma is explicitly enabled.
+    path:
+      - browser
+      - openwebui
+      - chroma-in-openwebui-data
+      - litellm-host
+      - upstream-provider
+    evidence:
+      - .env.example
+      - docker-compose.yml
+  - name: ingest
+    description: Import scripts feed the OpenWebUI knowledge APIs.
+    path:
+      - import-pdfs-to-kb.sh
+      - openwebui-apis
+      - openwebui-data
+    evidence:
+      - import-pdfs-to-kb.sh
+      - README.md
+  - name: eval-regression
+    description: Local scripts validate runtime and retrieval behavior.
+    path:
+      - local-scripts
+      - compose-services
+      - artifacts
+    evidence:
+      - test-rag.sh
+      - test-api.sh
+      - .mise.toml
+drift_checks:
+  - config/* is the canonical edit surface, but live scripts execute the root compatibility copies and both surfaces must stay byte-aligned.
+  - Compose environment fallbacks should match config/env/.env.example, especially for baseline retrieval flags such as VECTOR_DB and ENABLE_RAG_HYBRID_SEARCH.
+  - Postgres is always deployed and the committed OpenWebUI default now uses VECTOR_DB=pgvector; if a local runtime switches back to chroma, document that as an intentional override.
+  - Optional sidecars should stay disabled in the normal baseline unless a concrete workflow requires them.
+  - Legacy project containers outside the current compose config should be removed instead of being carried forward as supported topology.
+observed_runtime:
+  observed_at: 2026-03-13
+  evidence:
+    - .env
+    - status.sh
+    - docker compose config --services
+    - docker compose ps --format json
+  live_ui_url: http://localhost:3000
+  openwebui_image: ghcr.io/open-webui/open-webui:v0.8.10
+  vector_db: pgvector
+  embedding_model: pritamdeka/S-PubMedBert-MS-MARCO
+  web_search_enabled: false
+  searxng_host_port: 8888
+  optional_sidecars: []
+  optional_tools: []
+  legacy_project_containers: []

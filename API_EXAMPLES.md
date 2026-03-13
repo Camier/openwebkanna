@@ -1,11 +1,15 @@
 # OpenWebUI + LiteLLM API Examples
 
-Last updated: 2026-03-03 (UTC)
+Last updated: 2026-03-12 (UTC)
 
 This document provides reproducible HTTP examples for the current stack:
 - OpenWebUI in Docker
 - LiteLLM as the primary OpenAI-compatible upstream (`http://127.0.0.1:4000/v1`)
 - CLIProxyAPI as an optional legacy sidecar only
+
+Scope note:
+- This file is a repo-specific examples guide, not the runtime source of truth.
+- Validate ports, image tags, and default env values against `README.md`, `docs/ssot/stack.md`, `config/env/.env.example`, and `config/compose/docker-compose.yml`.
 
 ## Runtime environment
 

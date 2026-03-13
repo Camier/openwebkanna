@@ -61,6 +61,7 @@ OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 OPENWEBUI_TEST_MODEL="${OPENWEBUI_TEST_MODEL:-}"
+OPENWEBUI_SMOKE_MODEL_CANDIDATES="${OPENWEBUI_SMOKE_MODEL_CANDIDATES:-$(default_openwebui_smoke_model_candidates)}"
 VERBOSE="${VERBOSE:-false}"
 OUTPUT_DIR="/tmp/openwebui_api_tests_$(date +%Y%m%d_%H%M%S)"
 TEST_MODE="full"
@@ -368,14 +369,21 @@ test_models_list() {
 
     if has_non_empty_models_array "$response"; then
         local model_count
+        local preferred_model
         model_count=$(echo "$response" | jq '.data | length' 2>/dev/null || echo "0")
-        SELECTED_MODEL=$(echo "$response" | jq -r '.data[0].id // empty' 2>/dev/null || true)
+        SELECTED_MODEL="$(first_model_id_from_response "$response")"
         if [ -n "$OPENWEBUI_TEST_MODEL" ]; then
-            if echo "$response" | jq -e --arg model "$OPENWEBUI_TEST_MODEL" '.data[]?.id == $model' >/dev/null 2>&1; then
+            if models_response_has_id "$response" "$OPENWEBUI_TEST_MODEL"; then
                 SELECTED_MODEL="$OPENWEBUI_TEST_MODEL"
                 print_info "Using OPENWEBUI_TEST_MODEL=$OPENWEBUI_TEST_MODEL"
             else
                 print_warning "OPENWEBUI_TEST_MODEL not present in /api/models: $OPENWEBUI_TEST_MODEL"
+            fi
+        elif [ "$TEST_MODE" = "baseline" ]; then
+            preferred_model="$(choose_preferred_model_from_response "$response")"
+            if [ -n "$preferred_model" ]; then
+                SELECTED_MODEL="$preferred_model"
+                print_info "Using baseline smoke model: $preferred_model"
             fi
         fi
         print_success "Found $model_count models"
@@ -420,9 +428,9 @@ test_file_upload_text() {
 
     rm -f "$temp_file"
 
-    if echo "$response" | grep -q "id"; then
+    if json_response_has_any_id "$response"; then
         local file_id
-        file_id=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
+        file_id="$(extract_json_primary_id "$response")"
         CREATED_FILES+=("$file_id")
         print_success "File uploaded with ID: $file_id"
         test_pass
@@ -485,9 +493,9 @@ startxref
 
     rm -f "$temp_file"
 
-    if echo "$response" | grep -q "id"; then
+    if json_response_has_any_id "$response"; then
         local file_id
-        file_id=$(echo "$response" | jq -r '.id // .file_id // empty' 2>/dev/null)
+        file_id="$(extract_json_primary_id "$response")"
         CREATED_FILES+=("$file_id")
         print_success "PDF uploaded with ID: $file_id"
         test_pass
@@ -530,9 +538,9 @@ test_knowledge_create() {
     response=$(make_request "POST" "/api/v1/knowledge/create" "$data" "" 2>&1)
     save_response "knowledge_create" "$response"
 
-    if echo "$response" | grep -q "id"; then
+    if json_response_has_any_id "$response"; then
         local kb_id
-        kb_id=$(echo "$response" | jq -r '.id // .knowledge_id // empty' 2>/dev/null)
+        kb_id="$(extract_json_primary_id "$response")"
         CREATED_KNOWLEDGE_BASES+=("$kb_id")
         print_success "Knowledge base created with ID: $kb_id"
         test_pass
@@ -579,7 +587,7 @@ test_knowledge_add_file() {
     response=$(make_request "POST" "/api/v1/knowledge/$kb_id/file/add" "$data" "" 2>&1)
     save_response "knowledge_add_file" "$response"
 
-    if echo "$response" | grep -q "files"; then
+    if json_response_has_files_field "$response"; then
         print_success "File $file_id added to knowledge base $kb_id"
         test_pass
         return 0
@@ -595,13 +603,7 @@ test_chat_completion_simple() {
 
     choose_chat_fallback_model() {
         local current_model="$1"
-        echo "$MODELS_RESPONSE" | jq -r --arg current "$current_model" '
-            .data[]?.id
-            | select(type == "string" and length > 0)
-            | select(. != $current)
-            | select((contains("*") | not))
-            | select((startswith("ollama-cloud/") | not))
-        ' 2>/dev/null | head -n 1
+        choose_preferred_model_from_response "$MODELS_RESPONSE" "$current_model"
     }
 
     run_chat_completion_once() {
@@ -626,12 +628,12 @@ test_chat_completion_simple() {
     local response fallback_model
     response="$(run_chat_completion_once "$chat_model")"
 
-    if ! echo "$response" | grep -q "choices"; then
+    if ! json_response_has_chat_choices "$response"; then
         fallback_model="$(choose_chat_fallback_model "$chat_model")"
         if [ -n "$fallback_model" ]; then
             print_warning "Primary model failed ($chat_model). Retrying with fallback: $fallback_model"
             response="$(run_chat_completion_once "$fallback_model")"
-            if echo "$response" | grep -q "choices"; then
+            if json_response_has_chat_choices "$response"; then
                 chat_model="$fallback_model"
                 SELECTED_MODEL="$fallback_model"
             fi
@@ -640,9 +642,9 @@ test_chat_completion_simple() {
 
     save_response "chat_completion_simple" "$response"
 
-    if echo "$response" | grep -q "choices"; then
+    if json_response_has_chat_choices "$response"; then
         local reply
-        reply=$(echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+        reply="$(extract_chat_response_text "$response")"
         print_success "Got response from model $chat_model: $(echo "$reply" | head -c 50)..."
         test_pass
         return 0
@@ -668,7 +670,7 @@ test_chat_completion_streaming() {
     }'
 
     local response
-    response=$(curl -s -X POST \
+    response=$(curl -s -m 45 -X POST \
         "$OPENWEBUI_URL/api/chat/completions" \
         -H "Content-Type: application/json" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
@@ -766,7 +768,7 @@ test_vector_search() {
     response=$(make_request "POST" "/api/v1/retrieval/query/doc" "$data" "" 2>&1)
     save_response "vector_search" "$response"
 
-    if echo "$response" | grep -q "results\|documents"; then
+    if json_response_has_retrieval_hits "$response"; then
         test_pass
         return 0
     else

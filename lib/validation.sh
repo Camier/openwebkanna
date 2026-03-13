@@ -61,6 +61,27 @@ command_exists() {
 }
 
 ###############################################################################
+# _validation_print_error / _validation_print_info
+# Small fallbacks so validation helpers can emit consistent messages whether
+# print-utils has already been sourced or not.
+###############################################################################
+_validation_print_error() {
+    if command -v print_error >/dev/null 2>&1; then
+        print_error "$1"
+    else
+        printf 'ERROR: %s\n' "$1" >&2
+    fi
+}
+
+_validation_print_info() {
+    if command -v print_info >/dev/null 2>&1; then
+        print_info "$1"
+    else
+        printf '%s\n' "$1" >&2
+    fi
+}
+
+###############################################################################
 # normalize_base_url
 # Remove trailing slash from a base URL.
 #
