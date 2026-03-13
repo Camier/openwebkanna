@@ -219,6 +219,35 @@ fetch_ghcr_latest() {
     fi
 }
 
+# Fetch latest tag from Quay
+fetch_quay_latest() {
+    local repo="$1"
+    local current_tag="$2"
+    local api_url="https://quay.io/api/v1/repository/${repo}/tag/?limit=100&page=1&onlyActiveTags=true"
+    local response
+
+    response=$(curl -sf "$api_url" 2>/dev/null) || return 1
+
+    local latest_tag
+    if [[ $current_tag =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        latest_tag=$(echo "$response" | jq -r '
+            .tags[]
+            | .name
+            | select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+        ' 2>/dev/null | sort -V | tail -1)
+    else
+        latest_tag=$(echo "$response" | jq -r '
+            .tags
+            | sort_by(.start_ts)
+            | reverse
+            | .[0]
+            | .name
+        ' 2>/dev/null)
+    fi
+
+    echo "${latest_tag:-unknown}"
+}
+
 # Get image last updated date from Docker Hub
 fetch_docker_hub_image_date() {
     local repo="$1"
@@ -257,6 +286,18 @@ fetch_ghcr_image_date() {
 
     # Get published_at from release
     echo "$response" | jq -r '.published_at' 2>/dev/null
+}
+
+# Get image last updated date from Quay
+fetch_quay_image_date() {
+    local repo="$1"
+    local tag="$2"
+    local api_url="https://quay.io/api/v1/repository/${repo}/tag/?specificTag=${tag}&onlyActiveTags=true"
+    local response
+
+    response=$(curl -sf "$api_url" 2>/dev/null) || return 1
+
+    echo "$response" | jq -r '.tags[0].start_ts' 2>/dev/null
 }
 
 # Calculate age in days from ISO date string
@@ -346,20 +387,28 @@ check_image() {
         current_version="${digest:0:19}..."
     fi
 
-    # Fetch latest version based on registry
-    if [[ $registry == "ghcr.io" ]]; then
+    if [[ $is_pinned == "true" ]]; then
+        latest_version="pinned"
+    elif [[ $registry == "ghcr.io" ]]; then
         latest_version=$(fetch_ghcr_latest "$repo" "$tag") || latest_version="error"
 
-        if [[ $is_pinned == "false" && $latest_version != "error" && $latest_version != "unknown" ]]; then
+        if [[ $latest_version != "error" && $latest_version != "unknown" ]]; then
             local image_date
             image_date=$(fetch_ghcr_image_date "$repo" "$tag") || image_date=""
             age_days=$(calculate_age_days "$image_date")
         fi
+    elif [[ $registry == "quay.io" ]]; then
+        latest_version=$(fetch_quay_latest "$repo" "$tag") || latest_version="error"
+
+        if [[ $latest_version != "error" && $latest_version != "unknown" ]]; then
+            local image_date
+            image_date=$(fetch_quay_image_date "$repo" "$tag") || image_date=""
+            age_days=$(calculate_age_days "$image_date")
+        fi
     else
-        # Docker Hub or other
         latest_version=$(fetch_docker_hub_latest "$repo" "$tag") || latest_version="error"
 
-        if [[ $is_pinned == "false" && $latest_version != "error" && $latest_version != "unknown" ]]; then
+        if [[ $latest_version != "error" && $latest_version != "unknown" ]]; then
             local image_date
             image_date=$(fetch_docker_hub_image_date "$repo" "$tag") || image_date=""
             age_days=$(calculate_age_days "$image_date")
@@ -451,13 +500,15 @@ main() {
         CLIPROXYAPI_IMAGE=$(grep -E "^CLIPROXYAPI_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         JUPYTER_IMAGE=$(grep -E "^JUPYTER_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         INDIGO_SERVICE_IMAGE=$(grep -E "^INDIGO_SERVICE_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
+        MCPO_IMAGE=$(grep -E "^MCPO_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
     fi
 
     RESOLVED_IMAGES["openwebui"]="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
     RESOLVED_IMAGES["cliproxyapi"]="${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}"
     RESOLVED_IMAGES["postgres"]="pgvector/pgvector:pg16"
-    RESOLVED_IMAGES["jupyter"]="${JUPYTER_IMAGE:-jupyter/scipy-notebook:latest}"
-    RESOLVED_IMAGES["indigo-service"]="${INDIGO_SERVICE_IMAGE:-epmlsop/indigo-service:latest}"
+    RESOLVED_IMAGES["jupyter"]="${JUPYTER_IMAGE:-quay.io/jupyter/scipy-notebook:2026-02-19}"
+    RESOLVED_IMAGES["indigo-service"]="${INDIGO_SERVICE_IMAGE:-epmlsop/indigo-service@sha256:1dd5b19d9eaeb13c5d37c71611e28c403c4a7ccac392d0390043fe460b060c77}"
+    RESOLVED_IMAGES["mcpo"]="${MCPO_IMAGE:-ghcr.io/open-webui/mcpo@sha256:1e82c9555c19e50b80745705f32b47a2647589f35279527b5118ecd3a71bd467}"
 
     if [[ $OUTPUT_JSON == "true" ]]; then
         echo "["
@@ -482,7 +533,7 @@ main() {
                 "-------" "-----" "-------" "------" "---" "------"
         fi
 
-        for service in openwebui cliproxyapi postgres jupyter indigo-service; do
+        for service in openwebui cliproxyapi postgres jupyter indigo-service mcpo; do
             check_image "$service" "${RESOLVED_IMAGES[$service]}" || true
         done
 

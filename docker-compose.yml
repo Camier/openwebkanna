@@ -37,7 +37,7 @@ services:
 
   # Jupyter Notebook for code execution
   jupyter:
-    image: ${JUPYTER_IMAGE:-jupyter/scipy-notebook:latest}
+    image: ${JUPYTER_IMAGE:-quay.io/jupyter/scipy-notebook:2026-02-19}
     container_name: openwebui_jupyter
     restart: unless-stopped
     environment:
@@ -187,7 +187,7 @@ services:
   # Optional Indigo Service sidecar (EPAM cheminformatics REST API).
   indigo-service:
     profiles: ["indigo-service"]
-    image: ${INDIGO_SERVICE_IMAGE:-epmlsop/indigo-service:latest}
+    image: ${INDIGO_SERVICE_IMAGE:-epmlsop/indigo-service@sha256:1dd5b19d9eaeb13c5d37c71611e28c403c4a7ccac392d0390043fe460b060c77}
     container_name: indigo_service
     restart: unless-stopped
     ports:
@@ -201,7 +201,7 @@ services:
       - backend_network
 
   mcpo:
-    image: ${MCPO_IMAGE:-ghcr.io/open-webui/mcpo:main}
+    image: ${MCPO_IMAGE:-ghcr.io/open-webui/mcpo@sha256:1e82c9555c19e50b80745705f32b47a2647589f35279527b5118ecd3a71bd467}
     container_name: mcpo
     restart: unless-stopped
     ports:

@@ -133,7 +133,7 @@ make_request() {
         curl_args+=("-d" "$data")
     fi
 
-    curl "${curl_args[@]}"
+    curl "${curl_args[@]}" 2>/dev/null
 }
 
 test_repo_real_integration_guard() {
@@ -219,15 +219,15 @@ test_health_check() {
 test_root_endpoint() {
     test_start "Root Endpoint"
 
-    local response
-    response=$(curl -s -I "$OPENWEBUI_URL/" 2>&1 | head -n 1)
-    save_response "root_endpoint" "$response"
+    local http_code
+    http_code="$(curl -s -I -o /dev/null -w "%{http_code}" "$OPENWEBUI_URL/" 2>/dev/null || true)"
+    save_response "root_endpoint" "$http_code"
 
-    if echo "$response" | grep -q "200"; then
+    if [ "$http_code" = "200" ]; then
         test_pass
         return 0
     else
-        test_fail "Root endpoint returned unexpected response"
+        test_fail "Root endpoint returned HTTP ${http_code:-000}"
         return 1
     fi
 }

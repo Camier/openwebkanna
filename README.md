@@ -48,6 +48,7 @@ When you need to change behavior, use these paths first:
 
 - Default supported mode is Docker Compose with OpenWebUI in containers and LiteLLM as the primary host-assisted upstream at `http://host.docker.internal:4000/v1`.
 - `searxng`, `cliproxyapi`, `open-terminal`, and `indigo-service` remain optional sidecars gated by profiles or env flags.
+- The committed `.env.example` now pins the shipped `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` by digest so fresh deploys do not drift when upstream tags move.
 - For the full runtime model, service registry, and drift notes, use `docs/ssot/stack.md`.
 
 ```text

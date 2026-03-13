@@ -109,6 +109,7 @@ Evidence:
 5. `mcpo`
 - Role: MCP-to-OpenAPI bridge used for OpenWebUI tool exposure.
 - Critical because tool integrations depend on it and `openwebui` waits for it during startup.
+- Important nuance: the committed env template now pins `MCPO_IMAGE` by digest instead of tracking the floating `main` tag, so fresh deploys stay reproducible across time.
 - Run mode: `docker-primary`
 - Evidence: `docker-compose.yml`, `mcp/config.json`
 
@@ -141,6 +142,7 @@ Evidence:
 10. `indigo-service`
 - Role: optional chemistry REST sidecar for Indigo-based tooling.
 - Non-critical because it is profile-gated and disabled by default.
+- Important nuance: the committed env template now pins `INDIGO_SERVICE_IMAGE` by digest even though the upstream workflow still advertises `latest`.
 - Run mode: `optional-profile-sidecars`
 - Evidence: `docker-compose.yml`, `.env.example`, `README.md`
 
@@ -215,6 +217,7 @@ Evidence:
 
 - `config/*` is the canonical edit surface, but live scripts execute the root compatibility copies; both surfaces must remain byte-aligned.
 - Compose environment fallbacks must match the committed env template, especially for baseline retrieval flags such as `VECTOR_DB` and `ENABLE_RAG_HYBRID_SEARCH`.
+- Critical and shipped sidecar images should be pinned to immutable digests in `.env.example` when upstream defaults are floating tags such as `main` or `latest`.
 - postgres is always deployed and the committed default now uses `VECTOR_DB=pgvector`; if you switch a local runtime to `chroma`, document that as an intentional override because it changes where vectors persist.
 - Optional sidecars remain supported, but the normal baseline should keep them disabled unless a concrete workflow needs them.
 - Legacy project containers outside the current compose config should be removed instead of being treated as part of the supported topology.
@@ -254,6 +257,7 @@ Minimum refresh checklist:
 ## Changelog
 
 - `2026-03-13`: aligned `docker-compose.yml` environment fallbacks with the committed Docker baseline by restoring `pgvector` and hybrid retrieval as the default fallback values, refreshed the observed-runtime date, and tightened drift guidance so compose defaults, `.env.example`, and the SSOT stay synchronized.
+- `2026-03-13`: pinned `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` to verified digests in the committed env template so fresh deploys do not drift with upstream `main` or `latest` tags.
 - `2026-03-11`: normalized the repo and local baseline around a regular OpenWebUI RAG topology by making `pgvector` the committed default backend, aligning the committed embedding baseline with the currently indexed OpenWebUI corpus, removing repo-level SMILES retrieval env defaults, returning local runtime ports/image/sidecars to the standard baseline, and treating legacy compose orphans as cleanup targets instead of supported topology.
 - `2026-03-10`: refreshed the SSOT against current runtime entrypoints, added LiteLLM and Docling as explicit critical services, separated default `chroma` mode from optional OpenWebUI `pgvector` mode, restored the root `searxng/` compatibility copy, corrected the live MCPO default back to `ghcr.io/open-webui/mcpo:main`, and removed stale vLLM-primary wording from operator scripts.
 - `2026-03-09`: created explicit stack SSOT and aligned repo-navigation docs around canonical config/docs/ops surfaces.
