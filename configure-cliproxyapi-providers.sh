@@ -108,39 +108,6 @@ yaml_quote() {
     printf '"%s"' "$value"
 }
 
-read_dot007_key() {
-    local wanted="$1"
-    local dotfile="$HOME/.007"
-
-    [ -f "$dotfile" ] || return 1
-
-    # Supports lines like:
-    #   KEY=value
-    #   export KEY=value
-    #   KEY: value
-    awk -v k="$wanted" '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        {
-            line=$0
-            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
-            sep = index(line, "=") ? "=" : (index(line, ":") ? ":" : "")
-            if (sep == "") next
-            split(line, parts, sep)
-            key=parts[1]
-            sub(/^[[:space:]]+/, "", key); sub(/[[:space:]]+$/, "", key)
-            if (key != k) next
-            val = substr(line, length(parts[1]) + 2)
-            sub(/^[[:space:]]+/, "", val); sub(/[[:space:]]+$/, "", val)
-            if ((val ~ /^".*"$/) || (val ~ /^\x27.*\x27$/)) {
-                val = substr(val, 2, length(val)-2)
-            }
-            print val
-            exit 0
-        }
-    ' "$dotfile"
-}
-
 show_usage() {
     cat <<'EOF_USAGE'
 Usage: ./configure-cliproxyapi-providers.sh [--help]

@@ -82,3 +82,45 @@ load_env_defaults() {
         export "${key?}"
     done <"$env_file"
 }
+
+###############################################################################
+# read_dot007_key
+# Read a key from ~/.007, supporting KEY=value, export KEY=value, and KEY: value.
+#
+# Arguments:
+#   $1 - Key name to read
+#
+# Output:
+#   Value to stdout
+#
+# Returns:
+#   0 if the key was found, 1 otherwise
+###############################################################################
+read_dot007_key() {
+    local wanted="$1"
+    local dotfile="$HOME/.007"
+
+    [ -f "$dotfile" ] || return 1
+
+    awk -v k="$wanted" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            line=$0
+            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+            sep = index(line, "=") ? "=" : (index(line, ":") ? ":" : "")
+            if (sep == "") next
+            split(line, parts, sep)
+            key=parts[1]
+            sub(/^[[:space:]]+/, "", key); sub(/[[:space:]]+$/, "", key)
+            if (key != k) next
+            val = substr(line, length(parts[1]) + 2)
+            sub(/^[[:space:]]+/, "", val); sub(/[[:space:]]+$/, "", val)
+            if ((val ~ /^".*"$/) || (val ~ /^\x27.*\x27$/)) {
+                val = substr(val, 2, length(val)-2)
+            }
+            print val
+            exit 0
+        }
+    ' "$dotfile"
+}

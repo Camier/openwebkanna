@@ -31,11 +31,6 @@ require_cmds() {
     fi
 }
 
-uri_encode() {
-    local value="$1"
-    jq -nr --arg v "$value" '$v|@uri'
-}
-
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
@@ -124,7 +119,7 @@ patch_tool_by_id() {
     local content_file="$2"
 
     local tool_id_encoded
-    tool_id_encoded="$(uri_encode "$tool_id")"
+    tool_id_encoded="$(jq -nr --arg v "$tool_id" '$v|@uri')"
 
     print_step "Patching tool: $tool_id"
 

@@ -81,40 +81,6 @@ skip_test() {
     print_info "Skipped: $CURRENT_TEST :: $reason"
 }
 
-uri_encode() {
-    local value="$1"
-    jq -nr --arg v "$value" '$v|@uri'
-}
-
-read_dot007_key() {
-    local wanted="$1"
-    local dotfile="$HOME/.007"
-
-    [ -f "$dotfile" ] || return 1
-
-    awk -v k="$wanted" '
-        /^[[:space:]]*#/ { next }
-        /^[[:space:]]*$/ { next }
-        {
-            line=$0
-            sub(/^[[:space:]]*export[[:space:]]+/, "", line)
-            sep = index(line, "=") ? "=" : (index(line, ":") ? ":" : "")
-            if (sep == "") next
-            split(line, parts, sep)
-            key=parts[1]
-            sub(/^[[:space:]]+/, "", key); sub(/[[:space:]]+$/, "", key)
-            if (key != k) next
-            val = substr(line, length(parts[1]) + 2)
-            sub(/^[[:space:]]+/, "", val); sub(/[[:space:]]+$/, "", val)
-            if ((val ~ /^".*"$/) || (val ~ /^\x27.*\x27$/)) {
-                val = substr(val, 2, length(val)-2)
-            }
-            print val
-            exit 0
-        }
-    ' "$dotfile"
-}
-
 try_mint_openwebui_admin_jwt() {
     local cid=""
     local admin_id=""
@@ -380,7 +346,7 @@ cleanup_bootstrap_function_if_needed() {
         return 0
     fi
 
-    function_id_encoded="$(uri_encode "$AUDIT_BOOTSTRAP_FUNCTION_ID")"
+    function_id_encoded="$(jq -nr --arg v "$AUDIT_BOOTSTRAP_FUNCTION_ID" '$v|@uri')"
 
     start_test "DELETE /api/v1/functions/id/{id}/delete cleans bootstrap function"
     request_api "DELETE" "/api/v1/functions/id/${function_id_encoded}/delete" "" "functions_bootstrap_delete"
@@ -429,7 +395,7 @@ test_tools_endpoints() {
 
     first_tool_id="$(jq -r '.[0].id // empty' "$OUTPUT_DIR/tools_list.json")"
     if [ -n "$first_tool_id" ]; then
-        first_tool_id_encoded="$(uri_encode "$first_tool_id")"
+        first_tool_id_encoded="$(jq -nr --arg v "$first_tool_id" '$v|@uri')"
         start_test "GET /api/v1/tools/id/{id} returns tool details"
         request_api "GET" "/api/v1/tools/id/${first_tool_id_encoded}" "" "tools_first_id"
         if [ "$RESPONSE_CODE" = "200" ] && jq -e 'type == "object"' "$RESPONSE_FILE" >/dev/null 2>&1; then
@@ -447,7 +413,7 @@ test_tools_endpoints() {
     while IFS= read -r tool_id; do
         [ -z "$tool_id" ] && continue
 
-        tool_id_encoded="$(uri_encode "$tool_id")"
+        tool_id_encoded="$(jq -nr --arg v "$tool_id" '$v|@uri')"
         details_label="tool_${idx}_details"
         details_file="$OUTPUT_DIR/${details_label}.json"
 
@@ -586,7 +552,7 @@ test_functions_endpoints() {
 
     first_function_id="$(jq -r '.[0].id // empty' "$OUTPUT_DIR/functions_list.json")"
     if [ -n "$first_function_id" ]; then
-        first_function_id_encoded="$(uri_encode "$first_function_id")"
+        first_function_id_encoded="$(jq -nr --arg v "$first_function_id" '$v|@uri')"
         start_test "GET /api/v1/functions/id/{id} returns function details"
         request_api "GET" "/api/v1/functions/id/${first_function_id_encoded}" "" "functions_first_id"
         if [ "$RESPONSE_CODE" = "200" ] && jq -e 'type == "object"' "$RESPONSE_FILE" >/dev/null 2>&1; then
