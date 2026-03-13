@@ -26,6 +26,8 @@ cd "$SCRIPT_DIR"
 
 COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/docker-compose.yml}"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-openwebui}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-$OPENWEBUI_SERVICE}"
 
 main() {
     print_header "Rotate CLIProxyAPI Local Key"
@@ -108,9 +110,18 @@ PY
     # OpenWebUI also stores some OpenAI connection values in its persistent config DB.
     # If we rotate the local key, keep that DB config in sync too so /api/models and
     # /api/chat/completions continue to work without manual intervention.
-    if command_exists docker && docker ps --format '{{.Names}}' | grep -Fxq "openwebui"; then
+    local openwebui_container_id=""
+    local openwebui_python=""
+
+    init_compose_cmd >/dev/null
+    if command_exists docker && compose_service_running "$OPENWEBUI_SERVICE"; then
+        openwebui_container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
+        openwebui_python="$(docker exec "$openwebui_container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true)"
+    fi
+
+    if [ -n "$openwebui_container_id" ] && [ -n "$openwebui_python" ]; then
         print_step "Syncing OpenWebUI persistent OpenAI config (key not displayed)"
-        docker exec -i -e "OPENAI_KEY=$new_key" openwebui python3 - <<'PY'
+        docker exec -i -e "OPENAI_KEY=$new_key" "$openwebui_container_id" "$openwebui_python" - <<'PY'
 from __future__ import annotations
 
 import json
@@ -151,7 +162,7 @@ PY
     print_step "Restarting containers"
     # Restart cliproxyapi first so OpenWebUI reconnects with the new key.
     docker_compose up -d --force-recreate cliproxyapi >/dev/null
-    docker_compose up -d --force-recreate openwebui >/dev/null
+    docker_compose up -d --force-recreate "$OPENWEBUI_SERVICE" >/dev/null
     print_success "Containers restarted"
 
     if [ -x "${SCRIPT_DIR}/check-cliproxyapi.sh" ]; then

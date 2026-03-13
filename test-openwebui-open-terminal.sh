@@ -25,6 +25,8 @@ OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-}"
 OPENWEBUI_TOKEN="${OPENWEBUI_TOKEN:-}"
 OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
 OPENWEBUI_JWT="${OPENWEBUI_JWT:-}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}"
 
 OPEN_TERMINAL_ENABLED="${OPEN_TERMINAL_ENABLED:-false}"
 OPEN_TERMINAL_SERVER_ID="${OPEN_TERMINAL_SERVER_ID:-open-terminal}"
@@ -234,8 +236,16 @@ main() {
     authenticate
 
     if is_true "$OPEN_TERMINAL_ENABLED"; then
+        local openwebui_container_id=""
+
+        openwebui_container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
+        if [ -z "$openwebui_container_id" ]; then
+            print_error "Could not resolve a running OpenWebUI container for service '${OPENWEBUI_SERVICE}'"
+            exit 1
+        fi
+
         print_step "Checking Open Terminal reachability from OpenWebUI container"
-        if ! docker exec openwebui sh -lc "curl -sS -m 8 ${OPEN_TERMINAL_BACKEND_URL%/}/health >/dev/null"; then
+        if ! docker exec "$openwebui_container_id" sh -lc "curl -sS -m 8 ${OPEN_TERMINAL_BACKEND_URL%/}/health >/dev/null"; then
             print_error "OpenWebUI container cannot reach ${OPEN_TERMINAL_BACKEND_URL%/}/health"
             exit 1
         fi
@@ -300,6 +310,12 @@ main() {
     request_api "GET" "/api/v1/terminals/" "" "terminals_list"
     assert_code "200" "GET /api/v1/terminals/"
     if ! jq -e --arg id "$OPEN_TERMINAL_SERVER_ID" '[.. | objects | select(.id? == $id)] | length > 0' "$RESPONSE_FILE" >/dev/null 2>&1; then
+        if ! is_true "$OPEN_TERMINAL_SMOKE_APPLY_CONFIG" && ! is_true "$OPEN_TERMINAL_ENABLED"; then
+            print_warning "Terminal server id not registered while Open Terminal is disabled; skipping proxied checks"
+            print_info "response: $(head -c 400 "$RESPONSE_FILE" 2>/dev/null)"
+            print_success "Open Terminal smoke test passed (disabled/no registered terminal server)"
+            exit 0
+        fi
         print_error "Terminal server id not found in /api/v1/terminals/: ${OPEN_TERMINAL_SERVER_ID}"
         print_info "response: $(head -c 400 "$RESPONSE_FILE" 2>/dev/null)"
         exit 1

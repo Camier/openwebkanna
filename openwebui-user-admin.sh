@@ -26,6 +26,9 @@ source "${SCRIPT_DIR}/lib/init.sh"
 load_env_defaults
 cd "$SCRIPT_DIR"
 
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-openwebui}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-$OPENWEBUI_SERVICE}"
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -91,9 +94,23 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! docker ps --format '{{.Names}}' | grep -qx 'openwebui'; then
-    print_error "Container 'openwebui' is not running."
-    print_error "Start it first: docker compose up -d openwebui"
+init_compose_cmd >/dev/null
+
+if ! compose_service_running "$OPENWEBUI_SERVICE"; then
+    print_error "Service '${OPENWEBUI_SERVICE}' is not running."
+    print_error "Start it first: docker compose up -d ${OPENWEBUI_SERVICE}"
+    exit 1
+fi
+
+openwebui_container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
+if [ -z "$openwebui_container_id" ]; then
+    print_error "Could not resolve a running container for service '${OPENWEBUI_SERVICE}'."
+    exit 1
+fi
+
+openwebui_python="$(docker exec "$openwebui_container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true)"
+if [ -z "$openwebui_python" ]; then
+    print_error "No python interpreter found inside OpenWebUI container."
     exit 1
 fi
 
@@ -169,12 +186,12 @@ PY
     printf "%s" "$NEW_PASSWORD" | docker exec -i \
         -e "OPENWEBUI_TARGET_EMAIL=$EMAIL" \
         -e "OPENWEBUI_TARGET_ROLE=$ROLE" \
-        openwebui python3 -c "$RESET_PASSWORD_PYTHON"
+        "$openwebui_container_id" "$openwebui_python" -c "$RESET_PASSWORD_PYTHON"
 else
     docker exec -i \
         -e "OPENWEBUI_TARGET_EMAIL=$EMAIL" \
         -e "OPENWEBUI_TARGET_ROLE=$ROLE" \
-        openwebui python3 - <<'PY'
+        "$openwebui_container_id" "$openwebui_python" - <<'PY'
 from __future__ import annotations
 
 import os
@@ -219,7 +236,7 @@ if [ "$NO_RESTART" = "true" ]; then
 fi
 
 print_step "Restarting OpenWebUI container"
-docker_compose restart openwebui >/dev/null
+docker_compose restart "$OPENWEBUI_SERVICE" >/dev/null
 print_success "OpenWebUI restarted"
 
 print_step "Next steps (browser)"

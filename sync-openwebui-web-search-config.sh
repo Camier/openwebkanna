@@ -24,8 +24,8 @@ load_env_defaults
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
-OPENWEBUI_DOCKER_SERVICE="${OPENWEBUI_DOCKER_SERVICE:-openwebui}"
-OPENWEBUI_DOCKER_CONTAINER="${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_DOCKER_SERVICE}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}"
 OPENWEBUI_TOKEN_INPUT="${OPENWEBUI_TOKEN:-${OPENWEBUI_API_KEY:-}}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-45}"
 
@@ -38,6 +38,23 @@ CONCURRENT_RAW="${WEB_SEARCH_CONCURRENT_REQUESTS:-}"
 SSL_VERIFY_RAW="${ENABLE_WEB_LOADER_SSL_VERIFICATION:-}"
 
 API_TOKEN=""
+
+resolve_local_python() {
+    if command_exists python3; then
+        printf "python3"
+        return 0
+    fi
+    if command_exists python; then
+        printf "python"
+        return 0
+    fi
+    return 1
+}
+
+resolve_container_python() {
+    local container_id="$1"
+    docker exec "$container_id" sh -lc 'if command -v python3 >/dev/null 2>&1; then printf python3; elif command -v python >/dev/null 2>&1; then printf python; fi' 2>/dev/null || true
+}
 
 to_bool_json_or_null() {
     local value="$1"
@@ -62,30 +79,39 @@ to_nonneg_int_or_sentinel() {
 }
 
 mint_local_admin_jwt() {
-    if ! command_exists docker || ! command_exists python3; then
+    local container_id=""
+    local container_python=""
+    local host_python=""
+
+    if ! command_exists docker; then
         return 1
     fi
     if [ -z "${WEBUI_SECRET_KEY:-}" ]; then
         return 1
     fi
-
-    local container_id=""
-    container_id="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_CONTAINER}$" 2>/dev/null | head -n 1 || true)"
-    if [ -z "$container_id" ]; then
-        container_id="$(docker ps -q --filter "name=^/${OPENWEBUI_DOCKER_SERVICE}$" 2>/dev/null | head -n 1 || true)"
+    if ! host_python="$(resolve_local_python)"; then
+        return 1
     fi
+
+    init_compose_cmd >/dev/null
+    container_id="$(resolve_container_id "$OPENWEBUI_SERVICE" "$OPENWEBUI_CONTAINER_NAME" || true)"
     if [ -z "$container_id" ]; then
         return 1
     fi
 
+    container_python="$(resolve_container_python "$container_id")"
+    if [ -z "$container_python" ]; then
+        return 1
+    fi
+
     local admin_id=""
-    admin_id="$(docker exec "$container_id" python3 -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+    admin_id="$(docker exec "$container_id" "$container_python" -c "import sqlite3; con=sqlite3.connect('/app/backend/data/webui.db'); cur=con.cursor(); cur.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\"); row=cur.fetchone(); print(row[0] if row else '')" 2>/dev/null | tr -d '\r' | head -n 1 || true)"
     if [ -z "$admin_id" ]; then
         return 1
     fi
 
     API_TOKEN="$(
-        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" python3 - <<'PY'
+        WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" OPENWEBUI_ADMIN_ID="$admin_id" "$host_python" - <<'PY'
 import base64
 import hashlib
 import hmac
