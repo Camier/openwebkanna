@@ -90,22 +90,33 @@ Entrypoint note:
 cp .env.example .env
 ```
 
-2. Ensure these values are set in `.env`:
+2. Ensure these values are set in `.env` before the first deploy:
 ```bash
+WEBUI_SECRET_KEY=<stable-random-secret-at-least-32-chars>
+JUPYTER_TOKEN=<random-jupyter-token>
+CODE_EXECUTION_JUPYTER_AUTH_TOKEN=<same-as-JUPYTER_TOKEN>
+CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=<same-as-JUPYTER_TOKEN>
+POSTGRES_PASSWORD=<strong-local-password>
 OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
+OPENAI_API_KEY=<litellm-master-key>
 VECTOR_DB=pgvector
 CLIPROXYAPI_ENABLED=false
 OPEN_TERMINAL_ENABLED=false
 INDIGO_SERVICE_ENABLED=false
 ```
 
-3. Start stack:
+3. Sanity-check the config:
+```bash
+docker compose config >/dev/null
+```
+
+4. Start stack:
 ```bash
 ./deploy.sh --no-logs
 ```
 
-4. Check health:
+5. Check health:
 ```bash
 ./status.sh
 docker compose ps

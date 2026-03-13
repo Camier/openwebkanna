@@ -34,6 +34,65 @@ check_command() {
     fi
 }
 
+require_nonempty_env() {
+    local var_name="$1"
+    local help_text="$2"
+    local value="${!var_name:-}"
+    if [ -n "$value" ]; then
+        return 0
+    fi
+
+    print_error "${var_name} is required. ${help_text}"
+    exit 1
+}
+
+validate_install_env() {
+    print_step "Validating required environment"
+
+    require_nonempty_env "WEBUI_SECRET_KEY" "Set a stable secret in .env before deploy."
+    if [ "${#WEBUI_SECRET_KEY}" -lt 32 ]; then
+        print_error "WEBUI_SECRET_KEY must be at least 32 characters for stable sessions and secure cookie signing."
+        exit 1
+    fi
+
+    require_nonempty_env "JUPYTER_TOKEN" "Set a non-empty token in .env before deploy."
+    require_nonempty_env "POSTGRES_PASSWORD" "Replace the placeholder value in .env before deploy."
+    require_nonempty_env "OPENAI_API_KEY" "Set the LiteLLM master key in .env before deploy."
+
+    if [ "${POSTGRES_PASSWORD}" = "change-me-strong-password" ]; then
+        print_error "POSTGRES_PASSWORD still uses the example placeholder. Replace it in .env before deploy."
+        exit 1
+    fi
+
+    if [ "${OPENAI_API_KEY}" = "sk-litellm-replace-with-your-master-key" ]; then
+        print_error "OPENAI_API_KEY still uses the example placeholder. Replace it with your LiteLLM master key in .env before deploy."
+        exit 1
+    fi
+
+    if is_true "${ENABLE_CODE_EXECUTION:-true}" &&
+        [ "${CODE_EXECUTION_ENGINE:-jupyter}" = "jupyter" ] &&
+        [ "${CODE_EXECUTION_JUPYTER_AUTH:-token}" = "token" ] &&
+        [ "${CODE_EXECUTION_JUPYTER_AUTH_TOKEN:-}" != "${JUPYTER_TOKEN}" ]; then
+        print_error "CODE_EXECUTION_JUPYTER_AUTH_TOKEN must exactly match JUPYTER_TOKEN for Jupyter-backed code execution."
+        exit 1
+    fi
+
+    if is_true "${ENABLE_CODE_INTERPRETER:-true}" &&
+        [ "${CODE_INTERPRETER_ENGINE:-jupyter}" = "jupyter" ] &&
+        [ "${CODE_INTERPRETER_JUPYTER_AUTH:-token}" = "token" ] &&
+        [ "${CODE_INTERPRETER_JUPYTER_AUTH_TOKEN:-}" != "${JUPYTER_TOKEN}" ]; then
+        print_error "CODE_INTERPRETER_JUPYTER_AUTH_TOKEN must exactly match JUPYTER_TOKEN for Jupyter-backed interpreter mode."
+        exit 1
+    fi
+
+    if ! docker_compose config >/dev/null; then
+        print_error "docker compose config failed. Fix the .env values above before deploy."
+        exit 1
+    fi
+
+    print_success "Environment validation passed"
+}
+
 start_docker_compose() {
     print_step "Starting Docker Compose services"
 
@@ -235,6 +294,7 @@ main() {
     check_command "docker"
     init_compose_cmd || exit 1
     check_command "curl"
+    validate_install_env
     print_success "Prerequisites met"
 
     if [ "$SKIP_DOCKER" = false ]; then

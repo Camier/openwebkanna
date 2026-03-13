@@ -12,11 +12,17 @@ cd /LAB/@thesis/openwebui
 cp .env.example .env
 ```
 
-Edit `.env` if needed, then ensure these values:
+Edit `.env` before the first deploy, then ensure these values:
 
 ```bash
+WEBUI_SECRET_KEY=<stable-random-secret-at-least-32-chars>
+JUPYTER_TOKEN=<random-jupyter-token>
+CODE_EXECUTION_JUPYTER_AUTH_TOKEN=<same-as-JUPYTER_TOKEN>
+CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=<same-as-JUPYTER_TOKEN>
+POSTGRES_PASSWORD=<strong-local-password>
 OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
+OPENAI_API_KEY=<litellm-master-key>
 VECTOR_DB=pgvector
 CLIPROXYAPI_ENABLED=false
 ```
@@ -27,6 +33,14 @@ CLIPROXYAPI_ENABLED=false
 - Ensure `OPENAI_API_KEY` in `.env` matches LiteLLM's configured master key.
 
 ## 3. Start services
+
+Sanity-check the rendered compose config first:
+
+```bash
+docker compose config >/dev/null
+```
+
+Then deploy:
 
 ```bash
 ./deploy.sh --no-logs
@@ -79,6 +93,7 @@ Baseline note:
 - `pgvector` is the committed default retrieval backend; `chroma` remains an explicit opt-in override.
 - Web search stays disabled by default even though the `searxng` route is preconfigured.
 - Jupyter-backed code execution is part of the baseline and is driven by `.env`.
+- `CODE_EXECUTION_JUPYTER_AUTH_TOKEN` and `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN` must match `JUPYTER_TOKEN`.
 - Use `./test-rag.sh --baseline` after deploy to validate the full default lane.
 
 ## Tune "Documents" Settings (Manual-Only)

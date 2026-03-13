@@ -32,12 +32,29 @@ cp .env.example .env
 
 5. Required `.env` defaults present
 ```bash
-rg -n "^OPENAI_API_BASE_URL=|^OPENAI_API_BASE_URLS=|^CLIPROXYAPI_DOCKER_MANAGED=|^CLIPROXYAPI_ENABLED=" .env
+for key in \
+  WEBUI_SECRET_KEY \
+  JUPYTER_TOKEN \
+  CODE_EXECUTION_JUPYTER_AUTH_TOKEN \
+  CODE_INTERPRETER_JUPYTER_AUTH_TOKEN \
+  POSTGRES_PASSWORD \
+  OPENAI_API_BASE_URL \
+  OPENAI_API_BASE_URLS \
+  OPENAI_API_KEY
+do
+  grep -Eq "^${key}=.+$" .env || echo "missing: ${key}"
+done
 ```
 
 Expected values for LiteLLM-first mode:
+- `WEBUI_SECRET_KEY=<stable-random-secret-at-least-32-chars>`
+- `JUPYTER_TOKEN=<random-jupyter-token>`
+- `CODE_EXECUTION_JUPYTER_AUTH_TOKEN=<same-as-JUPYTER_TOKEN>`
+- `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN=<same-as-JUPYTER_TOKEN>`
+- `POSTGRES_PASSWORD=<strong-local-password>`
 - `OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1`
 - `OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1`
+- `OPENAI_API_KEY=<litellm-master-key>`
 - `CLIPROXYAPI_DOCKER_MANAGED=true`
 - `CLIPROXYAPI_ENABLED=false`
 
