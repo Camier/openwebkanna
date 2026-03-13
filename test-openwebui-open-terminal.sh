@@ -158,38 +158,29 @@ require_prereqs() {
 }
 
 authenticate() {
-    if [ -n "$OPENWEBUI_TOKEN" ]; then
-        API_TOKEN="$OPENWEBUI_TOKEN"
-        print_info "Using OPENWEBUI_TOKEN for API auth"
-    elif [ -n "$OPENWEBUI_API_KEY" ]; then
-        API_TOKEN="$OPENWEBUI_API_KEY"
-        print_info "Using OPENWEBUI_API_KEY for API auth"
-    fi
-
     if [ -n "$OPENWEBUI_JWT" ]; then
         JWT_TOKEN="$OPENWEBUI_JWT"
         print_info "Using OPENWEBUI_JWT for websocket auth"
     fi
 
-    if [ -z "$JWT_TOKEN" ] && [ -n "$OPENWEBUI_SIGNIN_EMAIL" ] && [ -n "$OPENWEBUI_SIGNIN_PASSWORD" ]; then
-        JWT_TOKEN="$(
-            openwebui_signin_token \
-                "$OPENWEBUI_URL" \
-                "$OPENWEBUI_SIGNIN_EMAIL" \
-                "$OPENWEBUI_SIGNIN_PASSWORD" \
-                "$OPEN_TERMINAL_TIMEOUT" \
-                "$OPENWEBUI_SIGNIN_PATH" || true
-        )"
-        if [ -n "$JWT_TOKEN" ]; then
-            print_success "Obtained JWT via signin"
-        else
-            print_warning "Signin did not return JWT; websocket check may be skipped"
-        fi
+    API_TOKEN="$(
+        resolve_openwebui_api_token \
+            "${OPENWEBUI_TOKEN:-${OPENWEBUI_API_KEY:-}}" \
+            "$OPENWEBUI_URL" \
+            "$OPENWEBUI_SIGNIN_EMAIL" \
+            "$OPENWEBUI_SIGNIN_PASSWORD" \
+            "$OPEN_TERMINAL_TIMEOUT" \
+            "$OPENWEBUI_SERVICE" \
+            "$OPENWEBUI_CONTAINER_NAME" \
+            "$OPENWEBUI_SIGNIN_PATH" || true
+    )"
+    if [ -n "$API_TOKEN" ]; then
+        print_success "OpenWebUI API token acquired"
     fi
 
-    if [ -z "$API_TOKEN" ] && [ -n "$JWT_TOKEN" ]; then
-        API_TOKEN="$JWT_TOKEN"
-        print_info "Using JWT token for API auth"
+    if [ -z "$JWT_TOKEN" ] && [ -n "$API_TOKEN" ]; then
+        JWT_TOKEN="$API_TOKEN"
+        print_info "Using OpenWebUI API token for websocket auth"
     fi
 
     if [ -z "$API_TOKEN" ]; then

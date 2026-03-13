@@ -19,10 +19,13 @@ OPENWEBUI_HEALTH_PATH="${OPENWEBUI_HEALTH_PATH:-/health}"
 OPENWEBUI_MODELS_PATH="${OPENWEBUI_MODELS_PATH:-/api/models}"
 OPENWEBUI_CHAT_PATH="${OPENWEBUI_CHAT_PATH:-/api/chat/completions}"
 OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
+OPENWEBUI_TOKEN="${OPENWEBUI_TOKEN:-}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}"
 
 CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
 CLIPROXYAPI_HEALTH_PATH="${CLIPROXYAPI_HEALTH_PATH:-/}"
@@ -152,24 +155,29 @@ openwebui_chat_probe() {
 }
 
 ensure_openwebui_auth_token() {
-    if [ -n "$OPENWEBUI_API_KEY" ]; then
-        OPENWEBUI_AUTH_TOKEN="$OPENWEBUI_API_KEY"
-        print_info "Using OPENWEBUI_API_KEY for OpenWebUI API calls"
+    local explicit_token="${OPENWEBUI_TOKEN:-${OPENWEBUI_API_KEY:-}}"
+
+    if [ -n "$explicit_token" ]; then
+        OPENWEBUI_AUTH_TOKEN="$explicit_token"
+        print_info "Using explicit OpenWebUI API token"
         return 0
     fi
 
     if ! is_true "$OPENWEBUI_AUTO_AUTH"; then
-        print_warning "OPENWEBUI_AUTO_AUTH=false and OPENWEBUI_API_KEY is empty"
+        print_warning "OPENWEBUI_AUTO_AUTH=false and no OpenWebUI token is set"
         return 0
     fi
 
-    print_step "Acquiring OpenWebUI bearer token via signin"
+    print_step "Acquiring OpenWebUI bearer token"
     OPENWEBUI_AUTH_TOKEN="$(
-        openwebui_signin_token \
+        resolve_openwebui_api_token \
+            "$explicit_token" \
             "$OPENWEBUI_URL" \
             "$OPENWEBUI_SIGNIN_EMAIL" \
             "$OPENWEBUI_SIGNIN_PASSWORD" \
             "$ROUTING_REQUEST_TIMEOUT" \
+            "$OPENWEBUI_SERVICE" \
+            "$OPENWEBUI_CONTAINER_NAME" \
             "$OPENWEBUI_SIGNIN_PATH" || true
     )"
     if [ -n "$OPENWEBUI_AUTH_TOKEN" ]; then
@@ -177,7 +185,7 @@ ensure_openwebui_auth_token() {
         return 0
     fi
 
-    print_warning "OpenWebUI signin response did not include token"
+    print_warning "Unable to acquire OpenWebUI bearer token"
     return 0
 }
 

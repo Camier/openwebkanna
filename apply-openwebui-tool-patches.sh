@@ -37,6 +37,8 @@ OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-45}"
 
 API_TOKEN=""
@@ -90,11 +92,14 @@ signin() {
 
     print_step "Signing in to OpenWebUI to get bearer token"
     API_TOKEN="$(
-        openwebui_signin_token \
+        resolve_openwebui_api_token \
+            "$OPENWEBUI_API_KEY" \
             "$OPENWEBUI_URL" \
             "$OPENWEBUI_SIGNIN_EMAIL" \
             "$OPENWEBUI_SIGNIN_PASSWORD" \
             "$CURL_TIMEOUT" \
+            "$OPENWEBUI_SERVICE" \
+            "$OPENWEBUI_CONTAINER_NAME" \
             "$OPENWEBUI_SIGNIN_PATH" || true
     )"
     if [ -n "$API_TOKEN" ]; then
@@ -102,7 +107,7 @@ signin() {
         return 0
     fi
 
-    print_warning "Unable to acquire OpenWebUI bearer token via signin; continuing unauthenticated"
+    print_warning "Unable to acquire OpenWebUI bearer token; continuing unauthenticated"
     return 0
 }
 

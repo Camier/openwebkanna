@@ -31,6 +31,8 @@ OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
+OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-${OPENWEBUI_DOCKER_SERVICE:-openwebui}}"
+OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAINER:-$OPENWEBUI_SERVICE}}"
 
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
 
@@ -63,8 +65,8 @@ Options:
 
 Auth:
   - If OPENWEBUI_API_KEY (or API_KEY) is set, it's used directly.
-  - Otherwise, the script signs in via /api/v1/auths/signin using:
-    OPENWEBUI_SIGNIN_EMAIL / OPENWEBUI_SIGNIN_PASSWORD
+  - Otherwise, the script resolves a bearer token from signin credentials and,
+    when available locally, a WEBUI_SECRET_KEY-based admin JWT fallback.
 
 Environment:
   IMPORT_PDFS_PARALLELISM            Same as --parallel (default: 1)
@@ -82,16 +84,19 @@ ensure_api_key() {
     fi
 
     API_KEY="$(
-        openwebui_signin_token \
+        resolve_openwebui_api_token \
+            "$API_KEY" \
             "$OPENWEBUI_URL" \
             "$OPENWEBUI_SIGNIN_EMAIL" \
             "$OPENWEBUI_SIGNIN_PASSWORD" \
             "30" \
+            "$OPENWEBUI_SERVICE" \
+            "$OPENWEBUI_CONTAINER_NAME" \
             "$OPENWEBUI_SIGNIN_PATH" || true
     )"
 
     if [ -z "$API_KEY" ]; then
-        print_error "Unable to acquire OpenWebUI token via signin"
+        print_error "Unable to acquire OpenWebUI token"
         exit 1
     fi
     export API_KEY
