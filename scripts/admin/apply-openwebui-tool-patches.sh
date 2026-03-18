@@ -188,12 +188,12 @@ class Valves(BaseModel):
     MODELS: str = "gpt-5.3-codex,minimax/chat-elite,minimax/chat-thinking,minimax/chat-quality,minmax,glm-5,qwen3-coder-flash"
 
     # Semicolon-separated OpenAI-compatible base URLs (with or without /v1 suffix).
-    # Default is the local CLIProxyAPI container.
-    API_BASE_URLS: str = "http://cliproxyapi:8317/v1"
+    # Default is the local LiteLLM endpoint exposed to the OpenWebUI container.
+    API_BASE_URLS: str = "http://host.docker.internal:4000/v1"
 
     # Semicolon-separated API keys matching API_BASE_URLS.
-    # NOTE: For local CLIProxyAPI base URLs, you can leave entries empty and this tool
-    # will fall back to OPENAI_API_KEY (or CLIPROXYAPI_API_KEY) from the OpenWebUI env.
+    # NOTE: For trusted local upstreams, you can leave entries empty and this tool
+    # will fall back to OPENAI_API_KEY from the OpenWebUI env.
     API_KEYS: str = ""
 
     # Optional: force routing per model to avoid ambiguous discovery when multiple
@@ -201,7 +201,7 @@ class Valves(BaseModel):
     #
     # JSON object: { "<model_id>": "<base_url>|<index>" }
     # Examples:
-    #   {"glm-5": "http://cliproxyapi:8317/v1", "minimax/chat-elite": 0}
+    #   {"glm-5": "http://host.docker.internal:4000/v1", "minimax/chat-elite": 0}
     MODEL_ROUTE_MAP: str = ""
 
     TIMEOUT: int = 120
@@ -214,14 +214,10 @@ def _split_csv(value: str, sep: str = ",") -> List[str]:
 def _default_local_api_key() -> str:
     # IMPORTANT: only use this fallback for known-local base URLs to avoid leaking a
     # local key to an external host.
-    for env_name in ("CLIPROXYAPI_API_KEY", "OPENAI_API_KEY"):
-        value = os.getenv(env_name, "").strip()
-        if value:
-            return value
-    return ""
+    return os.getenv("OPENAI_API_KEY", "").strip()
 
 
-def _is_local_cliproxy_base_url(base_url: str) -> bool:
+def _is_local_openai_base_url(base_url: str) -> bool:
     try:
         parsed = urllib.parse.urlsplit(base_url)
     except Exception:
@@ -232,11 +228,11 @@ def _is_local_cliproxy_base_url(base_url: str) -> bool:
     if not host or port is None:
         return False
 
-    return host in {"cliproxyapi", "localhost", "127.0.0.1", "host.docker.internal"} and port == 8317
+    return host in {"litellm", "localhost", "127.0.0.1", "host.docker.internal"} and port == 4000
 
 
 def _provider_configs(api_base_urls: str, api_keys: str) -> List[Tuple[str, str]]:
-    base_urls = _split_csv(api_base_urls, sep=";") or ["http://cliproxyapi:8317/v1"]
+    base_urls = _split_csv(api_base_urls, sep=";") or ["http://host.docker.internal:4000/v1"]
     keys = _split_csv(api_keys, sep=";")
 
     local_key = _default_local_api_key()
@@ -245,7 +241,7 @@ def _provider_configs(api_base_urls: str, api_keys: str) -> List[Tuple[str, str]
     for idx, raw_base_url in enumerate(base_urls):
         base_url = raw_base_url.rstrip("/")
         key = keys[idx] if idx < len(keys) else ""
-        if not key and local_key and _is_local_cliproxy_base_url(base_url):
+        if not key and local_key and _is_local_openai_base_url(base_url):
             key = local_key
         providers.append((base_url, key))
     return providers

@@ -5,9 +5,8 @@ Last updated: 2026-03-13 (UTC)
 This repository runs:
 - OpenWebUI in Docker (`openwebui`)
 - LiteLLM as the primary OpenAI-compatible upstream
-- Optional legacy CLIProxyAPI sidecar (`cliproxyapi`)
 - Docker-managed PostgreSQL/pgvector as the baseline vector store
-- Optional Docker SearXNG sidecar and archived host-side `vLLM` fallback
+- Optional Docker SearXNG sidecar
 
 When something looks "gone" in the UI (models, settings), the most common root cause is auth/session drift, not data loss.
 
@@ -43,12 +42,6 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 ```bash
 ./test-api.sh --baseline
 ./test-rag.sh --baseline
-```
-
-Optional legacy sidecar route checks (only if `CLIPROXYAPI_ENABLED=true`):
-```bash
-./scripts/cliproxyapi/check-cliproxyapi.sh
-./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
 ```
 
 If those pass, your "models disappeared" problem is almost always browser auth state (cookies/localStorage) or user role state in OpenWebUI DB.
@@ -254,31 +247,6 @@ sudo firewall-cmd --reload
 - Tool container (e.g., Jupyter) is not healthy.
 - Tool endpoint URLs changed after initial registration.
 
-## Symptom: API key rotation needed
-
-### What it means
-- The CLIProxyAPI local key may be compromised, expired, or needs rotation for security compliance.
-
-### Fix
-1. Rotate the CLIProxyAPI local key:
-```bash
-./scripts/cliproxyapi/rotate-cliproxyapi-local-key.sh
-```
-
-2. Update any services or scripts that use the old key:
-   - Check `.env` for references to the old key.
-   - Update external integrations that call CLIProxyAPI.
-   - Redeploy affected containers:
-```bash
-docker compose up -d --force-recreate
-```
-
-### After rotation
-- Verify the new key works:
-```bash
-./scripts/cliproxyapi/check-cliproxyapi.sh
-```
-
 ## Symptom: Code execution not working
 
 ### What it means
@@ -319,7 +287,9 @@ docker compose up -d --force-recreate jupyter openwebui
 ### Triage
 1. Run the smoke test suite:
 ```bash
-./scripts/testing/test-update-smoke.sh
+./scripts/testing/verify-scripts.sh
+./test-rag.sh --baseline
+./test-api.sh --baseline
 ```
 
 2. Check container logs for errors:

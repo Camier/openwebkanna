@@ -20,31 +20,10 @@ Use these files in this order so the repo stays legible:
 - `docs/README.md`: documentation routing for runbooks, guides, status notes, plans, and reference snapshots.
 - `scripts/README.md`: secondary maintenance and audit tooling.
 
-## 2. Canonical vs compatibility surfaces
+## 2. Canonical config surfaces
 
-This repo intentionally keeps two layers:
-
-- Canonical edit surface:
-  - `config/compose/`
-  - `config/env/`
-  - `config/jupyter/`
-  - `config/mcp/`
-  - `config/searxng/`
-  - `config/embeddings/`
-- Root/operator compatibility surface:
-  - `.env.example`
-  - `docker-compose.yml`
-  - `docker-compose.rg.yml`
-  - `Dockerfile.openwebui-rg`
-  - `jupyter/`
-  - `mcp/`
-  - `searxng/`
-
-Editing rule:
-
-- Change `config/*` first.
-- Keep the root compatibility copies byte-aligned for operator convenience and existing scripts.
-- Treat `docs/reference/openwebui/*` as snapshot/reference material, not as local deployment truth.
+Use `config/*` as the committed runtime edit surface.
+Treat `docs/reference/openwebui/*` as snapshot/reference material, not as local deployment truth.
 
 ## 3. Top-level layout
 
@@ -55,12 +34,11 @@ Operationally relevant roots:
 - `docs/`: runbooks, SSOT, guides, status notes, plans, reviews, and reference snapshots.
 - `lib/`: shared shell helpers used by root scripts.
 - `scripts/`: secondary maintenance, admin, testing, ingest, and optional-sidecar workflows.
-- `cliproxyapi/`: optional legacy sidecar config, local overlay, and auth state.
+- `services/`: tracked runtime APIs and workers that should use framework-native entrypoints instead of shell glue.
 - `local/`: local-only helper namespace for sidecar binaries, optional tool payloads, and separate workspaces that should not clutter the repo root.
 - `certs/`: local TLS material and placeholders; real certificate/key files stay ignored by default.
 - `data/`: local corpus, PDFs, extractions, notes, and processing artifacts.
 - `artifacts/`: generated audit and evaluation outputs.
-- `archive/`: archived fallback flows and retired operator paths.
 - `research/`: research-oriented helper assets.
 
 Local helper layout under `local/`:
@@ -80,13 +58,14 @@ Primary daily surface:
 
 Secondary scripts under `scripts/`:
 
-- `scripts/testing/`: audit and script-validation helpers such as `scripts/testing/audit-no-mock.sh`, `scripts/testing/audit-openwebui-plugins.sh`, `scripts/testing/test-openwebui-tools-endpoints.sh`, `scripts/testing/test-update-smoke.sh`, `scripts/testing/verify-scripts.sh`
-- `scripts/admin/`: OpenWebUI admin, repair, config-sync, and backup helpers such as `scripts/admin/openwebui-user-admin.sh`, `scripts/admin/repair-openwebui-tools.sh`, `scripts/admin/sync-openwebui-openai-config.sh`, `scripts/admin/sync-openwebui-web-search-config.sh`, `scripts/admin/backup-openwebui-db.sh`, `scripts/admin/apply-openwebui-tool-patches.sh`
-- `scripts/rag/`: ingest and retrieval-tuning flows such as `scripts/rag/import-pdfs-to-kb.sh`, `scripts/rag/tune-openwebui-documents.sh`, `scripts/rag/manage-openwebui-embedding-profiles.sh`, `scripts/rag/llm-council.sh`
+- `scripts/testing/`: audit and script-validation helpers such as `scripts/testing/audit-no-mock.sh`, `scripts/testing/audit-openwebui-plugins.sh`, `scripts/testing/test-openwebui-tools-endpoints.sh`, `scripts/testing/verify-scripts.sh`
+- `scripts/admin/`: OpenWebUI admin, repair, config-sync, and backup helpers such as `scripts/admin/openwebui-user-admin.sh`, `scripts/admin/repair-openwebui-tools.sh`, `scripts/admin/sync-openwebui-openai-config.sh`, `scripts/admin/sync-openwebui-web-search-config.sh`, `scripts/admin/sync-openwebui-retrieval-config.sh`, `scripts/admin/backup-openwebui-db.sh`, `scripts/admin/apply-openwebui-tool-patches.sh`
+- `scripts/eval/`: operator-facing evaluation harnesses such as `scripts/eval/run-retrieval-eval.sh`, `scripts/eval/run-chemical-ocsr-eval.sh` (writes `run.json`, `disagreements.json`, `report.md`), `scripts/eval/run-chemical-ocsr-disagreement-analysis.sh` (writes `disagreement_analysis.json`, `disagreement_analysis.md`), `scripts/eval/run-chemical-ocsr-fusion-analysis.sh` (writes `fusion_candidates.json`, `fusion_report.md`, `review_queue.json`, `review_queue.md`, `review_queue.csv`, `review_queue.jsonl`, `review_queue/*`), and `scripts/eval/run-chemical-ocsr-adjudication-analysis.sh` (writes `adjudication_manual_*` and `adjudication_defaulted_*` accepted/rejected/pending materializations plus compact `accepted_catalog` exports)
+- `scripts/rag/`: retrieval helpers such as `scripts/rag/import-pdfs-to-kb.sh`, `scripts/rag/build-multimodal-index.sh`, `scripts/rag/render-multimodal-answer.sh`, `scripts/rag/render-multimodal-answer-v2.sh`, `scripts/rag/migrate_rag_evidence.py` (one-shot text + figure + payload backfill driver), `scripts/rag/local_evidence_store.py` (migration/backfill-only extraction helper), and `scripts/rag/extract-chemical-smiles.sh` (`MolDetv2` detector + `MolGrapher`/`MolScribe` OCSR)
+- `services/multimodal_retrieval_api/`: native retrieval API for the `rag_evidence` one-collection runtime; it queries Qdrant directly for text, visual, and exact-chemistry lanes and only uses a compatibility env file for shared defaults when present
 
 Optional sidecar/tool flows:
 
-- CLIProxyAPI lifecycle/bootstrap/auth: `scripts/cliproxyapi/setup-cliproxyapi.sh`, `scripts/cliproxyapi/start-cliproxyapi.sh`, `scripts/cliproxyapi/stop-cliproxyapi.sh`, `scripts/cliproxyapi/restart-cliproxyapi.sh`, `scripts/cliproxyapi/check-cliproxyapi.sh`, `scripts/cliproxyapi/configure-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/test-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/import-qwen-auth.sh`, `scripts/cliproxyapi/cli-proxy-api.sh`, `local/bin/cliproxyapi`
 - Indigo: `scripts/indigo/start-indigo-service.sh`, `scripts/indigo/stop-indigo-service.sh`, `scripts/indigo/restart-indigo-service.sh`, `scripts/indigo/check-indigo-service.sh`, `scripts/indigo/enable-indigo-live.sh`, `local/plugins/indigo_chemistry_tool.py`
 - Open Terminal: `scripts/open-terminal/test-openwebui-open-terminal.sh`
 - MCP-specific helpers: `scripts/mcp/configure-mcpo-openapi-servers.sh`, `scripts/mcp/test-mcp.sh`
@@ -101,20 +80,17 @@ High-signal config paths:
 - `config/mcp/config.json`: MCPO server registry
 - `config/jupyter/jupyter_server_config.py`: Jupyter runtime config
 - `config/searxng/settings.yml`: local SearXNG config
-- `config/embeddings/profiles.json`: embedding profile catalog
-- `config/embeddings/kb-bindings.json`: KB-to-lane binding map
-- `config/compatibility-copies.txt`: authoritative root-to-canonical sync map
 
 ## 6. Documentation tree
 
 Documentation under `docs/` is split by purpose:
 
 - `docs/ssot/`: runtime source of truth
-- `docs/runbooks/`: setup, operations, troubleshooting, and embedding-profile procedures
+- `docs/runbooks/`: setup, operations, and troubleshooting procedures
 - `docs/guides/`: focused operator guidance
 - `docs/status/`: observed local runtime snapshots and point-in-time deployment notes
 - `docs/reviews/`: audits and technical reviews
-- `docs/plans/`: historical or pending planning documents
+- `docs/plans/`: historical or pending planning documents, including the multimodal redesign target in `docs/plans/MULTIMODAL_RAG_QDRANT_NEMOTRON_REDESIGN.md`
 - `docs/reference/openwebui/`: upstream-derived OpenWebUI snapshots
 - `docs/legacy/`: compatibility and migration notes
 
@@ -143,7 +119,6 @@ From the compose definition:
 - SearXNG: `${SEARXNG_BIND_ADDRESS:-127.0.0.1}:${SEARXNG_PORT:-8888} -> 8080`
 - MCPO: `${MCPO_BIND_ADDRESS:-127.0.0.1}:${MCPO_PORT:-8000} -> 8000`
 - Docling: `127.0.0.1:5001 -> 5001`
-- CLIProxyAPI: `${CLIPROXYAPI_BIND_ADDRESS:-127.0.0.1}:${CLIPROXYAPI_PORT:-8317} -> 8317`
 - Open Terminal: `${OPEN_TERMINAL_BIND_ADDRESS:-127.0.0.1}:${OPEN_TERMINAL_PORT:-8320} -> 8000`
 - Indigo Service: `${INDIGO_SERVICE_BIND_ADDRESS:-127.0.0.1}:${INDIGO_SERVICE_PORT:-8012} -> 80`
 

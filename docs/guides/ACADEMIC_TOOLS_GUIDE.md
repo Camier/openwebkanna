@@ -197,8 +197,10 @@ CHUNK_OVERLAP=600
 VECTOR_DB=pgvector
 ENABLE_RAG_WEB_SEARCH=false
 
-# Tune document retrieval intentionally rather than assuming an old profile:
-./scripts/rag/tune-openwebui-documents.sh
+# Inspect live retrieval config:
+OPENWEBUI_API_KEY="<admin-bearer-token>"
+curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
+  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/config" | jq
 ```
 
 ### Configure Memory for Long Research Sessions

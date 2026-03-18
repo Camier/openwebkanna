@@ -23,7 +23,7 @@ source "${PROJECT_ROOT}/lib/print-utils.sh"
 
 # Configuration
 AGE_WARNING_DAYS=90
-DOCKER_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.yml"
+DOCKER_COMPOSE_FILE="${PROJECT_ROOT}/config/compose/docker-compose.yml"
 
 # Output options
 OUTPUT_JSON=false
@@ -75,7 +75,7 @@ check_dependencies() {
     fi
 
     if [[ ! -f $DOCKER_COMPOSE_FILE ]]; then
-        print_error "docker-compose.yml not found at $DOCKER_COMPOSE_FILE"
+        print_error "compose file not found at $DOCKER_COMPOSE_FILE"
         exit 2
     fi
 }
@@ -497,14 +497,12 @@ main() {
     # Extract only image-related vars from .env (avoid sourcing entire file which may have issues)
     if [[ -f "${PROJECT_ROOT}/.env" ]]; then
         OPENWEBUI_IMAGE=$(grep -E "^OPENWEBUI_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
-        CLIPROXYAPI_IMAGE=$(grep -E "^CLIPROXYAPI_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         JUPYTER_IMAGE=$(grep -E "^JUPYTER_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         INDIGO_SERVICE_IMAGE=$(grep -E "^INDIGO_SERVICE_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
         MCPO_IMAGE=$(grep -E "^MCPO_IMAGE=" "${PROJECT_ROOT}/.env" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
     fi
 
     RESOLVED_IMAGES["openwebui"]="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
-    RESOLVED_IMAGES["cliproxyapi"]="${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}"
     RESOLVED_IMAGES["postgres"]="pgvector/pgvector:pg16"
     RESOLVED_IMAGES["jupyter"]="${JUPYTER_IMAGE:-quay.io/jupyter/scipy-notebook:2026-02-19}"
     RESOLVED_IMAGES["indigo-service"]="${INDIGO_SERVICE_IMAGE:-epmlsop/indigo-service@sha256:1dd5b19d9eaeb13c5d37c71611e28c403c4a7ccac392d0390043fe460b060c77}"
@@ -533,7 +531,7 @@ main() {
                 "-------" "-----" "-------" "------" "---" "------"
         fi
 
-        for service in openwebui cliproxyapi postgres jupyter indigo-service mcpo; do
+        for service in openwebui postgres jupyter indigo-service mcpo; do
             check_image "$service" "${RESOLVED_IMAGES[$service]}" || true
         done
 

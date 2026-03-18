@@ -5,7 +5,6 @@ Last updated: 2026-03-12 (UTC)
 This document provides reproducible HTTP examples for the current stack:
 - OpenWebUI in Docker
 - LiteLLM as the primary OpenAI-compatible upstream (`http://127.0.0.1:4000/v1`)
-- CLIProxyAPI as an optional legacy sidecar only
 
 Scope note:
 - This file is a repo-specific examples guide, not the runtime source of truth.
@@ -22,9 +21,6 @@ export OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 export LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://127.0.0.1:4000/v1}"
 export LITELLM_API_KEY="${LITELLM_API_KEY:-${OPENAI_API_KEY:-}}"
 export OPENWEBUI_API_KEY="${OPENWEBUI_API_KEY:-$API_KEY}"
-# Optional legacy sidecar values
-export CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
-export CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
 ```
 
 ## Authentication
@@ -132,24 +128,6 @@ curl -sS -f -H "Authorization: Bearer $OPENWEBUI_API_KEY" \
   "$OPENWEBUI_URL/api/models" | jq .
 ```
 
-Optional legacy sidecar check (only when `CLIPROXYAPI_ENABLED=true`):
-```bash
-curl -sS -f -H "Authorization: Bearer $CLIPROXYAPI_API_KEY" \
-  "$CLIPROXYAPI_BASE_URL/v1/models" | jq -e '.data | type == "array" and length > 0'
-```
-
-## Required alias presence (legacy sidecar only)
-
-```bash
-curl -sS -f -H "Authorization: Bearer $CLIPROXYAPI_API_KEY" \
-  "$CLIPROXYAPI_BASE_URL/v1/models" \
-| jq -e '
-  [.data[].id] as $ids
-  | ["openai-codex","qwen-cli","kimi-cli"]
-  | all(. as $name | $ids | index($name))
-'
-```
-
 ## Chat completion examples
 
 LiteLLM direct call (replace `MODEL_ID` with one from `/v1/models`):
@@ -176,82 +154,12 @@ curl -sS -f -H "Authorization: Bearer $OPENWEBUI_API_KEY" \
   }' | jq .
 ```
 
-## Wrapper examples (`cli-proxy-api.sh`)
-
-The wrapper command namespace keeps `vllm` as the OpenAI-compatible endpoint label.
-In this repo, `vllm` resolves to `OPENAI_API_BASE_URL` (LiteLLM by default).
-
-List models via wrapper against configured OpenAI-compatible endpoint:
-```bash
-./scripts/cliproxyapi/cli-proxy-api.sh --raw models vllm | jq .
-```
-
-Force wrapper to LiteLLM explicitly:
-```bash
-./scripts/cliproxyapi/cli-proxy-api.sh --raw --url "$LITELLM_BASE_URL" models vllm | jq .
-```
-
-Force wrapper to CLIProxyAPI explicitly (legacy sidecar):
-```bash
-./scripts/cliproxyapi/cli-proxy-api.sh --raw --url "$CLIPROXYAPI_BASE_URL" models vllm | jq .
-```
-
-Health all services:
-```bash
-./scripts/cliproxyapi/cli-proxy-api.sh health all
-```
-
 ## Regression test commands
 
 LiteLLM-first baseline:
 ```bash
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
-```
-
-OAuth alias regression (legacy sidecar):
-```bash
-./scripts/cliproxyapi/test-cliproxyapi-oauth.sh
-```
-
-OpenWebUI-to-CLIProxy routing regression (legacy sidecar):
-```bash
-./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
-```
-
-LLM council evaluation (candidate + judge pass):
-```bash
-./scripts/rag/llm-council.sh \
-  --models "glm-5 minimax/chat-elite" \
-  --judges "glm-5 minimax/chat-elite" \
-  --prompt "Summarize retrieval quality risks in one paragraph."
-```
-
-LLM council with stricter judge retries (useful for reasoning-heavy models):
-```bash
-./scripts/rag/llm-council.sh \
-  --models "glm-5 minimax/chat-elite" \
-  --judges "glm-5 minimax/chat-elite" \
-  --prompt "Reply with exactly council-ok" \
-  --judge-max-tokens 256 --judge-retries 3 --judge-force-max-tokens 96
-```
-
-LLM council anti-position-bias mode (A/B then B/A):
-```bash
-./scripts/rag/llm-council.sh \
-  --models "glm-5 minimax/chat-elite" \
-  --judges "glm-5 minimax/chat-elite" \
-  --prompt "Pick the stronger incident response plan." \
-  --position-swap
-```
-
-LLM council with strict JSON judge output:
-```bash
-./scripts/rag/llm-council.sh \
-  --models "glm-5 minimax/chat-elite" \
-  --judges "glm-5 minimax/chat-elite" \
-  --prompt "Reply with exactly council-ok" \
-  --judge-output-format json --judge-retries 3
 ```
 
 Full API smoke suite:
@@ -393,5 +301,3 @@ curl -sS -X POST "${OPENWEBUI_URL}/api/v1/chats/new" \
 ## Notes
 
 - LiteLLM is the reference upstream for this repository.
-- `CLIPROXYAPI_ENABLED=false` is the expected default in normal deployments.
-- Manual OAuth sidecar setup is still supported; auth material is persisted under `cliproxyapi/auth/`.

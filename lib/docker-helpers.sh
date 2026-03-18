@@ -18,7 +18,11 @@ fi
 
 # Default compose file (can be overridden by sourcing scripts)
 if [ -z "${COMPOSE_FILE+x}" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+    COMPOSE_FILE="${COMPOSE_FILE:-config/compose/docker-compose.yml}"
+fi
+
+if [ -z "${COMPOSE_PROJECT_DIR+x}" ]; then
+    COMPOSE_PROJECT_DIR="${COMPOSE_PROJECT_DIR:-.}"
 fi
 
 ###############################################################################
@@ -61,7 +65,8 @@ init_compose_cmd() {
 #
 # Globals:
 #   COMPOSE_CMD  - Array containing the compose command
-#   COMPOSE_FILE - Path to the compose file (default: docker-compose.yml)
+#   COMPOSE_FILE - Path to the compose file (default: config/compose/docker-compose.yml)
+#   COMPOSE_PROJECT_DIR - Compose project directory (default: .)
 #
 # Arguments:
 #   $@ - All arguments passed through to docker compose
@@ -76,7 +81,7 @@ init_compose_cmd() {
 ###############################################################################
 docker_compose() {
     init_compose_cmd || return 1
-    "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" "$@"
+    "${COMPOSE_CMD[@]}" --project-directory "$COMPOSE_PROJECT_DIR" -f "$COMPOSE_FILE" "$@"
 }
 
 ###############################################################################

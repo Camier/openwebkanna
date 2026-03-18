@@ -21,27 +21,16 @@ Historical note:
 - `status.sh` ✅
 - `cleanup.sh` ✅
 - `logs.sh` ✅
-- `start-cliproxyapi.sh` ✅
-- `stop-cliproxyapi.sh` ✅
-- `restart-cliproxyapi.sh` ✅
-- `check-cliproxyapi.sh` ✅
 - `import-pdfs-to-kb.sh` ✅
 - `test-rag.sh` ✅
 - `test-api.sh` ✅
 - `tune-openwebui-documents.sh` ✅
 - `llm-council.sh` ✅
-- `configure-cliproxyapi-*.sh` ✅
 - `backup-openwebui-db.sh` ✅
 - `openwebui-user-admin.sh` ✅
 - `audit-no-mock.sh` ✅
 - `verify-scripts.sh` ✅
 - `update.sh` ✅
-
-### Deprecated Scripts (Move to archive/)
-- `archive/start-vllm.sh` ⚠️ (already archived but referenced)
-- `archive/stop-vllm.sh` ⚠️
-- `archive/restart-vllm.sh` ⚠️
-- `archive/check-vllm.sh` ⚠️
 
 ### Documentation Overload
 - **Core docs (keep in root):** README.md, SETUP.md, TROUBLESHOOTING.md, SECURITY.md, API_EXAMPLES.md
@@ -55,33 +44,7 @@ Historical note:
 
 ## PR Units (Prioritized)
 
-### PR 1: Archive vLLM Scripts (High Priority)
-
-**Rationale:** vLLM remains an optional fallback and is de-emphasized in favor of LiteLLM-first operations. Scripts already in `archive/` but need to:
-1. Remove active references from working scripts
-2. Document deprecation clearly
-3. Update README to reflect LiteLLM-first
-
-**Changes:**
-```
-Files modified:
-- cleanup.sh (remove vLLM references)
-- logs.sh (remove vLLM log tailing)
-- test-api.sh (skip vLLM tests if CLIPROXYAPI_ENABLED=true)
-- test-rag.sh (deprecate vLLM tests)
-- archive/README.md (NEW - explain what's archived and why)
-
-Files moved:
-- None (already in archive/)
-```
-
-**Behavior preserved:**
-- vLLM still functional if manually enabled
-- Scripts don't break, just keep vLLM optional and non-default
-
----
-
-### PR 2: Documentation Hierarchy (High Priority)
+### PR 1: Documentation Hierarchy (High Priority)
 
 **Rationale:** 100+ Markdown files clutter root. Create clear hierarchy.
 
@@ -148,36 +111,20 @@ mv prod_max_multimodal/ data/processing/prod_max_multimodal/
 
 ### PR 4: Configuration Consolidation (Medium Priority)
 
-**Rationale:** Keep `.env.example` and docs consistently LiteLLM-first, with CLIProxyAPI explicitly marked legacy/optional.
+**Rationale:** Keep `config/env/.env.example` and docs consistently aligned with the canonical LiteLLM-first baseline.
 
 **Changes:**
 ```bash
-# .env.example - Keep section order aligned with runtime defaults
+# config/env/.env.example - Keep section order aligned with runtime defaults
 # Keep LiteLLM section as primary OpenAI-compatible upstream
-# Keep CLIProxyAPI section as legacy/optional sidecar
 
 # Current order (target):
 # 1. Authentication
 # 2. Jupyter
 # 3. Ollama
 # 4. LiteLLM Proxy (PRIMARY)
-# 5. CLIProxyAPI (LEGACY OPTIONAL SIDECAR)
-# 6. MCPO
-# 7. RAG
-```
-
-**Add legacy-sidecar notice:**
-```bash
-# .env.example - before CLIProxyAPI section
-# ==============================================================================
-# LEGACY OPTIONAL: CLIProxyAPI Sidecar
-# ==============================================================================
-# LiteLLM is the reference upstream in this repository.
-# CLIProxyAPI remains available only for legacy OAuth alias workflows.
-# Keep these settings disabled unless you explicitly enable sidecar routing.
-#
-# Migration: keep OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
-# ==============================================================================
+# 5. MCPO
+# 6. RAG
 ```
 
 **Behavior preserved:** All configs still work, just reorganized
@@ -209,8 +156,6 @@ cat > OPERATIONS.md << 'EOF'
 ### Check Status
 ```bash
 ./status.sh
-# Optional legacy sidecar check:
-./check-cliproxyapi.sh
 ```
 
 ### View Logs
@@ -223,14 +168,12 @@ docker compose logs -f       # Follow mode
 ### Restart Services
 ```bash
 docker compose restart openwebui
-# Optional legacy sidecar restart:
-./restart-cliproxyapi.sh
 ```
 
 ### Stop Stack
 ```bash
 docker compose down
-./cleanup.sh                 # Include vLLM
+./cleanup.sh
 ```
 
 ---
@@ -249,27 +192,13 @@ IMPORT_PDFS_PARALLELISM=3 ./import-pdfs-to-kb.sh
 
 ### Tune RAG Settings
 ```bash
-./tune-openwebui-documents.sh --top-k 8 --chunk-size 1800
+./scripts/admin/sync-openwebui-retrieval-config.sh
 ```
 
 ### Test RAG
 ```bash
 ./test-rag.sh --baseline     # Fast checks (2 min)
 ./test-rag.sh --full         # Full suite (15 min)
-```
-
----
-
-## LLM Council
-
-### Quick Evaluation
-```bash
-./llm-council.sh --prompt "Compare RAG vs fine-tuning"
-```
-
-### Batch Evaluation
-```bash
-./llm-council.sh --prompts-file data/notes/prompts.txt --models "glm-5 minimax/chat-elite"
 ```
 
 ---
@@ -300,13 +229,12 @@ docker compose up -d
 ### Service Health
 ```bash
 curl http://localhost:3000/health
-curl http://localhost:8317/health
 curl http://localhost:8000/docs  # MCPO
 ```
 
 ### Model Availability
 ```bash
-./check-cliproxyapi.sh --models
+OPENWEBUI_API_KEY="<admin-bearer-token>" curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" http://localhost:3000/api/models | jq '.data[].id'
 ```
 
 ### RAG Settings
@@ -358,11 +286,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
 echo "Finding empty directories..."
-find . -type d -empty ! -path "./.git/*" ! -path "./archive/*" -print
+find . -type d -empty ! -path "./.git/*" -print
 
 echo ""
 echo "To remove, run:"
-echo "  find . -type d -empty ! -path './.git/*' ! -path './archive/*' -delete"
+echo "  find . -type d -empty ! -path './.git/*' -delete"
 EOF
 
 chmod +x scripts/cleanup-empty-dirs.sh
@@ -373,8 +301,8 @@ chmod +x scripts/cleanup-empty-dirs.sh
 ### PR 7: Script Naming Consistency (Low Priority)
 
 **Rationale:** Mixed naming patterns:
-- `start-cliproxyapi.sh` (verb-noun)
-- `cliproxyapi-helpers.sh` (noun-adjective)
+- `thesis-backup.sh` (topic-noun)
+- `export-thesis-chats.sh` (verb-topic-noun)
 - `thesis-rag-helper.sh` (topic-noun-noun)
 
 **Proposed standard:** **verb-noun** for action scripts, **noun-helpers** for libraries
@@ -393,7 +321,7 @@ ln -s backup-thesis.sh thesis-backup.sh
 ln -s export-chats-thesis.sh export-thesis-chats.sh
 
 # Library scripts (noun-helpers)
-# Already consistent: cliproxyapi-helpers.sh, docker-helpers.sh
+# Already consistent: docker-helpers.sh, http-helpers.sh
 ```
 
 **Better approach:** Don't rename. Script names are muscle memory. Instead, document naming convention for NEW scripts only.
@@ -405,7 +333,7 @@ ln -s export-chats-thesis.sh export-thesis-chats.sh
 ## Implementation Timeline
 
 ### Week 1 (High Priority)
-- ✅ PR 1: Archive vLLM scripts
+- ✅ PR 1: remove legacy operator-path references
 - ✅ PR 2: Documentation hierarchy
 - ⚠️ Verify all links work after moves
 
@@ -476,10 +404,6 @@ openwebui/
 │   ├── audit-dependencies.sh
 │   └── ...
 │
-├── archive/                     # Deprecated functionality
-│   ├── README.md                # NEW: Explain what/why archived
-│   └── vllm-*.sh
-│
 ├── data/
 │   ├── pdfs/                    # Source PDFs
 │   ├── extractions/             # Per-paper data
@@ -489,8 +413,9 @@ openwebui/
 │   │   └── prod_max_multimodal/
 │   └── ...
 │
-├── docker-compose.yml
-├── .env.example                 # Reordered (CLIProxyAPI first)
+├── config/
+│   ├── compose/docker-compose.yml
+│   └── env/.env.example
 └── ...
 ```
 

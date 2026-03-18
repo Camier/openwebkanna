@@ -16,7 +16,6 @@ PRIMARY_DOCS=(
     "config/README.md"
     "scripts/README.md"
     "artifacts/README.md"
-    "cliproxyapi/README.md"
     "research/README.md"
     "docs/runbooks/SETUP.md"
     "docs/runbooks/OPERATIONS.md"
@@ -53,7 +52,6 @@ LINK_DOCS=(
     "config/README.md"
     "scripts/README.md"
     "artifacts/README.md"
-    "cliproxyapi/README.md"
     "research/README.md"
     "docs/reference/openwebui/OPENWEBUI_PIPELINES_GUIDE.md"
     "docs/reference/openwebui/OPENWEBUI_WEBSEARCH_DEEP_DIVE.md"
@@ -72,9 +70,6 @@ INVALID_TUNE_FLAGS=(
 )
 
 FAILURES=0
-
-COMPAT_COPY_MANIFEST="config/compatibility-copies.txt"
-COMPAT_COPY_PAIRS=()
 
 current_openwebui_version() {
     local image
@@ -108,66 +103,6 @@ check_required_docs_exist() {
     for file in "${PRIMARY_DOCS[@]}"; do
         if require_file "$file"; then
             print_success "Required doc present: $file"
-        fi
-    done
-}
-
-load_compatibility_copy_pairs() {
-    if ! require_file "$COMPAT_COPY_MANIFEST"; then
-        return 1
-    fi
-
-    COMPAT_COPY_PAIRS=()
-
-    local entry=""
-    while IFS= read -r entry || [ -n "$entry" ]; do
-        entry="${entry%$'\r'}"
-        entry="${entry#"${entry%%[![:space:]]*}"}"
-        entry="${entry%"${entry##*[![:space:]]}"}"
-
-        [ -z "$entry" ] && continue
-        [[ $entry == \#* ]] && continue
-
-        if [[ $entry != *:* ]]; then
-            record_failure "Invalid compatibility copy manifest entry: $entry"
-            continue
-        fi
-
-        COMPAT_COPY_PAIRS+=("$entry")
-    done <"$COMPAT_COPY_MANIFEST"
-
-    if ((${#COMPAT_COPY_PAIRS[@]} == 0)); then
-        record_failure "No compatibility copy pairs declared in $COMPAT_COPY_MANIFEST"
-        return 1
-    fi
-
-    print_success "Loaded ${#COMPAT_COPY_PAIRS[@]} compatibility copy pair(s) from $COMPAT_COPY_MANIFEST"
-    return 0
-}
-
-check_compatibility_copies() {
-    local entry
-    print_section "Compatibility Copy Check"
-
-    if ! load_compatibility_copy_pairs; then
-        return
-    fi
-
-    for entry in "${COMPAT_COPY_PAIRS[@]}"; do
-        local root_path="${entry%%:*}"
-        local canonical_path="${entry#*:}"
-
-        if ! require_file "$root_path"; then
-            continue
-        fi
-        if ! require_file "$canonical_path"; then
-            continue
-        fi
-
-        if cmp -s "$root_path" "$canonical_path"; then
-            print_success "Compatibility copy aligned: $root_path"
-        else
-            record_failure "Compatibility copy drift: $root_path != $canonical_path"
         fi
     done
 }
@@ -377,7 +312,6 @@ main() {
     check_invalid_operations_flags
     check_mcp_phrase_consistency
     check_required_docs_exist
-    check_compatibility_copies
     check_relative_markdown_links
 
     if ((FAILURES == 0)); then

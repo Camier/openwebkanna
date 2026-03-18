@@ -139,7 +139,17 @@ find_or_create_kb() {
     kb_list="$(api_get "/api/v1/knowledge/" 2>/dev/null || true)"
 
     if [ -n "$kb_list" ]; then
-        kb_id="$(echo "$kb_list" | jq -r --arg name "$KB_NAME" '.[] | select(.name == $name) | .id' 2>/dev/null | head -n 1 || true)"
+        kb_id="$(echo "$kb_list" | jq -r --arg name "$KB_NAME" '
+            if type == "array" then
+                .[]
+            elif type == "object" and (.items | type == "array") then
+                .items[]
+            else
+                empty
+            end
+            | select(.name == $name)
+            | .id
+        ' 2>/dev/null | head -n 1 || true)"
         if [ -n "$kb_id" ] && [ "$kb_id" != "null" ]; then
             print_success "Using existing Knowledge Base: $KB_NAME ($kb_id)" >&2
             echo "$kb_id"

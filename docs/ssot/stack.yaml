@@ -1,40 +1,40 @@
-version: 2026-03-13
+version: 2026-03-15
 run_modes:
   - name: docker-primary
-    description: Default supported operator mode using root compatibility entrypoints backed by canonical config surfaces.
+    description: Default supported operator mode using root shell entrypoints backed by canonical config surfaces.
     status: supported
     evidence:
       - deploy.sh
       - status.sh
-      - docker-compose.yml
+      - config/compose/docker-compose.yml
       - config/README.md
       - scripts/check-doc-consistency.sh
   - name: docker-rg-build-variant
     description: OpenWebUI-only build override that swaps the image build to Dockerfile.openwebui-rg.
     status: supported
     evidence:
-      - docker-compose.rg.yml
-      - Dockerfile.openwebui-rg
+      - config/compose/docker-compose.rg.yml
+      - config/docker/Dockerfile.openwebui-rg
   - name: host-assisted-upstreams
     description: The Docker stack depends on host-provided resources such as LiteLLM and a host-mounted Zotero directory.
     status: supported
     evidence:
-      - .env.example
-      - docker-compose.yml
+      - config/env/.env.example
+      - config/compose/docker-compose.yml
       - README.md
+  - name: host-native-retrieval-adjunct
+    description: Optional host-native multimodal retrieval API that queries Qdrant `rag_evidence` directly through one-collection text, visual, and exact-chemistry lanes.
+    status: supported
+    evidence:
+      - services/README.md
+      - README.md
+      - services/multimodal_retrieval_api/service.py
   - name: optional-profile-sidecars
     description: Legacy or optional services that are started only when explicit feature flags or profiles are enabled.
     status: supported
     evidence:
-      - docker-compose.yml
+      - config/compose/docker-compose.yml
       - deploy.sh
-      - README.md
-  - name: archived-host-fallback
-    description: Archived host-side vLLM lifecycle scripts kept for fallback and reference only.
-    status: archived
-    evidence:
-      - archive/README.md
-      - archive/start-vllm.sh
       - README.md
   - name: kubernetes-or-system-services
     description: No supported Kubernetes, Helm, Procfile, or systemd topology is currently evidenced in the tracked operator trees.
@@ -51,7 +51,7 @@ services:
       - multi-dependent
     run_mode: docker-primary
     evidence:
-      - docker-compose.yml
+      - config/compose/docker-compose.yml
       - README.md
   - name: litellm
     critical: true
@@ -61,7 +61,7 @@ services:
       - external-adapter
     run_mode: host-assisted-upstreams
     evidence:
-      - .env.example
+      - config/env/.env.example
       - README.md
       - status.sh
   - name: postgres
@@ -73,10 +73,10 @@ services:
       - multi-dependent
     run_mode: docker-primary
     notes:
-      - OpenWebUI now defaults to VECTOR_DB=pgvector in .env.example, so postgres backs the baseline retrieval path in this repo.
+      - OpenWebUI now defaults to VECTOR_DB=pgvector in config/env/.env.example, so postgres backs the baseline retrieval path in this repo.
     evidence:
-      - docker-compose.yml
-      - .env.example
+      - config/compose/docker-compose.yml
+      - config/env/.env.example
   - name: jupyter
     critical: true
     role: Code execution backend used by OpenWebUI.
@@ -85,9 +85,9 @@ services:
       - multi-dependent
     run_mode: docker-primary
     evidence:
-      - docker-compose.yml
-      - .env.example
-      - jupyter/jupyter_server_config.py
+      - config/compose/docker-compose.yml
+      - config/env/.env.example
+      - config/jupyter/jupyter_server_config.py
   - name: mcpo
     critical: true
     role: MCP-to-OpenAPI bridge for tool exposure into OpenWebUI.
@@ -96,8 +96,8 @@ services:
       - external-adapter
     run_mode: docker-primary
     evidence:
-      - docker-compose.yml
-      - mcp/config.json
+      - config/compose/docker-compose.yml
+      - config/mcp/config.json
   - name: docling
     critical: true
     role: Multimodal extraction backend used during document ingest.
@@ -106,42 +106,46 @@ services:
       - multi-dependent
     run_mode: docker-primary
     evidence:
-      - docker-compose.yml
+      - config/compose/docker-compose.yml
       - README.md
   - name: searxng
     critical: false
     role: Local web-search backend for OpenWebUI web search when enabled.
     run_mode: optional-profile-sidecars
     notes:
-      - Service is only needed when OpenWebUI web search is enabled, and ENABLE_WEB_SEARCH=false in .env.example keeps it off by default.
+      - Service is only needed when OpenWebUI web search is enabled, and ENABLE_WEB_SEARCH=false in config/env/.env.example keeps it off by default.
     evidence:
-      - docker-compose.yml
-      - .env.example
+      - config/compose/docker-compose.yml
+      - config/env/.env.example
       - config/searxng/settings.yml
-  - name: cliproxyapi
-    critical: false
-    role: Optional legacy OAuth alias sidecar.
-    run_mode: optional-profile-sidecars
-    evidence:
-      - docker-compose.yml
-      - .env.example
-      - cliproxyapi/config.yaml
   - name: open-terminal
     critical: false
     role: Optional terminal and file-server sidecar.
     run_mode: optional-profile-sidecars
     evidence:
-      - docker-compose.yml
-      - .env.example
+      - config/compose/docker-compose.yml
+      - config/env/.env.example
       - README.md
   - name: indigo-service
     critical: false
     role: Optional Indigo-based chemistry REST sidecar.
     run_mode: optional-profile-sidecars
     evidence:
-      - docker-compose.yml
-      - .env.example
+      - config/compose/docker-compose.yml
+      - config/env/.env.example
       - README.md
+  - name: multimodal_retrieval_api
+    critical: false
+    role: Optional host-native retrieval API for one-collection multimodal RAG over `rag_evidence`.
+    run_mode: host-native-retrieval-adjunct
+    notes:
+      - Service is not part of the compose baseline and is operated separately when multimodal retrieval workflows need it.
+      - Live retrieval is native to this repo and no longer delegates to thesis_graph.
+      - "`/ready` includes sampled `rag_evidence` collection-completeness checks for native `figure_records`."
+    evidence:
+      - services/README.md
+      - README.md
+      - services/multimodal_retrieval_api/service.py
 critical_paths:
   - name: deploy-run-baseline
     description: Baseline operator path from environment configuration into the compose-managed runtime.
@@ -149,7 +153,7 @@ critical_paths:
       - operator
       - .env
       - deploy.sh
-      - docker-compose.yml
+      - config/compose/docker-compose.yml
       - postgres
       - jupyter
       - mcpo
@@ -160,7 +164,7 @@ critical_paths:
     evidence:
       - README.md
       - deploy.sh
-      - docker-compose.yml
+      - config/compose/docker-compose.yml
       - status.sh
   - name: query-generation-default
     description: Default committed OpenWebUI query path with pgvector as the vector backend.
@@ -171,8 +175,8 @@ critical_paths:
       - litellm-host
       - upstream-provider
     evidence:
-      - .env.example
-      - docker-compose.yml
+      - config/env/.env.example
+      - config/compose/docker-compose.yml
       - README.md
   - name: query-generation-chroma-fallback
     description: Optional OpenWebUI query path when VECTOR_DB=chroma is explicitly enabled.
@@ -183,8 +187,26 @@ critical_paths:
       - litellm-host
       - upstream-provider
     evidence:
-      - .env.example
-      - docker-compose.yml
+      - config/env/.env.example
+      - config/compose/docker-compose.yml
+  - name: native-multimodal-retrieval-api
+    description: Optional host-native multimodal retrieval path over the `rag_evidence` one-collection index.
+    path:
+      - client
+      - multimodal_retrieval_api
+      - qdrant-rag_evidence
+      - text-lane
+      - visual-lane
+      - exact-chemistry-lane
+    notes:
+      - This path is separate from the OpenWebUI pgvector baseline.
+      - "`rag_evidence` is the sole runtime evidence source."
+      - Missing figure payloads surface as runtime diagnostics instead of falling back to local extraction artifacts.
+      - "`/ready` samples page payload completeness and can mark the service degraded when native `figure_records` coverage is incomplete."
+    evidence:
+      - services/README.md
+      - README.md
+      - services/multimodal_retrieval_api/service.py
   - name: ingest
     description: Import scripts feed the OpenWebUI knowledge APIs.
     path:
@@ -205,10 +227,12 @@ critical_paths:
       - test-api.sh
       - .mise.toml
 drift_checks:
-  - config/* is the canonical edit surface, but live scripts execute the root compatibility copies and both surfaces must stay byte-aligned.
+  - config/* is the canonical edit surface for committed runtime behavior.
   - Compose environment fallbacks should match config/env/.env.example, especially for baseline retrieval flags such as VECTOR_DB and ENABLE_RAG_HYBRID_SEARCH.
   - Postgres is always deployed and the committed OpenWebUI default now uses VECTOR_DB=pgvector; if a local runtime switches back to chroma, document that as an intentional override.
   - Optional sidecars should stay disabled in the normal baseline unless a concrete workflow requires them.
+  - multimodal_retrieval_api is a supported host-native adjunct, not a compose-managed baseline service.
+  - The native multimodal retrieval path targets `rag_evidence` directly and should not be described as delegating to thesis_graph.
   - Legacy project containers outside the current compose config should be removed instead of being carried forward as supported topology.
 observed_runtime:
   observed_at: 2026-03-13

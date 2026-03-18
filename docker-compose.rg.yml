@@ -1,8 +1,0 @@
-services:
-  openwebui:
-    build:
-      context: .
-      dockerfile: Dockerfile.openwebui-rg
-      args:
-        BASE_IMAGE: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}
-    image: ${OPENWEBUI_IMAGE_WITH_RG:-openwebui-with-rg:local}

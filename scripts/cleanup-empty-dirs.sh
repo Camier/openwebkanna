@@ -32,7 +32,6 @@ Description:
   Excluded from cleanup:
   - .git/ (git metadata)
   - .venvs/, .conda/ (local environment directories)
-  - archive/ (deprecated but kept for reference)
   - data/milvus/ (runtime state)
   - data/processing/prod_max/ and data/processing/prod_max_multimodal/ (processing outputs)
   - logs/, backups/, certs/ (runtime directories)
@@ -78,7 +77,7 @@ fi
 print_header "Empty Directory Cleanup"
 
 # Directories to always exclude
-export EXCLUDE_PATTERN="\.git|\.venvs|\.conda|archive|data/milvus|logs|backups|certs|data/pdfs|data/extractions|data/corpus|data/processing|jupyter|cliproxyapi|searxng|thesis-exports"
+export EXCLUDE_PATTERN="\.git|\.venvs|\.conda|data/milvus|logs|backups|certs|data/pdfs|data/extractions|data/corpus|data/processing|jupyter|searxng|thesis-exports"
 
 print_step "Finding empty directories..."
 print_info "Excluded: .git, .venvs/.conda, archive, data/milvus, data/processing, logs, backups, certs, runtime dirs"
@@ -100,7 +99,6 @@ general_empty_dirs=$(find . -type d -empty \
     ! -path "./data/corpus*" \
     ! -path "./data/processing*" \
     ! -path "./jupyter*" \
-    ! -path "./cliproxyapi*" \
     ! -path "./searxng*" \
     ! -path "./thesis-exports*" \
     2>/dev/null | sort)

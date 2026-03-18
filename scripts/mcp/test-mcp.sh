@@ -141,17 +141,9 @@ test_openwebui_tool_servers_endpoint() {
 test_mcp_config_syntax() {
     start_test "MCP config files are valid JSON"
     local config_files=()
-    if [[ -f "${SCRIPT_DIR}/config/mcp/config.json" ]]; then
-        config_files+=("${SCRIPT_DIR}/config/mcp/config.json")
-    else
-        config_files+=("${SCRIPT_DIR}/mcp/config.json")
-    fi
+    config_files+=("${SCRIPT_DIR}/config/mcp/config.json")
 
-    if [[ -f "${SCRIPT_DIR}/config/mcp/config.research.optional.json" ]]; then
-        config_files+=("${SCRIPT_DIR}/config/mcp/config.research.optional.json")
-    else
-        config_files+=("${SCRIPT_DIR}/mcp/config.research.optional.json")
-    fi
+    config_files+=("${SCRIPT_DIR}/config/mcp/config.research.optional.json")
     local file
     local all_valid=true
 
@@ -174,12 +166,12 @@ test_mcp_config_syntax() {
 }
 
 test_docker_compose_mcpo_service() {
-    start_test "MCPO service defined in docker-compose.yml"
+    start_test "MCPO service defined in config/compose/docker-compose.yml"
 
-    if grep -q "^  mcpo:" "${SCRIPT_DIR}/docker-compose.yml" 2>/dev/null; then
-        pass_test "MCPO service defined in docker-compose.yml"
+    if grep -q "^  mcpo:" "${SCRIPT_DIR}/config/compose/docker-compose.yml" 2>/dev/null; then
+        pass_test "MCPO service defined in config/compose/docker-compose.yml"
     else
-        fail_test "MCPO service not found in docker-compose.yml"
+        fail_test "MCPO service not found in config/compose/docker-compose.yml"
     fi
 }
 

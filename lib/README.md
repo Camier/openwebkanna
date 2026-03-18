@@ -166,7 +166,7 @@ print_success "Ready"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `COMPOSE_CMD` | `()` | Array holding detected compose command |
-| `COMPOSE_FILE` | `docker-compose.yml` | Path to compose file |
+| `COMPOSE_FILE` | `config/compose/docker-compose.yml` | Path to compose file |
 
 #### Functions
 

@@ -36,7 +36,6 @@ Behavior:
      - .mypy_cache
      - .ruff_cache
   2) Quarantines known runtime drift artifacts:
-     - vllm.log
      - config/searxng/settings.yml.new
      - logs/*.pid
   3) Quarantines stale timestamped rollup artifacts, keeping only the newest file per family:
@@ -94,7 +93,6 @@ mapfile -t cache_dirs < <(
 
 declare -a quarantine_candidates=()
 declare -a known_globs=(
-    "vllm.log"
     "config/searxng/settings.yml.new"
     "searxng/settings.yml.new"
     "logs/*.pid"

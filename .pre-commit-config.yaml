@@ -68,8 +68,6 @@ exclude: |
     data/|
     logs/|
     backups/|
-    cliproxyapi/auth/|
-    cliproxyapi/logs/|
     \.env|
     .*\.pid|
     .*\.log

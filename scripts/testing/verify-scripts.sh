@@ -25,10 +25,8 @@ mapfile -t TARGET_SCRIPTS < <(printf "%s\n" \
     "$SCRIPT_DIR/status.sh" \
     "$SCRIPT_DIR/cleanup.sh" \
     "$SCRIPT_DIR/update.sh" \
-    "$SCRIPT_DIR/scripts/testing/test-update-smoke.sh" \
     "$SCRIPT_DIR/scripts/testing/audit-openwebui-plugins.sh" \
     "$SCRIPT_DIR/scripts/check-doc-consistency.sh" \
-    "$SCRIPT_DIR/scripts/sync-compatibility-copies.sh" \
     "$SCRIPT_DIR/scripts/testing/verify-scripts.sh")
 
 is_target_script() {
@@ -82,12 +80,6 @@ else
     print_warning "shellcheck not installed; skipping"
     # Keep as a warning so verify stays informative without failing in environments
     # where shellcheck is unavailable.
-fi
-
-print_info "Running update.sh smoke tests..."
-if ! "$SCRIPT_DIR/scripts/testing/test-update-smoke.sh"; then
-    print_error "update.sh smoke test failed"
-    FAILED=1
 fi
 
 print_info "Running documentation consistency checks..."

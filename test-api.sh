@@ -29,41 +29,20 @@ resolve_openai_base_root() {
     if [[ $candidate == *"://host.docker.internal"* ]] && [ ! -f "/.dockerenv" ]; then
         candidate="$(printf "%s" "$candidate" | sed 's#://host.docker.internal#://localhost#')"
     fi
-    if [[ $candidate == *"://cliproxyapi"* ]]; then
-        candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
-    fi
     printf "%s" "$candidate"
-}
-
-should_run_cliproxy_smoke() {
-    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
-        return 0
-    fi
-
-    case "${OPENAI_BASE_ROOT:-${UPSTREAM_URL:-${VLLM_URL:-}}}" in
-        *cliproxyapi* | *127.0.0.1:8317* | *localhost:8317*)
-            return 0
-            ;;
-    esac
-
-    return 1
 }
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
-CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
-UPSTREAM_URL="${UPSTREAM_URL:-${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}}"
+UPSTREAM_URL="${UPSTREAM_URL:-${OPENAI_BASE_ROOT:-http://localhost:4000}}"
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
-CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
 OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 OPENWEBUI_TEST_MODEL="${OPENWEBUI_TEST_MODEL:-}"
 OPENWEBUI_SMOKE_MODEL_CANDIDATES="${OPENWEBUI_SMOKE_MODEL_CANDIDATES:-$(default_openwebui_smoke_model_candidates)}"
-CLIPROXY_BIN="${CLIPROXY_BIN:-./scripts/cliproxyapi/cli-proxy-api.sh}"
-CLIPROXYAPI_CHECK_SCRIPT="${CLIPROXYAPI_CHECK_SCRIPT:-./scripts/cliproxyapi/check-cliproxyapi.sh}"
 NO_MOCK_AUDIT_SCRIPT="${NO_MOCK_AUDIT_SCRIPT:-./scripts/testing/audit-no-mock.sh}"
 VERBOSE="${VERBOSE:-false}"
 OUTPUT_DIR="/tmp/openwebui_api_tests_$(date +%Y%m%d_%H%M%S)"
@@ -260,105 +239,6 @@ test_api_key_validation() {
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
     fi
-}
-
-# CliProxyApi Smoke Tests (managed runtime + client wrapper)
-test_cli_proxy_api_smoke() {
-    local response
-    local cliproxy_base="${CLIPROXYAPI_BASE_URL%/}"
-    local -a cliproxy_headers=()
-    local wrapper_upstream_api_key="${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}"
-
-    if [ -n "$CLIPROXYAPI_API_KEY" ]; then
-        cliproxy_headers=(-H "Authorization: Bearer $CLIPROXYAPI_API_KEY")
-    fi
-
-    test_start "CliProxyApi Disabled Lifecycle Negative Check"
-    if response=$(CLIPROXYAPI_ENABLED=false "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
-        save_response "cliproxyapi_disabled_lifecycle_check" "$response"
-        test_fail "check-cliproxyapi.sh unexpectedly passed with CLIPROXYAPI_ENABLED=false"
-    else
-        save_response "cliproxyapi_disabled_lifecycle_check" "$response"
-        if echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
-            test_pass
-        else
-            test_fail "Expected disabled lifecycle failure message was not found"
-        fi
-    fi
-
-    test_start "CliProxyApi Managed Health Check"
-    if response=$(CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false CLIPROXYAPI_API_KEY="$wrapper_upstream_api_key" "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
-        save_response "cliproxyapi_managed_health" "$response"
-        if echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
-            test_fail "check-cliproxyapi.sh reported disabled lifecycle; real runtime check did not run"
-        else
-            test_pass
-        fi
-    else
-        save_response "cliproxyapi_managed_health" "$response"
-        test_fail "CLIProxyAPI managed health check failed (set CLIPROXYAPI_ENABLED=true and start service)"
-    fi
-
-    test_start "CliProxyApi Root Endpoint"
-    if response=$(curl -sS -f "${cliproxy_base}/" 2>&1); then
-        save_response "cliproxyapi_root" "$response"
-        if command -v jq >/dev/null 2>&1; then
-            if echo "$response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1; then
-                test_pass
-            else
-                test_fail "CLIProxyAPI root response missing expected message"
-            fi
-        elif echo "$response" | grep -q "CLI Proxy API Server"; then
-            test_pass
-        else
-            test_fail "CLIProxyAPI root response missing expected message"
-        fi
-    else
-        save_response "cliproxyapi_root" "$response"
-        test_fail "CLIProxyAPI root endpoint failed: ${cliproxy_base}/"
-    fi
-
-    test_start "CliProxyApi Models Endpoint"
-    if response=$(curl -sS -f "${cliproxy_headers[@]}" "${cliproxy_base}/v1/models" 2>&1); then
-        save_response "cliproxyapi_models" "$response"
-        if has_non_empty_models_array "$response"; then
-            test_pass
-        else
-            test_fail "CLIProxyAPI /v1/models output missing expected non-empty models list"
-        fi
-    else
-        save_response "cliproxyapi_models" "$response"
-        test_fail "CLIProxyAPI models endpoint failed: ${cliproxy_base}/v1/models"
-    fi
-
-    test_start "CliProxyApi Wrapper Help"
-    if response=$("$CLIPROXY_BIN" --help 2>&1); then
-        save_response "cli_proxy_api_help" "$response"
-        if echo "$response" | grep -Fq "models [openwebui|webui|vllm|all]" &&
-            echo "$response" | grep -Fq "chat --model <id> --message <text>"; then
-            test_pass
-        else
-            test_fail "Help output missing expected command contract"
-        fi
-    else
-        save_response "cli_proxy_api_help" "$response"
-        test_fail "Command failed: $CLIPROXY_BIN --help"
-    fi
-
-    test_start "CliProxyApi Wrapper URL Override (models upstream via legacy 'vllm' command)"
-    if response=$(VLLM_API_KEY="$wrapper_upstream_api_key" "$CLIPROXY_BIN" --raw --url "$cliproxy_base" models vllm 2>&1); then
-        save_response "cli_proxy_api_models_vllm_override" "$response"
-        if has_non_empty_models_array "$response"; then
-            test_pass
-        else
-            test_fail "Wrapper override output missing expected non-empty models list"
-        fi
-    else
-        save_response "cli_proxy_api_models_vllm_override" "$response"
-        test_fail "Command failed: $CLIPROXY_BIN --raw --url \"$cliproxy_base\" models vllm"
-    fi
-
-    return 0
 }
 
 # Model Tests
@@ -892,15 +772,6 @@ main() {
     test_health_check
     test_root_endpoint
     test_api_key_validation
-
-    # CliProxyApi Smoke
-    if should_run_cliproxy_smoke; then
-        print_section "CliProxyApi Smoke"
-        test_cli_proxy_api_smoke
-    else
-        print_section "CliProxyApi Smoke"
-        print_info "Skipping CLIProxyAPI smoke checks (LiteLLM/non-CLIProxy primary mode)"
-    fi
 
     # Models
     print_section "Models API"

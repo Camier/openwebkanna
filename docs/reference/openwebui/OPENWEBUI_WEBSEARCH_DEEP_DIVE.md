@@ -3,7 +3,7 @@
 > Comprehensive guide to web search integration, configuration, and optimization for OpenWebUI deployments.
 > **Reference Snapshot Baseline:** OpenWebUI v0.8.3-era web-search behavior
 > **Runtime Truth:** `../../../README.md`, `../../../docs/REPO_MAP.md`, `../../../docs/runbooks/*`, `../../../config/env/.env.example`, `../../../config/compose/docker-compose.yml`
-> **Snapshot Notice:** This is background/reference material. For current repo deployment behavior, use `../../status/WEBSEARCH_DEPLOYMENT_STATUS.md` plus the live compose and env files.
+> **Snapshot Notice:** This is background/reference material. For current repo deployment behavior, use `../../status/WEBSEARCH_DEPLOYMENT_STATUS.md` plus `../../../config/compose/docker-compose.yml` and `../../../config/env/.env.example`.
 
 ---
 

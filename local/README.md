@@ -7,7 +7,7 @@ It keeps the repo root focused on the canonical operator scripts and versioned c
 
 ## Layout
 
-- `local/bin/`: local sidecar binaries and wrappers, such as `cliproxyapi`
+- `local/bin/`: local sidecar binaries and wrappers
 - `local/plugins/`: local tool payloads used by optional integrations
 - `local/entities/`: separate entity-maintenance workspace and its run outputs
 

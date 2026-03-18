@@ -15,15 +15,14 @@ Do not use this file as the full procedure reference:
 - use `config/README.md` before changing config files
 
 Layout note:
-- Root `docker-compose.yml`, `docker-compose.rg.yml`, `.env.example`, `mcp/`, `jupyter/`, and `searxng/` are compatibility copies of the canonical files under `config/`.
 - Canonical config paths live under `config/`, canonical runbooks/references live under `docs/`, the small daily operator surface lives at the repo root, and secondary maintenance or optional workflows live under `scripts/`.
-- Local directory maps now exist for the main subtrees: `config/README.md`, `scripts/README.md`, `artifacts/README.md`, `cliproxyapi/README.md`, `research/README.md`, and `local/README.md`.
+- Runtime service code that should not be reduced to shell wrappers lives under `services/`.
+- Local directory maps now exist for the main subtrees: `config/README.md`, `scripts/README.md`, `artifacts/README.md`, `research/README.md`, and `local/README.md`.
 - Local-only helper assets now live under `local/` instead of cluttering the repo root. This includes sidecar binaries under `local/bin/`, optional tool payloads under `local/plugins/`, and the separate entity-maintenance workspace under `local/entities/`.
 - `certs/` is reserved for local TLS material and placeholders such as `.gitkeep`; certificate files remain ignored by default.
 
 Editing rule:
 - Change `config/*` first for runtime behavior.
-- Use the root copies as daily operator entrypoints and compatibility surfaces.
 - Use `scripts/*` for narrower admin, testing, ingest, and optional-sidecar workflows.
 - Treat `docs/reference/openwebui/*` as upstream snapshot material, not live repo truth.
 
@@ -34,7 +33,7 @@ Use these first before exploring the rest of the tree:
 - `docs/ssot/stack.md`: canonical runtime topology, run modes, service registry, and drift protocol.
 - `docs/REPO_MAP.md`: repo-wide layout, operator entrypoints, config roots, and port inventory.
 - `docs/README.md`: doc routing so runbooks, guides, plans, and reference snapshots do not compete.
-- `config/README.md`: canonical config tree and root compatibility copies.
+- `config/README.md`: canonical config tree.
 - `scripts/README.md`: secondary utilities and maintenance helpers.
 
 ## Canonical edit targets
@@ -46,27 +45,25 @@ When you need to change behavior, use these paths first:
 - MCP registry: `config/mcp/config.json`
 - Jupyter config: `config/jupyter/jupyter_server_config.py`
 - SearXNG config: `config/searxng/settings.yml`
-- Embedding lanes/bindings: `config/embeddings/`
 
 ## Document ownership
 
 - `README.md` is the operator front door: quick start, high-signal commands, and the main workflow.
 - `docs/ssot/stack.md` owns runtime truth: run modes, critical services, critical paths, and drift gaps.
 - `docs/REPO_MAP.md` owns repository shape: where config, scripts, subprojects, and entrypoints live.
-- `config/README.md` owns the canonical edit surface under `config/` and the root compatibility-copy map.
+- `config/README.md` owns the canonical edit surface under `config/`.
 
 ## Runtime summary
 
 - Default supported mode is Docker Compose with OpenWebUI in containers and LiteLLM as the primary host-assisted upstream at `http://host.docker.internal:4000/v1`.
-- `searxng`, `cliproxyapi`, `open-terminal`, and `indigo-service` remain optional sidecars gated by profiles or env flags.
-- The committed `.env.example` now pins the shipped `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` by digest so fresh deploys do not drift when upstream tags move.
+- `searxng`, `open-terminal`, and `indigo-service` remain optional sidecars gated by profiles or env flags.
+- The committed `config/env/.env.example` now pins the shipped `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` by digest so fresh deploys do not drift when upstream tags move.
 - For the full runtime model, service registry, and drift notes, use `docs/ssot/stack.md`.
 
 ```text
 OpenWebUI (container) --> LiteLLM (host/container) --> providers
                      \
                       \--> optional sidecars:
-                           - CLIProxyAPI (legacy OAuth workflows)
                            - Open Terminal (terminal/file integration)
                            - Indigo Service (chemistry REST APIs)
 ```
@@ -74,8 +71,6 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
 ## Operational constraints
 
 - No mock, dummy, or monkey fallback path for integration checks.
-- OAuth aliases validated in this repo: `openai-codex`, `qwen-cli`, `kimi-cli`.
-- Manual OAuth login is expected and supported.
 
 ## Prerequisites
 
@@ -84,10 +79,8 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
 - LiteLLM credentials and reachable LiteLLM endpoint
 
 Not part of the baseline:
-- CLIProxyAPI OAuth credentials
 - Open Terminal API key
 - Indigo Service enablement
-- archived `vLLM` fallback tooling
 
 ## Quick start
 
@@ -97,7 +90,7 @@ Entrypoint note:
 
 1. Copy env file:
 ```bash
-cp .env.example .env
+cp config/env/.env.example .env
 ```
 
 2. Ensure these values are set in `.env` before the first deploy:
@@ -111,7 +104,6 @@ OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
 OPENAI_API_KEY=<litellm-master-key>
 VECTOR_DB=pgvector
-CLIPROXYAPI_ENABLED=false
 OPEN_TERMINAL_ENABLED=false
 INDIGO_SERVICE_ENABLED=false
 ```
@@ -132,11 +124,6 @@ docker compose config >/dev/null
 docker compose ps
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
-```
-
-Optional legacy sidecar check (only if `CLIPROXYAPI_ENABLED=true`):
-```bash
-./scripts/cliproxyapi/check-cliproxyapi.sh
 ```
 
 ## Daily operations
@@ -164,30 +151,18 @@ OPENWEBUI_TEST_MODEL="openrouter/openai/gpt-5-mini" ./test-api.sh --baseline
 Use these local documents instead of treating this file as a dump of every procedure:
 
 - [docs/runbooks/PREREQUISITES.md](docs/runbooks/PREREQUISITES.md): first-time setup and local prerequisites.
-- [docs/runbooks/OPERATIONS.md](docs/runbooks/OPERATIONS.md): day-to-day operations, updates, LLM Council, MCP setup, and maintenance flows.
+- [docs/runbooks/OPERATIONS.md](docs/runbooks/OPERATIONS.md): day-to-day operations, retrieval, MCP setup, and maintenance flows.
 - [docs/runbooks/TROUBLESHOOTING.md](docs/runbooks/TROUBLESHOOTING.md): account, model, RAG, proxy, and web-search triage.
-- [docs/runbooks/EMBEDDING_PROFILES.md](docs/runbooks/EMBEDDING_PROFILES.md): embedding lanes, model switching, and KB bindings.
 - [scripts/README.md](scripts/README.md): utility/audit helpers such as `check-image-versions.sh` and `audit-dependencies.sh`.
 
 Advanced optional flows:
 
-- CLIProxyAPI legacy OAuth sidecar: `scripts/cliproxyapi/setup-cliproxyapi.sh`, `scripts/cliproxyapi/start-cliproxyapi.sh`, `scripts/cliproxyapi/configure-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/test-cliproxyapi-oauth.sh`, `scripts/cliproxyapi/import-qwen-auth.sh`, `scripts/cliproxyapi/cli-proxy-api.sh`, `local/bin/`, `docs/runbooks/OPERATIONS.md`
 - Open Terminal smoke/integration flow: `scripts/open-terminal/test-openwebui-open-terminal.sh`
 - Indigo sidecar and tool registration: `scripts/indigo/start-indigo-service.sh`, `scripts/indigo/check-indigo-service.sh`, `scripts/indigo/enable-indigo-live.sh`, local tool source under `local/plugins/`
 - OpenWebUI tool repair/admin helpers: `scripts/testing/audit-openwebui-plugins.sh`, `scripts/testing/test-openwebui-tools-endpoints.sh`, `scripts/admin/repair-openwebui-tools.sh`, `scripts/admin/apply-openwebui-tool-patches.sh`
 - Entity-maintenance workspace, when present locally: `local/entities/README.md`
-- archived `vLLM` fallback scripts: `archive/`
 
 ## Focused local tasks
-
-Embedding profile flow:
-
-```bash
-./scripts/rag/manage-openwebui-embedding-profiles.sh list
-./scripts/rag/manage-openwebui-embedding-profiles.sh lanes
-./scripts/rag/manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
-./scripts/rag/manage-openwebui-embedding-profiles.sh diagnose
-```
 
 Validation loop:
 
@@ -196,17 +171,119 @@ Validation loop:
 ./test-api.sh --baseline
 ```
 
-Legacy sidecar OAuth flow, only if you intentionally enable `cliproxyapi`:
+Multimodal retrieval artifact from an existing OpenWebUI knowledge base:
 
 ```bash
-./scripts/cliproxyapi/configure-cliproxyapi-oauth.sh
-./scripts/cliproxyapi/test-cliproxyapi-oauth.sh
+./scripts/rag/render-multimodal-answer.sh \
+  --kb-name "Sceletium Research" \
+  --query "What is the structure of mesembrine?"
 ```
 
-LLM Council quick run:
+Direct multimodal retrieval API against the native `rag_evidence` Qdrant backend:
 
 ```bash
-./scripts/rag/llm-council.sh --prompt "Compare RAG vs fine-tuning for this local stack."
+PYTHONPATH=/LAB/@thesis/openwebui \
+MULTIMODAL_RETRIEVAL_API_QDRANT_URL=http://localhost:6333 \
+MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH=/path/to/nemotron-model \
+MULTIMODAL_RETRIEVAL_API_TEXT_SPARSE_MODEL_NAME=Qdrant/bm25 \
+/LAB/@thesis/wow/.venv/bin/python -m uvicorn \
+  services.multimodal_retrieval_api.app:app \
+  --host 127.0.0.1 \
+  --port 8510
+
+curl -fsS http://127.0.0.1:8510/health
+curl -fsS http://127.0.0.1:8510/ready
+curl -fsS -X POST http://127.0.0.1:8510/api/v1/retrieve \
+  -H 'content-type: application/json' \
+  -d '{"query":"mesembrine structure","top_k":3}'
+```
+
+One-shot migration/backfill into `rag_evidence`:
+
+```bash
+PYTHONPATH=/LAB/@thesis/openwebui \
+python scripts/rag/migrate_rag_evidence.py \
+  --manifest artifacts/rag/manifests/<run>.json \
+  --output-report artifacts/rag/migrate_rag_evidence.report.json
+```
+
+Optional compatibility env file:
+
+```bash
+export MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE=/LAB/@thesis/wow/.env
+```
+
+Build and use the CLIP-backed multimodal figure index (V2):
+
+```bash
+./scripts/rag/build-multimodal-index.sh
+./scripts/rag/render-multimodal-answer-v2.sh \
+  --kb-name "Sceletium Research" \
+  --query "What is the structure of mesembrine?"
+```
+
+Extract SMILES from `ChemicalBlock` images and persist `smiles_extracted.json` beside each extraction. The default path is now framework-first: `MolDetv2` detects molecule crops, then the selected OCSR backend parses each crop.
+
+```bash
+MOLGRAPHER_PYTHON_BIN=/path/to/molgrapher-env/bin/python \
+./scripts/rag/extract-chemical-smiles.sh \
+  --backend molgrapher \
+  --detector moldetv2-general \
+  --paper "Capps" \
+  --min-confidence 0.5 \
+  --overwrite
+```
+
+Use the local `smiles-extraction` Conda env to run the MolScribe replacement backend with the same detector stage:
+
+```bash
+MOLSCRIBE_PYTHON_BIN=/home/miko/.conda/envs/smiles-extraction/bin/python \
+./scripts/rag/extract-chemical-smiles.sh \
+  --backend molscribe \
+  --detector moldetv2-general \
+  --paper "Capps" \
+  --min-confidence 0.5 \
+  --overwrite
+```
+
+Compare both OCSR backends on the same `MolDetv2` crops and write `run.json`, `disagreements.json`, and `report.md` under `artifacts/chemical-ocsr-eval/`:
+
+```bash
+MOLGRAPHER_PYTHON_BIN=/LAB/@thesis/SMILES/tools/vendor/MolGrapher/.venv/bin/python \
+MOLSCRIBE_PYTHON_BIN=/home/miko/.conda/envs/smiles-extraction/bin/python \
+./scripts/eval/run-chemical-ocsr-eval.sh
+```
+
+Classify backend disagreements with RDKit-backed categories such as `substituent_drift`, `same_scaffold_variant`, and `placeholder_or_attachment`:
+
+```bash
+./scripts/eval/run-chemical-ocsr-disagreement-analysis.sh \
+  --out-dir artifacts/chemical-ocsr-eval/latest
+```
+
+Build a conservative fusion view over the same benchmark, splitting candidates into `consensus`, `complementary`, `review_required`, and `risky`, plus a per-paper `review_queue/` export and flat adjudication files (`review_queue.csv`, `review_queue.jsonl`):
+
+```bash
+./scripts/eval/run-chemical-ocsr-fusion-analysis.sh \
+  --out-dir artifacts/chemical-ocsr-eval/latest
+```
+
+Materialize `accepted` / `rejected` / `pending` exports from the adjudication queue. The script writes `adjudication_manual_*` outputs by default; pass `--apply-default-actions` to also materialize `adjudication_defaulted_*` outputs from the conservative defaults. Each run also emits an `accepted_catalog` export with compact ingestion-safe provenance (`effective_smiles`, backend match, page/block/crop, source image):
+
+```bash
+./scripts/eval/run-chemical-ocsr-adjudication-analysis.sh \
+  --out-dir artifacts/chemical-ocsr-eval/latest \
+  --apply-default-actions
+```
+
+Direct retrieval config inspection:
+
+```bash
+./scripts/admin/sync-openwebui-retrieval-config.sh
+
+OPENWEBUI_API_KEY="<admin-bearer-token>"
+curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
+  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/config" | jq
 ```
 
 ## Maintenance
@@ -222,8 +299,7 @@ Use the local maintenance surface, not this README, for detailed policy and edge
 
 When updating runtime behavior:
 
-- edit `config/` first, not the root compatibility copies
-- run `./scripts/sync-compatibility-copies.sh` if the root compatibility copies need to be refreshed
+- edit `config/` first for runtime behavior
 - re-run `./scripts/check-doc-consistency.sh`
 - re-run `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline`
 

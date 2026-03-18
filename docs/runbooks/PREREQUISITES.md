@@ -17,6 +17,12 @@ If a required item fails, fix it before running `./deploy.sh`.
 docker info >/dev/null
 ```
 
+1.a Host cgroup-runtime sanity check
+```bash
+docker run --rm --network none busybox:latest true
+```
+This validates the host/runtime can start a container before full deploy. If this fails with a cgroup-scoped error, fix Docker cgroup delegation first (systemd + cgroup driver mismatch is the typical root cause in this environment).
+
 2. Docker Compose plugin available
 ```bash
 docker compose version
@@ -30,7 +36,7 @@ command -v jq
 
 4. Repo env file prepared
 ```bash
-cp .env.example .env
+cp config/env/.env.example .env
 ```
 
 5. Required `.env` defaults present
@@ -70,37 +76,12 @@ Expected values for LiteLLM-first mode:
 - `OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1`
 - `OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1`
 - `OPENAI_API_KEY=<litellm-master-key>`
-- `CLIPROXYAPI_ENABLED=false`
 - `OPEN_TERMINAL_ENABLED=false`
 - `INDIGO_SERVICE_ENABLED=false`
 
 For the complete committed baseline and image defaults, use `config/env/.env.example`.
 
 Advanced optional prerequisites are not required for the baseline runtime.
-
-## Optional CLIProxyAPI OAuth prerequisites (legacy sidecar only)
-
-For aliases `openai-codex`, `qwen-cli`, `kimi-cli`:
-
-1. Complete provider OAuth manually when prompted.
-2. Ensure auth artifacts exist under `cliproxyapi/auth/`.
-3. Confirm aliases are visible:
-```bash
-curl -sS -H "Authorization: Bearer ${CLIPROXYAPI_API_KEY:-layra-cliproxyapi-key}" \
-  http://127.0.0.1:8317/v1/models | jq .
-```
-
-## Archived fallback prerequisites (only if enabling `vLLM`)
-
-- Python runtime with `vllm` installed
-- GPU and CUDA compatibility
-- Free port `8000`
-
-Check fallback prerequisites:
-```bash
-python3 -c "import vllm"
-lsof -nP -iTCP:8000 -sTCP:LISTEN || true
-```
 
 ## Pre-deploy verification
 

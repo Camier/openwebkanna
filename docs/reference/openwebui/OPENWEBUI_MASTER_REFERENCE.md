@@ -1,7 +1,7 @@
 # OpenWebUI Master Technical Reference
 
 > **Reference Snapshot Baseline:** OpenWebUI v0.8.3
-> **Repository:** LiteLLM-first deployment (CLIProxyAPI optional legacy sidecar)
+> **Repository:** LiteLLM-first deployment with canonical config surfaces under `config/`
 > **Last Updated:** 2026-03-03
 > **Runtime Truth:** `README.md`, `docs/REPO_MAP.md`, `docs/runbooks/*`, `config/env/.env.example`, `config/compose/docker-compose.yml`
 
@@ -533,11 +533,10 @@ class Filter:
 ### 8.1 Deploy OpenWebUI (Repository-Specific)
 
 This repository uses LiteLLM as the reference OpenAI-compatible upstream.
-CLIProxyAPI is optional and only for legacy OAuth alias workflows.
 
 ```bash
 # 1. Prepare environment
-cp .env.example .env
+cp config/env/.env.example .env
 # Edit .env to set required values:
 # - WEBUI_SECRET_KEY (>=32 bytes)
 # - OPENAI_API_KEY (for LiteLLM)
@@ -555,12 +554,10 @@ cp .env.example .env
 ./test-api.sh --baseline
 ```
 
-**Note:** Optional legacy OAuth sidecar setup is available via `./configure-cliproxyapi-oauth.sh`.
-
 ### 8.2 Enable RAG with Custom Settings
 
 ```bash
-# docker-compose.yml environment
+# config/compose/docker-compose.yml environment
 environment:
   - RAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
   - RAG_TOP_K=5

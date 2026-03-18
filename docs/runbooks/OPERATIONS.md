@@ -51,8 +51,6 @@ Normal post-change validation loop:
 #### Check Status
 ```bash
 ./status.sh
-# Optional legacy sidecar check (only if CLIPROXYAPI_ENABLED=true):
-./scripts/cliproxyapi/check-cliproxyapi.sh
 ```
 
 #### View Logs
@@ -66,14 +64,12 @@ docker compose logs --tail=100 openwebui
 #### Restart Services
 ```bash
 docker compose restart openwebui
-# Optional legacy sidecar restart (only if CLIPROXYAPI_ENABLED=true):
-./scripts/cliproxyapi/restart-cliproxyapi.sh
 ```
 
 #### Stop Stack
 ```bash
 docker compose down
-./cleanup.sh                 # Includes archived fallback cleanup if you explicitly enabled it
+./cleanup.sh
 ```
 
 ---
@@ -109,60 +105,46 @@ IMPORT_PDFS_PARALLELISM=3 ./scripts/rag/import-pdfs-to-kb.sh
 ### Tune RAG Settings
 
 Prefer `./test-rag.sh --baseline` for the normal health signal.
-Use the raw retrieval endpoint only for advanced debugging when you already have an admin bearer token:
+For advanced debugging, inspect and update the live retrieval config directly through the OpenWebUI API when you already have an admin bearer token:
 
 ```bash
-OPENWEBUI_API_KEY="<admin-bearer-token>" \
+OPENWEBUI_API_KEY="<admin-bearer-token>"
 curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
-  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/" | jq
+  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/config" | jq
 ```
 
-**Apply optimized settings (env overrides + `--apply`):**
-```bash
-# For focused factual retrieval
-TUNE_TOP_K=8 \
-TUNE_CHUNK_SIZE=1800 \
-TUNE_CHUNK_OVERLAP=200 \
-./scripts/rag/tune-openwebui-documents.sh --apply
+Prefer this deployment-sync path to keep `.env` and live retrieval DB in sync (including multimodal extraction defaults):
 
-# For broader conceptual retrieval
-TUNE_TOP_K=15 \
-TUNE_CHUNK_SIZE=3000 \
-TUNE_CHUNK_OVERLAP=600 \
-./scripts/rag/tune-openwebui-documents.sh --apply
+```bash
+./scripts/admin/sync-openwebui-retrieval-config.sh
 ```
 
-These are intentional tuning examples, not hidden baseline defaults. The committed baseline remains `RAG_TOP_K=15`, `CHUNK_SIZE=3000`, `CHUNK_OVERLAP=600`, and `RAG_EMBEDDING_MODEL=pritamdeka/S-PubMedBert-MS-MARCO`.
-
-**Snapshot current config to a custom directory:**
+**Apply an explicit retrieval update:**
 ```bash
-./scripts/rag/tune-openwebui-documents.sh --snapshot-dir backups/rag-snapshots
+OPENWEBUI_API_KEY="<admin-bearer-token>"
+curl -s -X POST \
+  -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"TOP_K":8,"CHUNK_SIZE":1800,"CHUNK_OVERLAP":200,"CONTENT_EXTRACTION_ENGINE":"docling","PDF_EXTRACT_IMAGES":true}' \
+  "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/config/update" | jq
 ```
 
-**Restore retrieval/embedding settings from a snapshot:**
+The committed baseline remains `RAG_TOP_K=15`, `CHUNK_SIZE=3000`, `CHUNK_OVERLAP=600`, and `RAG_EMBEDDING_MODEL=pritamdeka/S-PubMedBert-MS-MARCO`.
+
+**Snapshot current retrieval + embedding config before changing it:**
 ```bash
-./scripts/rag/tune-openwebui-documents.sh \
-  --restore backups/rag-snapshots/openwebui-documents-snapshot-YYYYMMDD-HHMMSS.json
+OPENWEBUI_API_KEY="<admin-bearer-token>"
+jq -n \
+  --argjson retrieval "$(curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/config")" \
+  --argjson embedding "$(curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" "http://127.0.0.1:${WEBUI_PORT:-3000}/api/v1/retrieval/embedding")" \
+  '{retrieval:$retrieval, embedding:$embedding}' \
+  > "backups/openwebui-retrieval-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
 
-### Embedding Profiles (Reusable KB Use Cases)
-
-Use the embedding profiles architecture for clean model lifecycle, KB bindings, and drift checks.
-Source of truth:
-- `docs/runbooks/EMBEDDING_PROFILES.md`
-
-Daily operator flow:
-
+**Check whether indexed chunks match the active embedding model:**
 ```bash
-# Inspect runtime and available lanes
-./scripts/rag/manage-openwebui-embedding-profiles.sh list
-./scripts/rag/manage-openwebui-embedding-profiles.sh lanes
-
-# Activate biomedical text lane
-./scripts/rag/manage-openwebui-embedding-profiles.sh use-kb --lane sceletium --prewarm
-
-# Diagnose compatibility/drift
-./scripts/rag/manage-openwebui-embedding-profiles.sh diagnose
+docker compose exec postgres psql -U openwebui -d openwebui -c \
+  "SELECT DISTINCT collection_name, vmetadata->>'embedding_config' AS embedding_config FROM document_chunk ORDER BY collection_name;"
 ```
 
 ### Test RAG
@@ -194,74 +176,6 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 ```bash
 ./scripts/admin/backup-openwebui-db.sh
 ```
-
----
-
-## LLM Council
-
-### Quick Evaluation
-```bash
-./scripts/rag/llm-council.sh --prompt "Compare RAG vs fine-tuning for academic papers"
-```
-
-### Multi-Model Benchmark
-```bash
-./scripts/rag/llm-council.sh --models "glm-5 minimax/chat-elite" \
-  --prompt "Explain the mechanism of action of Sceletium tortuosum"
-```
-
-### Batch Evaluation
-```bash
-./scripts/rag/llm-council.sh --prompts-file data/notes/evaluation_prompts.txt \
-  --models "glm-5 minimax/chat-elite" \
-  --output-dir logs/llm-council/batch-1
-```
-
-### Anti-Position-Bias Testing
-```bash
-./scripts/rag/llm-council.sh --models "glm-5 minimax/chat-elite" \
-  --prompt "Which response is more accurate: A or B?" \
-  --position-swap
-```
-
----
-
-## Legacy CLIProxyAPI Operations
-
-### Start/Stop
-```bash
-./scripts/cliproxyapi/start-cliproxyapi.sh
-./scripts/cliproxyapi/stop-cliproxyapi.sh
-./scripts/cliproxyapi/restart-cliproxyapi.sh
-```
-
-### Health Check
-```bash
-./scripts/cliproxyapi/check-cliproxyapi.sh
-./scripts/cliproxyapi/check-cliproxyapi.sh --models
-```
-
-### Configure Providers
-```bash
-# Generate config from ~/.007 secrets
-./configure-cliproxyapi-providers.sh
-
-# Setup OAuth (interactive)
-./scripts/cliproxyapi/configure-cliproxyapi-oauth.sh
-```
-
-### Rotate API Key
-```bash
-./scripts/cliproxyapi/rotate-cliproxyapi-local-key.sh
-```
-
-### Test OAuth Aliases
-```bash
-./scripts/cliproxyapi/test-cliproxyapi-oauth.sh
-./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
-```
-
----
 
 ## MCP Operations
 
@@ -335,9 +249,6 @@ curl -fsS "http://127.0.0.1:${WEBUI_PORT:-3000}/health" >/dev/null && echo "open
 # Raw probes for advanced debugging
 curl "http://127.0.0.1:${WEBUI_PORT:-3000}/health"
 
-# CLIProxyAPI (only if enabled)
-curl http://localhost:8317/health
-
 # MCPO
 curl http://localhost:8000/docs
 
@@ -347,9 +258,6 @@ docker compose exec postgres pg_isready -U openwebui
 
 ### Model Availability
 ```bash
-# From CLIProxyAPI (only if enabled)
-./scripts/cliproxyapi/check-cliproxyapi.sh --models
-
 # From OpenWebUI (advanced debug; requires an admin bearer token)
 OPENWEBUI_API_KEY="<admin-bearer-token>" \
 curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
@@ -462,7 +370,6 @@ docker image prune -a
 ### Verify Scripts
 ```bash
 ./scripts/testing/verify-scripts.sh
-./scripts/testing/test-update-smoke.sh
 ```
 
 ---
@@ -475,6 +382,22 @@ Use the canonical sources instead of this runbook for static reference data:
 - Canonical config edit surface: `config/README.md`
 - Runtime topology and service roles: `docs/ssot/stack.md`
 - Repository layout and key paths: `docs/REPO_MAP.md`
+
+---
+
+## Deploy preflight recovery
+
+`./deploy.sh` includes a Docker runtime preflight that checks cgroup/container startup before full stack launch.
+
+If preflight fails with a cgroup error:
+- confirm Docker daemon starts cleanly and `/etc/docker/daemon.json` is explicit about the host cgroup contract
+- on this deployment path, keep this runtime stanza in daemon config for stability:
+  - `"exec-opts": ["native.cgroupdriver=cgroupfs"]`
+- restart Docker and rerun `./deploy.sh`
+- then run:
+  - `./status.sh`
+  - `./test-api.sh --baseline`
+  - `./test-rag.sh --baseline`
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "_comment": "This is an OPTIONAL configuration file for external/research MCP servers.",
-  "_note": "Copy required servers to config/mcp/config.json (or the root compatibility copy mcp/config.json) or source this file via MCPO_CONFIG env var.",
+  "_note": "Copy required servers to config/mcp/config.json or source this file via MCPO_CONFIG env var.",
   "mcpServers": {
     "zotero_plugin_streamable": {
       "type": "streamable-http",

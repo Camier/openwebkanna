@@ -313,12 +313,6 @@ services:
     networks:
       - openwebui_network
 
-  # Optional legacy CLIProxyAPI sidecar (deprecated as primary upstream)
-  # cliproxyapi:
-  #   # ... your existing config ...
-  #   networks:
-  #     - openwebui_network
-
   # MCPO for MCP servers (already part of this repo architecture)
   mcpo:
     image: ghcr.io/open-webui/mcpo:latest

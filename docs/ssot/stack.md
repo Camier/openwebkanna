@@ -1,6 +1,6 @@
 # Stack SSOT
 
-Last updated: 2026-03-13 (UTC)
+Last updated: 2026-03-15 (UTC)
 Scope: `/LAB/@thesis/openwebui`
 
 ## North Star + DoD
@@ -9,9 +9,9 @@ This repository should remain an operator-facing deployment layer for OpenWebUI-
 
 Definition of done for topology changes in this repo:
 
-- deployment truth is recoverable from `docs/ssot/stack.md`, `docs/ssot/stack.yaml`, `README.md`, `.env.example`, and `docker-compose.yml`
+- deployment truth is recoverable from `docs/ssot/stack.md`, `docs/ssot/stack.yaml`, `README.md`, `config/env/.env.example`, and `config/compose/docker-compose.yml`
 - `README.md` stays a front door, `docs/REPO_MAP.md` stays a layout map, and this document owns runtime topology
-- docs distinguish the canonical edit surface (`config/*`) from the live operator entrypoints/root compatibility copies
+- docs distinguish the canonical edit surface (`config/*`) from the daily operator entrypoints
 - every critical service is named, justified, and backed by evidence
 - optional profiles remain explicitly labeled optional
 - drift between docs, env defaults, and scripts is recorded instead of hand-waved away
@@ -20,24 +20,24 @@ Definition of done for topology changes in this repo:
 
 ### Docker primary
 
-Default supported mode. Operators run the root compatibility entrypoints (`./deploy.sh`, `./status.sh`, `docker-compose.yml`, `.env`), while `config/*` remains the canonical edit surface and is checked for byte-for-byte alignment.
+Default supported mode. Operators run the root shell entrypoints (`./deploy.sh`, `./status.sh`, `.env`), while compose and committed defaults come from `config/*`.
 
 Evidence:
 
 - `deploy.sh`
 - `status.sh`
-- `docker-compose.yml`
+- `config/compose/docker-compose.yml`
 - `config/README.md`
 - `scripts/check-doc-consistency.sh`
 
 ### Docker RG build variant
 
-Supported build variant for `openwebui` only. `docker-compose.rg.yml` overrides the `openwebui` image build to use `Dockerfile.openwebui-rg`; it is not a second full-stack topology.
+Supported build variant for `openwebui` only. `config/compose/docker-compose.rg.yml` overrides the `openwebui` image build to use `config/docker/Dockerfile.openwebui-rg`; it is not a second full-stack topology.
 
 Evidence:
 
-- `docker-compose.rg.yml`
-- `Dockerfile.openwebui-rg`
+- `config/compose/docker-compose.rg.yml`
+- `config/docker/Dockerfile.openwebui-rg`
 
 ### Host-assisted upstreams
 
@@ -45,28 +45,31 @@ The Docker stack depends on host-provided or host-mounted resources, especially 
 
 Evidence:
 
-- `.env.example`
-- `docker-compose.yml`
+- `config/env/.env.example`
+- `config/compose/docker-compose.yml`
 - `README.md`
+
+### Host-native retrieval adjunct
+
+Supported local adjunct mode for the native multimodal retrieval API. This
+service is not part of the compose baseline; operators can run it separately on
+the host to query the `rag_evidence` Qdrant collection through one-collection
+text, visual, and exact-chemistry lanes.
+
+Evidence:
+
+- `services/README.md`
+- `README.md`
+- `services/multimodal_retrieval_api/service.py`
 
 ### Optional profile sidecars
 
-`cliproxyapi`, `open-terminal`, and `indigo-service` are opt-in profiles or feature-flagged sidecars. `deploy.sh` starts or stops them only when the corresponding env flags are enabled.
+`open-terminal` and `indigo-service` are opt-in profiles or feature-flagged sidecars. `deploy.sh` starts or stops them only when the corresponding env flags are enabled.
 
 Evidence:
 
-- `docker-compose.yml`
+- `config/compose/docker-compose.yml`
 - `deploy.sh`
-- `README.md`
-
-### Archived host fallback
-
-Archived host-side `vLLM` lifecycle scripts remain for fallback/reference only and are not part of the default deploy path.
-
-Evidence:
-
-- `archive/README.md`
-- `archive/start-vllm.sh`
 - `README.md`
 
 ### Kubernetes / system service modes
@@ -85,39 +88,39 @@ Evidence:
 - Role: primary UI/API and orchestration surface.
 - Critical because it is the user entrypoint and depends on `postgres`, `jupyter`, `mcpo`, and `docling`.
 - Run mode: `docker-primary`
-- Evidence: `docker-compose.yml`, `README.md`
+- Evidence: `config/compose/docker-compose.yml`, `README.md`
 
 2. `litellm`
 - Role: primary OpenAI-compatible upstream for model discovery and generation.
 - Critical because it is the external adapter on the main E2E query path.
 - Run mode: `host-assisted-upstreams`
-- Evidence: `.env.example`, `README.md`, `status.sh`
+- Evidence: `config/env/.env.example`, `README.md`, `status.sh`
 
 3. `postgres`
 - Role: stateful postgres/pgvector service for application data and the default OpenWebUI vector backend in this repo.
 - Critical because it stores persistent state and serves multiple dependents.
-- Important nuance: postgres is always deployed and the committed `.env.example` now defaults OpenWebUI itself to `VECTOR_DB=pgvector`, so pgvector is the baseline retrieval backend for this repo.
+- Important nuance: postgres is always deployed and the committed `config/env/.env.example` now defaults OpenWebUI itself to `VECTOR_DB=pgvector`, so pgvector is the baseline retrieval backend for this repo.
 - Run mode: `docker-primary`
-- Evidence: `docker-compose.yml`, `.env.example`
+- Evidence: `config/compose/docker-compose.yml`, `config/env/.env.example`
 
 4. `jupyter`
 - Role: code execution and code-interpreter backend.
 - Critical because code execution is enabled by default and `openwebui` waits for a healthy Jupyter service.
 - Run mode: `docker-primary`
-- Evidence: `docker-compose.yml`, `.env.example`, `jupyter/jupyter_server_config.py`
+- Evidence: `config/compose/docker-compose.yml`, `config/env/.env.example`, `config/jupyter/jupyter_server_config.py`
 
 5. `mcpo`
 - Role: MCP-to-OpenAPI bridge used for OpenWebUI tool exposure.
 - Critical because tool integrations depend on it and `openwebui` waits for it during startup.
 - Important nuance: the committed env template now pins `MCPO_IMAGE` by digest instead of tracking the floating `main` tag, so fresh deploys stay reproducible across time.
 - Run mode: `docker-primary`
-- Evidence: `docker-compose.yml`, `mcp/config.json`
+- Evidence: `config/compose/docker-compose.yml`, `config/mcp/config.json`
 
 6. `docling`
 - Role: multimodal extraction backend.
 - Critical because `openwebui` waits for a healthy `docling` service and ingest features depend on it.
 - Run mode: `docker-primary`
-- Evidence: `docker-compose.yml`, `README.md`
+- Evidence: `config/compose/docker-compose.yml`, `README.md`
 
 ### Supporting and optional services
 
@@ -125,26 +128,27 @@ Evidence:
 - Role: local web-search backend for OpenWebUI web search.
 - Non-critical because it is only needed when OpenWebUI web search is enabled.
 - Run mode: `optional-profile-sidecars`
-- Evidence: `docker-compose.yml`, `.env.example`, `config/searxng/settings.yml`
+- Evidence: `config/compose/docker-compose.yml`, `config/env/.env.example`, `config/searxng/settings.yml`
 
-8. `cliproxyapi`
-- Role: optional legacy OAuth alias sidecar.
-- Non-critical because LiteLLM is the primary upstream and this sidecar is profile-gated.
-- Run mode: `optional-profile-sidecars`
-- Evidence: `docker-compose.yml`, `.env.example`, `cliproxyapi/config.yaml`
-
-9. `open-terminal`
+8. `open-terminal`
 - Role: optional terminal and file-server sidecar.
 - Non-critical because it is profile-gated and disabled by default.
 - Run mode: `optional-profile-sidecars`
-- Evidence: `docker-compose.yml`, `.env.example`, `README.md`
+- Evidence: `config/compose/docker-compose.yml`, `config/env/.env.example`, `README.md`
 
-10. `indigo-service`
+9. `indigo-service`
 - Role: optional chemistry REST sidecar for Indigo-based tooling.
 - Non-critical because it is profile-gated and disabled by default.
 - Important nuance: the committed env template now pins `INDIGO_SERVICE_IMAGE` by digest even though the upstream workflow still advertises `latest`.
 - Run mode: `optional-profile-sidecars`
-- Evidence: `docker-compose.yml`, `.env.example`, `README.md`
+- Evidence: `config/compose/docker-compose.yml`, `config/env/.env.example`, `README.md`
+
+10. `multimodal_retrieval_api`
+- Role: optional host-native retrieval API for one-collection multimodal RAG over `rag_evidence`.
+- Non-critical because it is not part of the compose baseline and is operated separately when multimodal/native retrieval workflows need it.
+- Important nuance: it now uses native `qdrant-client`, native Transformers/FastEmbed query encoding, lane-based readiness reporting, and a sampled `rag_evidence` completeness probe; it no longer delegates live retrieval through `thesis_graph`.
+- Run mode: `host-native-retrieval-adjunct`
+- Evidence: `services/README.md`, `README.md`, `services/multimodal_retrieval_api/service.py`
 
 ## Critical Paths
 
@@ -156,20 +160,40 @@ Evidence:
 
 - `README.md`
 - `deploy.sh`
-- `docker-compose.yml`
+- `config/compose/docker-compose.yml`
 - `status.sh`
 
 ### Query / generation (default committed settings)
 
 `browser -> openwebui -> postgres/pgvector -> LiteLLM(host) -> upstream provider`
 
-This is the default OpenWebUI retrieval/generation path implied by `.env.example` because `VECTOR_DB=pgvector` is now the committed baseline for this repo.
+This is the default OpenWebUI retrieval/generation path implied by `config/env/.env.example` because `VECTOR_DB=pgvector` is now the committed baseline for this repo.
 
 Evidence:
 
-- `.env.example`
-- `docker-compose.yml`
+- `config/env/.env.example`
+- `config/compose/docker-compose.yml`
 - `README.md`
+
+### Native multimodal retrieval API
+
+`client -> multimodal_retrieval_api -> qdrant(rag_evidence) -> text lane + visual lane + exact chemistry lane`
+
+This path is a supported host-native adjunct for multimodal/SMILES retrieval.
+It is separate from the OpenWebUI pgvector baseline and uses `rag_evidence` as
+its sole runtime evidence source. Missing figure payloads are surfaced as
+runtime diagnostics instead of triggering local extraction fallbacks.
+
+Operational nuance:
+
+- `/ready` now samples `page` points in `rag_evidence` and reports collection completeness for native `figure_records`.
+- A `degraded` readiness state can therefore mean runtime prerequisites are missing, or that sampled native evidence coverage is incomplete.
+
+Evidence:
+
+- `services/README.md`
+- `README.md`
+- `services/multimodal_retrieval_api/service.py`
 
 ### Query / generation (chroma fallback mode)
 
@@ -179,8 +203,8 @@ This path is still supported when `VECTOR_DB=chroma` is set explicitly.
 
 Evidence:
 
-- `.env.example`
-- `docker-compose.yml`
+- `config/env/.env.example`
+- `config/compose/docker-compose.yml`
 
 ### Ingest
 
@@ -209,17 +233,19 @@ Evidence:
 Evidence:
 
 - `README.md`
-- `.env.example`
-- `docker-compose.yml`
-- `mcp/config.json`
+- `config/env/.env.example`
+- `config/compose/docker-compose.yml`
+- `config/mcp/config.json`
 
 ## Drift Radar
 
-- `config/*` is the canonical edit surface, but live scripts execute the root compatibility copies; both surfaces must remain byte-aligned.
+- `config/*` is the canonical edit surface for committed runtime behavior.
 - Compose environment fallbacks must match the committed env template, especially for baseline retrieval flags such as `VECTOR_DB` and `ENABLE_RAG_HYBRID_SEARCH`.
-- Critical and shipped sidecar images should be pinned to immutable digests in `.env.example` when upstream defaults are floating tags such as `main` or `latest`.
+- Critical and shipped sidecar images should be pinned to immutable digests in `config/env/.env.example` when upstream defaults are floating tags such as `main` or `latest`.
 - postgres is always deployed and the committed default now uses `VECTOR_DB=pgvector`; if you switch a local runtime to `chroma`, document that as an intentional override because it changes where vectors persist.
 - Optional sidecars remain supported, but the normal baseline should keep them disabled unless a concrete workflow needs them.
+- `multimodal_retrieval_api` is a supported host-native adjunct, not a compose-managed baseline service; keep docs explicit about that boundary.
+- The native multimodal retrieval path now targets `rag_evidence` directly; do not describe it as delegating to `thesis_graph`.
 - Legacy project containers outside the current compose config should be removed instead of being treated as part of the supported topology.
 
 ## Observed Local Runtime
@@ -239,25 +265,26 @@ Observed from `./status.sh`, `.env`, `docker compose config --services`, and `do
 
 Update this SSOT when any of the following change:
 
-- `docker-compose.yml` or `docker-compose.rg.yml`
-- `.env.example` defaults that affect topology, ports, or primary upstreams
+- `config/compose/docker-compose.yml` or `config/compose/docker-compose.rg.yml`
+- `config/env/.env.example` defaults that affect topology, ports, or primary upstreams
 - `deploy.sh`, `status.sh`, `update.sh`, or `cleanup.sh`
 - profile-gated sidecars and their enablement flags
 - CI gates that change the deploy, ingest, or eval path
 
 Minimum refresh checklist:
 
-1. Re-scan `docker-compose*.yml`, `.env.example`, `deploy.sh`, and `status.sh`.
+1. Re-scan `config/compose/docker-compose*.yml`, `config/env/.env.example`, `deploy.sh`, and `status.sh`.
 2. Update `docs/ssot/stack.md` and `docs/ssot/stack.yaml`.
 3. Update `README.md` if the operator-facing summary changed, and update `docs/REPO_MAP.md` only when repo layout, entrypoint ownership, or config-root navigation changed.
-4. Restore any broken root compatibility copies before running consistency checks.
+4. Re-run the baseline validation scripts after runtime changes.
 5. Run `./scripts/check-doc-consistency.sh`.
 6. If runtime behavior changed, run `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline`.
 
 ## Changelog
 
-- `2026-03-13`: aligned `docker-compose.yml` environment fallbacks with the committed Docker baseline by restoring `pgvector` and hybrid retrieval as the default fallback values, refreshed the observed-runtime date, and tightened drift guidance so compose defaults, `.env.example`, and the SSOT stay synchronized.
+- `2026-03-15`: added the host-native multimodal retrieval API as a supported adjunct run mode and service, documented the `rag_evidence` one-collection query path, and removed stale references to live `thesis_graph` delegation from the runtime topology.
+- `2026-03-13`: aligned `config/compose/docker-compose.yml` environment fallbacks with the committed Docker baseline by restoring `pgvector` and hybrid retrieval as the default fallback values, refreshed the observed-runtime date, and tightened drift guidance so compose defaults, `config/env/.env.example`, and the SSOT stay synchronized.
 - `2026-03-13`: pinned `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` to verified digests in the committed env template so fresh deploys do not drift with upstream `main` or `latest` tags.
 - `2026-03-11`: normalized the repo and local baseline around a regular OpenWebUI RAG topology by making `pgvector` the committed default backend, aligning the committed embedding baseline with the currently indexed OpenWebUI corpus, removing repo-level SMILES retrieval env defaults, returning local runtime ports/image/sidecars to the standard baseline, and treating legacy compose orphans as cleanup targets instead of supported topology.
-- `2026-03-10`: refreshed the SSOT against current runtime entrypoints, added LiteLLM and Docling as explicit critical services, separated default `chroma` mode from optional OpenWebUI `pgvector` mode, restored the root `searxng/` compatibility copy, corrected the live MCPO default back to `ghcr.io/open-webui/mcpo:main`, and removed stale vLLM-primary wording from operator scripts.
+- `2026-03-10`: refreshed the SSOT against current runtime entrypoints, added LiteLLM and Docling as explicit critical services, separated default `chroma` mode from optional OpenWebUI `pgvector` mode, corrected the live MCPO default back to `ghcr.io/open-webui/mcpo:main`, and removed stale legacy-upstream wording from operator scripts.
 - `2026-03-09`: created explicit stack SSOT and aligned repo-navigation docs around canonical config/docs/ops surfaces.

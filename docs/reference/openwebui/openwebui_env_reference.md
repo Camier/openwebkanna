@@ -14,7 +14,7 @@
 
 > **Snapshot Scope:** OpenWebUI v0.8.3-era configuration reference
 > **Source:** [Official OpenWebUI Documentation](https://docs.openwebui.com/reference/env-configuration/) and [GitHub Source](https://github.com/open-webui/open-webui)
-> **Snapshot Notice:** Validate all deployment-sensitive values against this repo's current `.env.example` and compose files before acting.
+> **Snapshot Notice:** Validate all deployment-sensitive values against this repo's current `config/env/.env.example` and compose files before acting.
 
 ---
 

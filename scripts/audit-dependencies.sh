@@ -94,7 +94,6 @@ fi
 # service_name corresponds to docker-compose service names
 declare -A IMAGES=(
     ["openwebui"]="openwebui"
-    ["cliproxyapi"]="cliproxyapi"
     ["pgvector"]="pgvector"
     ["jupyter"]="jupyter"
 )
@@ -147,12 +146,12 @@ check_trivy_installed() {
 
 get_image_info() {
     local service_name="$1"
-    local compose_file="${COMPOSE_FILE:-${PROJECT_ROOT}/docker-compose.yml}"
+    local compose_file="${COMPOSE_FILE:-${PROJECT_ROOT}/config/compose/docker-compose.yml}"
 
     # Try to get image from docker-compose config
     if [[ -f $compose_file ]]; then
         local image
-        image=$(docker compose -f "$compose_file" config 2>/dev/null |
+        image=$(docker compose --project-directory "$PROJECT_ROOT" -f "$compose_file" config 2>/dev/null |
             grep -A2 "^[[:space:]]*${service_name}:" |
             grep "image:" |
             head -1 |

@@ -14,7 +14,7 @@ load_env_defaults
 cd "$SCRIPT_DIR"
 
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
-COMPOSE_FILE="docker-compose.yml"
+COMPOSE_FILE="config/compose/docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 PLUGIN_AUDIT_ENABLED="${PLUGIN_AUDIT_ENABLED:-true}"
 PLUGIN_AUDIT_SCRIPT="${PLUGIN_AUDIT_SCRIPT:-./scripts/testing/audit-openwebui-plugins.sh}"
@@ -93,6 +93,54 @@ validate_install_env() {
     print_success "Environment validation passed"
 }
 
+check_docker_runtime() {
+    print_step "Running Docker runtime preflight"
+
+    if ! docker info &>/dev/null; then
+        print_error "Docker daemon is not reachable."
+        exit 1
+    fi
+
+    local cgroup_driver
+    local cgroup_version
+    cgroup_driver="$(docker info --format '{{.CgroupDriver}}' 2>/dev/null || true)"
+    cgroup_version="$(docker info --format '{{.CgroupVersion}}' 2>/dev/null || true)"
+
+    if [ -z "$cgroup_driver" ] || [ -z "$cgroup_version" ]; then
+        print_error "Unable to read Docker cgroup metadata from 'docker info'."
+        exit 1
+    fi
+
+    print_info "Docker CgroupDriver: ${cgroup_driver}"
+    print_info "Docker CgroupVersion: ${cgroup_version}"
+
+    local probe_output
+    local probe_name="openwebui-pref-${RANDOM:-0}"
+    if ! probe_output="$(docker run --rm --name "$probe_name" --network none busybox:latest true 2>&1)"; then
+        if printf '%s\n' "$probe_output" | grep -Eq "unable to apply cgroup configuration|failed to create task|Launch helper"; then
+            print_error "Docker runtime preflight failed due to container cgroup setup (hard blocker for OpenWebUI/Jupyter startup)."
+            echo
+            echo "Recommended host fix:"
+            echo "  - set Docker cgroup driver to cgroupfs in /etc/docker/daemon.json:"
+            echo '    "exec-opts": ["native.cgroupdriver=cgroupfs"]'
+            echo "  - restart docker daemon: sudo systemctl restart docker"
+            echo
+            print_error "Keep the default runtime value (nvidia/others) unless your CUDA toolchain requires a different value."
+            echo
+            print_error "$probe_output"
+            exit 1
+        fi
+
+        print_error "Docker runtime preflight container test failed."
+        print_error "$probe_output"
+        echo
+        print_error "Common causes: corrupted Docker image cache, daemon not healthy, or container runtime pull/start issues."
+        exit 1
+    fi
+
+    print_success "Docker runtime preflight passed"
+}
+
 start_docker_compose() {
     print_step "Starting Docker Compose services"
 
@@ -107,16 +155,6 @@ start_docker_compose() {
     fi
 
     docker_compose up -d
-
-    # CLIProxyAPI is a legacy sidecar behind an explicit flag/profile.
-    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
-        print_step "CLIPROXYAPI enabled; starting legacy sidecar profile"
-        docker_compose --profile legacy-cliproxy up -d cliproxyapi
-    else
-        print_info "CLIPROXYAPI disabled; ensuring legacy sidecar is not running"
-        docker_compose --profile legacy-cliproxy stop cliproxyapi >/dev/null 2>&1 || true
-        docker_compose --profile legacy-cliproxy rm -f -s cliproxyapi >/dev/null 2>&1 || true
-    fi
 
     # SearXNG is optional and only needed when OpenWebUI web search is enabled.
     if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
@@ -228,6 +266,17 @@ sync_openwebui_web_search_config() {
     print_success "OpenWebUI retrieval web-search config synced"
 }
 
+sync_openwebui_retrieval_config() {
+    if [ ! -x "./scripts/admin/sync-openwebui-retrieval-config.sh" ]; then
+        print_warning "Retrieval sync script missing or not executable: ./scripts/admin/sync-openwebui-retrieval-config.sh"
+        return 0
+    fi
+
+    print_step "Syncing OpenWebUI retrieval config"
+    ./scripts/admin/sync-openwebui-retrieval-config.sh
+    print_success "OpenWebUI retrieval config synced"
+}
+
 show_access_info() {
     local indigo_url="${INDIGO_SERVICE_BASE_URL:-http://${INDIGO_SERVICE_BIND_ADDRESS:-127.0.0.1}:${INDIGO_SERVICE_PORT:-8012}}"
 
@@ -293,6 +342,7 @@ main() {
     print_step "Checking prerequisites"
     check_command "docker"
     init_compose_cmd || exit 1
+    check_docker_runtime
     check_command "curl"
     validate_install_env
     print_success "Prerequisites met"
@@ -306,11 +356,12 @@ main() {
     local openwebui_ready=false
     if wait_for_openwebui; then
         openwebui_ready=true
+        sync_openwebui_retrieval_config || exit 1
         sync_openwebui_web_search_config || exit 1
     fi
 
     if [ "$openwebui_ready" = false ]; then
-        print_warning "Skipping retrieval web-search sync because OpenWebUI is not ready yet"
+        print_warning "Skipping retrieval config sync steps because OpenWebUI is not ready yet"
     fi
 
     run_plugin_audit_gate || exit 1

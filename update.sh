@@ -2,7 +2,7 @@
 
 ###############################################################################
 # OpenWebUI + LiteLLM RAG Update Script
-# This script updates OpenWebUI and restarts services while leaving any optional legacy vLLM fallback untouched
+# This script updates OpenWebUI and restarts the supported compose baseline.
 ###############################################################################
 
 set -e
@@ -14,15 +14,10 @@ load_env_defaults
 # Configuration
 OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
 OPENWEBUI_ALT_IMAGE="${OPENWEBUI_ALT_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
-COMPOSE_FILE="docker-compose.yml"
+COMPOSE_FILE="config/compose/docker-compose.yml"
 BACKUP_DIR="backups"
 OPENWEBUI_VOLUME="${OPENWEBUI_VOLUME:-openwebui_data}"
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
-CLIPROXYAPI_ENABLED="${CLIPROXYAPI_ENABLED:-false}"
-CLIPROXYAPI_DOCKER_MANAGED="${CLIPROXYAPI_DOCKER_MANAGED:-true}"
-CLIPROXYAPI_START_SCRIPT="./scripts/cliproxyapi/start-cliproxyapi.sh"
-CLIPROXYAPI_RESTART_SCRIPT="./scripts/cliproxyapi/restart-cliproxyapi.sh"
-CLIPROXYAPI_CHECK_SCRIPT="./scripts/cliproxyapi/check-cliproxyapi.sh"
 OPENWEBUI_RELEASES_URL="${OPENWEBUI_RELEASES_URL:-https://api.github.com/repos/open-webui/open-webui/releases/latest}"
 
 ###############################################################################
@@ -364,49 +359,6 @@ wait_for_openwebui() {
     return 1
 }
 
-ensure_cliproxyapi() {
-    if ! is_true "$CLIPROXYAPI_ENABLED"; then
-        print_info "CLIPROXYAPI_ENABLED=false; skipping CLIProxyAPI health checks"
-        return 0
-    fi
-
-    print_step "Ensuring CLIProxyAPI is healthy..."
-
-    # Keep update flow stable: chat completion checks can fail due to transient upstream
-    # throttling (HTTP 429) while the proxy itself is healthy.
-    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
-        print_success "CLIProxyAPI is already healthy"
-        return 0
-    fi
-
-    if [ "$CLIPROXYAPI_DOCKER_MANAGED" = "true" ]; then
-        print_info "Restarting CLIProxyAPI container (docker-managed)..."
-        if ! docker_compose up -d --force-recreate cliproxyapi; then
-            print_error "Failed to restart docker-managed CLIProxyAPI container"
-            return 1
-        fi
-    else
-        if [ -x "$CLIPROXYAPI_RESTART_SCRIPT" ]; then
-            print_info "Restarting CLIProxyAPI service..."
-            CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_RESTART_SCRIPT"
-        elif [ -x "$CLIPROXYAPI_START_SCRIPT" ]; then
-            print_info "Starting CLIProxyAPI service..."
-            CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_START_SCRIPT"
-        else
-            print_error "CLIProxyAPI management scripts not found"
-            return 1
-        fi
-    fi
-
-    if [ -x "$CLIPROXYAPI_CHECK_SCRIPT" ] && CLIPROXYAPI_ENABLED=true CLIPROXYAPI_CHECK_CHAT_COMPLETION=false "$CLIPROXYAPI_CHECK_SCRIPT" --quiet >/dev/null 2>&1; then
-        print_success "CLIProxyAPI is healthy"
-        return 0
-    fi
-
-    print_error "CLIProxyAPI health check failed after restart"
-    return 1
-}
-
 show_update_summary() {
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}${BOLD}              🚀 Update Successful! 🚀                          ${NC}"
@@ -414,12 +366,6 @@ show_update_summary() {
 
     echo -e "${BOLD}Updated Services:${NC}"
     echo -e "  ${CYAN}OpenWebUI:${NC}    Updated image: ${OPENWEBUI_IMAGE}"
-    echo -e "  ${CYAN}Archived vLLM fallback:${NC} Not managed by update"
-    if is_true "$CLIPROXYAPI_ENABLED"; then
-        echo -e "  ${CYAN}CLIProxyAPI:${NC}  Checked/restarted as needed"
-    else
-        echo -e "  ${CYAN}CLIProxyAPI:${NC}  Skipped (CLIPROXYAPI_ENABLED=false)"
-    fi
 
     echo -e "\n${BOLD}Quick Commands:${NC}"
     echo -e "  ${YELLOW}View logs:${NC}     ./logs.sh"
@@ -539,12 +485,6 @@ main() {
 
     echo "  • Pull latest OpenWebUI image"
     echo "  • Restart OpenWebUI container"
-    if is_true "$CLIPROXYAPI_ENABLED"; then
-        echo "  • Ensure CLIProxyAPI service is healthy"
-    else
-        echo "  • Skip CLIProxyAPI checks (CLIPROXYAPI_ENABLED=false)"
-    fi
-    echo "  • Archived vLLM fallback is outside the update flow"
     echo
 
     resolve_latest_openwebui_image
@@ -557,12 +497,6 @@ main() {
 
     # Check prerequisites
     check_docker
-
-    # Ensure CLIProxyAPI is healthy before restarting OpenWebUI
-    if ! ensure_cliproxyapi; then
-        print_error "Failed to ensure CLIProxyAPI health before update"
-        exit 1
-    fi
 
     # Show current version
     check_current_version
@@ -602,12 +536,6 @@ main() {
 
     if ! sync_openwebui_web_search_config; then
         print_error "Failed to sync OpenWebUI retrieval web-search config"
-        exit 1
-    fi
-
-    # Ensure CLIProxyAPI service is healthy after OpenWebUI restart
-    if ! ensure_cliproxyapi; then
-        print_error "Failed to ensure CLIProxyAPI health"
         exit 1
     fi
 

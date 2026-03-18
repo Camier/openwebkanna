@@ -10,7 +10,7 @@ Use these files in this order:
 - `README.md`: operator front door and daily command surface
 - `docs/ssot/stack.md`: canonical supported topology and runtime contract
 - `docs/REPO_MAP.md`: repository layout and operator entrypoints
-- `config/README.md`: canonical config edit surface and compatibility-copy map
+- `config/README.md`: canonical config edit surface
 - `docs/README.md`: documentation routing and doc-scope rules
 - `docs/runbooks/*.md`: procedure-level operating detail
 
@@ -18,7 +18,7 @@ Use these files in this order:
 
 - Root `*.sh` scripts are the canonical operator surface.
 - `config/*` is the canonical edit surface for runtime behavior.
-- Root `.env.example`, `docker-compose*.yml`, `mcp/`, `jupyter/`, and `searxng/` are compatibility copies or compatibility entrypoints. Edit `config/*` first.
+- `config/*` contains the committed runtime configuration and compose surfaces. Edit `config/*` first.
 - `docs/status/*` are observed local-runtime snapshots, not desired-state topology docs.
 - `docs/reference/openwebui/*` are upstream/reference snapshots, not local deployment truth.
 - `docs/plans/*` and `docs/legacy/*` are historical/context material, not active SSOT.

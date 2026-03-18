@@ -4,6 +4,33 @@
 **Review Date:** 2026-02-18
 **Reviewer:** Technical Code Review Agent
 
+## Current Repo State Note (2026-03-14)
+
+This report remains a review of the upstream-derived snapshot in
+`docs/reference/openwebui/openwebui_rag_technical_reference.md`.
+It is not the current runtime source of truth for this repository.
+
+Before using any deployment-sensitive claim here, verify it against:
+
+- `config/env/.env.example`
+- `config/compose/docker-compose.yml`
+- `docs/ssot/stack.md`
+- `README.md`
+
+Important current-state corrections relative to the original February review:
+
+- The canonical local config already uses `ENABLE_RAG_HYBRID_SEARCH`; the old
+  `RAG_HYBRID_SEARCH` warning is now a review note about the upstream reference,
+  not a current local-config bug.
+- The canonical local extraction backend is `docling` via `DOCLING_SERVER_URL`;
+  Tika is not part of the default local baseline and only appears in upstream
+  reference material.
+- This repo now contains a tracked multimodal retrieval prototype, including a
+  CLIP-backed local figure index under `scripts/rag/` and a Qdrant-backed
+  retrieval service under `services/multimodal_retrieval_api/`.
+- This repo also now documents a Qdrant/Nemotron redesign target in
+  `docs/plans/MULTIMODAL_RAG_QDRANT_NEMOTRON_REDESIGN.md`.
+
 ---
 
 ## Executive Summary
@@ -21,8 +48,10 @@ The OpenWebUI RAG Technical Reference document provides a comprehensive overview
 
 ### ⚠️ Issues Found
 
-#### 1.1 Missing Vector Database Options
-The document states only **3 vector databases** are supported (Chroma, FAISS, pgvector), but OpenWebUI has expanded support:
+#### 1.1 Missing Vector Database Options In The Reviewed Reference
+The reviewed reference states only **3 vector databases** are supported
+(Chroma, FAISS, pgvector), but broader OpenWebUI and repo-local guidance now
+references additional external backends:
 
 | Database | Mentioned | Actual Support Status |
 |----------|-----------|----------------------|
@@ -33,7 +62,7 @@ The document states only **3 vector databases** are supported (Chroma, FAISS, pg
 | **Qdrant** | ❌ No | ✅ Supported (via external) |
 | **Weaviate** | ❌ No | ⚠️ Community integrations exist |
 
-**Evidence:** GitHub Discussion #938 ("Support for external VectorDB") discusses expanded vector DB support for production scale. Performance documentation recommends Milvus/Qdrant for "High Scale for Many Users" deployments.
+**Evidence:** GitHub Discussion #938 ("Support for external VectorDB") discusses expanded vector DB support for production scale. Performance documentation recommends Milvus/Qdrant for "High Scale for Many Users" deployments. In the current local repo, Qdrant is also referenced in `docs/plans/MULTIMODAL_RAG_QDRANT_NEMOTRON_REDESIGN.md` and `services/multimodal_retrieval_api/`.
 
 #### 1.2 FAISS Persistence Mischaracterization
 The document states FAISS has "❌ No persistence by default" - this is technically accurate but misleading. FAISS **can** persist indexes to disk using `faiss.write_index()` and `faiss.read_index()`. OpenWebUI's implementation may not enable this by default, but FAISS itself supports persistence.
@@ -199,7 +228,7 @@ These variables are **not documented** in the reference.
 | **Metadata Filtering** | Not mentioned | Date, source, author filters |
 | **Deduplication** | Not mentioned | Removing duplicate chunks |
 
-#### 5.2 Incomplete Content Extraction Information
+#### 5.2 Incomplete Content Extraction Information In The Reviewed Reference
 
 **Apache Tika URL Path:**
 
@@ -215,10 +244,12 @@ The document says "Handles 1000+ formats" but doesn't specify:
 - Formatted text extraction (tables, lists)
 - Metadata extraction capabilities
 
-**Missing Docling Details:**
+**Missing Docling Details In The Reviewed Reference:**
 - Docling is newer and may have different setup requirements
 - Better for academic papers with tables and figures
 - May require additional Python dependencies
+
+**Current repo state note:** This specific gap is no longer a local-runtime documentation problem. The canonical local stack explicitly deploys Docling and treats it as the active multimodal extraction backend.
 
 #### 5.3 RAG Query Flow Missing Details
 
@@ -315,13 +346,13 @@ For production deployments, the document should mention:
 
 ### ⚠️ Missing Critical Issues
 
-#### 8.1 Missing: Hybrid Search Not Working
+#### 8.1 Missing: Historical Hybrid Search Stability Note
 
-As noted in GitHub Issue #15915, hybrid search has been broken in recent versions. This should be a troubleshooting entry.
+At the time of the February review, GitHub Issue #15915 described hybrid-search instability in some recent versions. This belongs in the reviewed reference as a version-scoped troubleshooting note, not as a timeless runtime claim.
 
-**Symptoms:** No documents retrieved when hybrid search enabled
-**Solution:** Downgrade to v0.6.15 or disable hybrid search
-**Workaround:** Use dense search only with high-quality embeddings
+**Historical symptoms:** No documents retrieved when hybrid search enabled
+**Historical mitigation examples:** Downgrade to a known-good version or disable hybrid search
+**Safer wording for the reviewed reference:** Call out version-specific behavior and tell readers to verify against the current release notes and local deployment docs.
 
 #### 8.2 Missing: RAG_TOP_K_RERANKER Not Found in UI
 
@@ -384,12 +415,12 @@ Both may work, but this creates confusion.
 | `ENABLE_BASE_MODELS_CACHE` | Cache model lists | Medium |
 | `DATABASE_URL` | PostgreSQL connection | High (for scale) |
 
-### ⚠️ Incorrect Defaults
+### ⚠️ Defaults And Baseline Notes That Need Better Scoping
 
-| Variable | Document Claims | Actual Default |
+| Variable | Document Claims | Better Framing |
 |----------|-----------------|----------------|
-| `RAG_SYSTEM_CONTEXT` | `true` | Verify in actual deployment |
-| `CHUNK_SIZE` | 1500 chars | Check version-specific defaults |
+| `RAG_SYSTEM_CONTEXT` | `true` | Verify against the target deployment or current repo baseline before treating as universal |
+| `CHUNK_SIZE` | 1500 chars | Treat as version-specific and deployment-specific; current local baseline differs |
 
 ---
 
@@ -416,7 +447,7 @@ Both may work, but this creates confusion.
 
 | Topic | Why It Matters |
 |-------|---------------|
-| **Multi-modal RAG** | Images, tables, charts in documents |
+| **Multi-modal RAG in the reviewed reference** | Images, tables, charts in documents. Current repo note: local multimodal prototype paths now exist under `scripts/rag/` and `services/multimodal_retrieval_api/`. |
 | **RAG evaluation metrics** | How to measure retrieval quality |
 | **A/B testing embeddings** | Comparing model performance |
 | **Cost optimization** | Balancing quality vs API costs |
@@ -428,13 +459,13 @@ Both may work, but this creates confusion.
 
 | Severity | Issue | Location |
 |----------|-------|----------|
-| 🔴 **Critical** | `RAG_HYBRID_SEARCH` should be `ENABLE_RAG_HYBRID_SEARCH` | Environment Variables section |
-| 🔴 **Critical** | Tika URL missing `/tika` path | Content Extraction section |
+| 🔴 **Critical** | Reviewed reference uses `RAG_HYBRID_SEARCH`; current local config uses `ENABLE_RAG_HYBRID_SEARCH` | Environment Variables section |
+| 🔴 **Critical** | Reviewed reference needs Tika path clarification; current local baseline uses Docling instead | Content Extraction section |
 | 🟡 **High** | Missing hybrid search known issues | Troubleshooting section |
 | 🟡 **High** | Missing modern embedding models | Embedding Models section |
 | 🟡 **High** | Missing external reranking variables | Environment Variables |
 | 🟡 **High** | Inconsistent web search variable names | Web Search section |
-| 🟠 **Medium** | Missing Milvus/Qdrant support | Vector Database section |
+| 🟠 **Medium** | Reviewed reference under-documents Milvus/Qdrant compared with current repo guidance | Vector Database section |
 | 🟠 **Medium** | Oversimplified RBAC description | Knowledge Base section |
 | 🟠 **Medium** | Character vs token confusion | Chunking section |
 | 🟢 **Low** | Missing batch size optimization | Performance section |
@@ -453,22 +484,22 @@ Both may work, but this creates confusion.
 │  ├── RAG_SYSTEM_CONTEXT=true                               │
 │  └── ENABLE_WEBSEARCH=true + WEB_SEARCH_ENGINE=searxng    │
 │                                                            │
-│  SETUP                                                     │
-│  ├── Vector DB: chroma (dev) / pgvector (prod)            │
-│  ├── For scale: Consider Milvus/Qdrant (external)         │
-│  ├── Embedding: all-MiniLM-L6-v2 (fast) / bge-m3 (best)   │
-│  └── Extraction: Tika at http://tika:9998/tika            │
+│  CURRENT REPO BASELINE                                     │
+│  ├── Vector DB: pgvector (committed baseline)             │
+│  ├── External side path: Qdrant for multimodal work       │
+│  ├── Embedding: pritamdeka/S-PubMedBert-MS-MARCO          │
+│  └── Extraction: Docling at http://docling:5001           │
 │                                                            │
 │  CHUNKING (CHUNK_SIZE is in CHARACTERS)                    │
-│  ├── Size: 1500-6000 chars (~400-1500 tokens)              │
-│  ├── Overlap: 10-20%                                       │
+│  ├── Size: 3000 chars baseline (~750-1000 tokens)         │
+│  ├── Overlap: 600 chars baseline                           │
 │  └── Min Size: 50-60% of chunk size                        │
 │                                                            │
 │  RETRIEVAL                                                 │
 │  ├── Top K: 5-10 chunks                                    │
 │  ├── Top K Reranker: 10-20 (candidates for re-ranking)    │
-│  ├── Enable: Hybrid Search (if version < 0.6.16)          │
-│  └── Context: RAG_SYSTEM_CONTEXT=true                     │
+│  ├── Enable: Hybrid Search after version-specific checks   │
+│  └── Context: verify against current deployment defaults   │
 │                                                            │
 │  CONTEXT (TOKENS)                                          │
 │  ├── Local models: 4096-8192 tokens                       │
@@ -476,7 +507,7 @@ Both may work, but this creates confusion.
 │  └── Cloud models: 128k+ tokens                           │
 │                                                            │
 │  KNOWN ISSUES                                              │
-│  └── Hybrid search broken in v0.6.16+ (use v0.6.15)       │
+│  └── Historical hybrid-search issues were version-specific │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -485,15 +516,17 @@ Both may work, but this creates confusion.
 
 ## Conclusion
 
-The OpenWebUI RAG Technical Reference document provides a solid foundation but requires updates for production reliability. The most critical fixes needed are:
+The reviewed OpenWebUI RAG Technical Reference snapshot provides a solid foundation but still requires updates for production reliability. For this repository specifically, some of the February findings are now historical because the local config and docs have moved on.
 
-1. **Correct the `ENABLE_RAG_HYBRID_SEARCH` variable name** (currently incorrect as `RAG_HYBRID_SEARCH`)
-2. **Add the `/tika` path** to Tika URL configuration
-3. **Document known hybrid search issues** in recent versions
-4. **Expand vector database options** to include Milvus/Qdrant
+For the reviewed reference document itself, the most important remaining corrections are:
+
+1. **Correct the `ENABLE_RAG_HYBRID_SEARCH` variable name** in the reviewed reference (the local repo already does this)
+2. **Clarify the Tika path and optional status** in the reviewed reference (the local repo baseline uses Docling)
+3. **Document hybrid search caveats with explicit version scope** instead of presenting them as timeless behavior
+4. **Expand vector database options** to include Milvus/Qdrant in the reviewed reference
 5. **Add missing environment variables** for production deployments
 
-With these corrections, the document would achieve **~90% technical accuracy** and be suitable for production deployment guidance.
+With these corrections, the reviewed reference would achieve **~90% technical accuracy** and be more trustworthy as background material. For current local behavior, always prefer the canonical repo docs and config instead of this historical review in isolation.
 
 ---
 

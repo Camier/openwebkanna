@@ -15,7 +15,7 @@ load_env_defaults
 TARGET_DIR="${TARGET_DIR:-$SCRIPT_DIR}"
 
 OPENWEBUI_SERVICE="${OPENWEBUI_SERVICE:-openwebui}"
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-config/compose/docker-compose.yml}"
 FOCUS="${PLUGIN_AUDIT_FOCUS:-all}"
 PLUGIN_AUDIT_TIMEOUT_SECONDS="${PLUGIN_AUDIT_TIMEOUT_SECONDS:-60}"
 PLUGIN_AUDIT_CHECK_PIPELINES_DIR="${PLUGIN_AUDIT_CHECK_PIPELINES_DIR:-false}"
@@ -33,7 +33,7 @@ Usage: $0 [OPTIONS]
 Options:
   --focus all|tool|function   Scope audit to a specific plugin type (default: all)
   --target PATH               Target directory containing compose file (default: script dir)
-  --compose-file PATH         Compose file path relative to target dir (default: docker-compose.yml)
+  --compose-file PATH         Compose file path relative to target dir (default: config/compose/docker-compose.yml)
   --check-pipelines-dir       Compile Python files from PIPELINES_DIR after DB audit
   --quiet                     Only print failures and final status
   -h, --help                  Show this help

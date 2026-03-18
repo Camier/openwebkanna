@@ -68,7 +68,6 @@ services:
       - NB_ASK_CONFIRM=False
       - NB_DISABLE_GIT=True
       - JUPYTER_ALLOW_ROOT=False
-      - PYTHONSTARTUP=/opt/continua/continua.py
     ports:
       - "127.0.0.1:${JUPYTER_PORT:-8890}:${JUPYTER_INTERNAL_PORT:-8889}"
     volumes:
@@ -112,42 +111,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    networks:
-      - openwebui_network
-
-  # Optional legacy sidecar. Not started by default.
-  cliproxyapi:
-    profiles: ["legacy-cliproxy"]
-    image: ${CLIPROXYAPI_IMAGE:-eceasy/cli-proxy-api:v6.8.18}
-    container_name: cliproxyapi
-    restart: unless-stopped
-    environment:
-      - DEPLOY=${CLIPROXYAPI_DEPLOY:-}
-    ports:
-      - "${CLIPROXYAPI_BIND_ADDRESS:-127.0.0.1}:${CLIPROXYAPI_PORT:-8317}:8317"
-    volumes:
-      - ${CLIPROXYAPI_CONFIG:-./cliproxyapi/config.yaml}:/CLIProxyAPI/config.yaml:ro
-      - ./cliproxyapi/auth:/CLIProxyAPI/cliproxyapi/auth:rw
-      - ./cliproxyapi/logs:/CLIProxyAPI/logs:rw
-    # Resource limits
-    cpus: "${CLIPROXYAPI_CPUS:-0.5}"
-    mem_limit: "${CLIPROXYAPI_MEM_LIMIT:-512m}"
-    pids_limit: ${CLIPROXYAPI_PIDS_LIMIT:-128}
-    # Security hardening (note: DAC_OVERRIDE needed for volume access)
-    cap_drop:
-      - ALL
-    cap_add:
-      - DAC_OVERRIDE
-      - SETUID
-      - SETGID
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8317/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
     networks:
       - openwebui_network
 
@@ -236,7 +199,7 @@ services:
 
   # Docling-Serve for multimodal PDF extraction (OCR + Image Description)
   docling:
-    image: quay.io/docling-project/docling-serve-cu128:latest
+    image: quay.io/docling-project/docling-serve-cu128@sha256:5ba5427efe6f024f435c6ad5fef7c828e47aaf5b1fe1e7ec5af952ac580f7b8e
     container_name: docling
     restart: unless-stopped
     ports:

@@ -13,7 +13,7 @@ cd "$SCRIPT_DIR"
 
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 # shellcheck disable=SC2034
-COMPOSE_FILE="docker-compose.yml"
+COMPOSE_FILE="config/compose/docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 OPEN_TERMINAL_ENABLED="${OPEN_TERMINAL_ENABLED:-false}"
@@ -67,9 +67,6 @@ check_docker_compose() {
     fi
 
     local -a profile_args=()
-    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
-        profile_args+=(--profile legacy-cliproxy)
-    fi
     if is_true "${ENABLE_WEB_SEARCH:-false}" || is_true "${ENABLE_WEBSEARCH:-false}"; then
         profile_args+=(--profile web-search)
     fi
@@ -259,22 +256,6 @@ check_mcpo() {
     fi
     print_svc "MCPO" "stopped" "(not reachable at ${url})"
     return 1
-}
-
-check_cliproxyapi() {
-    print_section "CLIProxyAPI (optional sidecar)"
-    # CLIProxyAPI is no longer the primary upstream; report informational status only.
-    local check_script="${SCRIPT_DIR}/scripts/cliproxyapi/check-cliproxyapi.sh"
-    if [ "${CLIPROXYAPI_ENABLED:-false}" = "false" ]; then
-        print_info "CLIProxyAPI disabled (CLIPROXYAPI_ENABLED=false)"
-        return 0
-    fi
-    if [ -x "$check_script" ] && CLIPROXYAPI_ENABLED=true "$check_script" --quiet &>/dev/null 2>&1; then
-        print_svc "CLIProxyAPI" "running" "(optional sidecar — not the primary upstream)"
-        return 0
-    fi
-    print_svc "CLIProxyAPI" "warning" "(not responding — this is OK; LiteLLM is the primary upstream)"
-    return 0
 }
 
 check_open_terminal() {
@@ -548,7 +529,6 @@ main() {
             check_openwebui || true
             check_litellm || true
             check_mcpo || true
-            check_cliproxyapi || true
             check_open_terminal || true
             check_indigo_service || true
             check_indigo_tool_registration || true

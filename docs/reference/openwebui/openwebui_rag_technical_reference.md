@@ -12,7 +12,7 @@
 
 ---
 
-> **Snapshot Notice:** This guide captures OpenWebUI RAG behavior as documented around v0.8.3. Confirm any repo-runtime assumptions against `config/compose/docker-compose.yml`, `.env.example`, and current runbooks.
+> **Snapshot Notice:** This guide captures OpenWebUI RAG behavior as documented around v0.8.3. Confirm any repo-runtime assumptions against `config/compose/docker-compose.yml`, `config/env/.env.example`, and current runbooks.
 
 ---
 

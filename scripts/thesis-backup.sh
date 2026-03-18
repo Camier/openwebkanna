@@ -62,7 +62,7 @@ fi
 echo "[3/4] Backing up configuration..."
 tar czf "${THESIS_BACKUP_DIR}/config-${DATE}.tar.gz" \
     -C "${OPENWEBUI_DIR}" \
-    .env cliproxyapi/config.yaml docker-compose.yml 2>/dev/null ||
+    .env config/env/.env.example config/compose/docker-compose.yml config/mcp/config.json config/jupyter/jupyter_server_config.py config/searxng/settings.yml 2>/dev/null ||
     echo "  ! Some config files may be missing"
 
 # 4. Cleanup old backups

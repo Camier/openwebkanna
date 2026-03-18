@@ -19,7 +19,7 @@ Exit criteria for this runbook:
 
 ```bash
 cd /LAB/@thesis/openwebui
-cp .env.example .env
+cp config/env/.env.example .env
 ```
 
 Edit `.env` before the first deploy, then ensure these values:
@@ -34,7 +34,6 @@ OPENAI_API_BASE_URL=http://host.docker.internal:4000/v1
 OPENAI_API_BASE_URLS=http://host.docker.internal:4000/v1
 OPENAI_API_KEY=<litellm-master-key>
 VECTOR_DB=pgvector
-CLIPROXYAPI_ENABLED=false
 ```
 
 For the full committed baseline, use `config/env/.env.example`. Keep this runbook list as the minimum first-deploy contract, not the exhaustive env reference.
@@ -76,13 +75,6 @@ docker compose ps
 ./scripts/testing/audit-no-mock.sh
 ```
 
-Optional legacy checks (only if `CLIPROXYAPI_ENABLED=true`):
-
-```bash
-./scripts/cliproxyapi/check-cliproxyapi.sh
-./scripts/cliproxyapi/test-openwebui-cliproxy-routing.sh
-```
-
 Baseline validation (fast checks):
 
 ```bash
@@ -110,15 +102,12 @@ Baseline note:
 ## 5. After setup
 
 For routine operations after the first deploy:
-- use `docs/runbooks/OPERATIONS.md` for start/stop, logs, backups, MCP, RAG tuning, and maintenance
+- use `docs/runbooks/OPERATIONS.md` for start/stop, logs, backups, MCP, retrieval operations, and maintenance
 - use `docs/runbooks/TROUBLESHOOTING.md` for auth, model, vector-store, SSL, and sidecar recovery flows
-- use `docs/runbooks/EMBEDDING_PROFILES.md` for lane selection and KB/profile lifecycle
 
 Advanced and optional flows intentionally live outside this setup runbook:
 - image updates and version review: `./scripts/check-image-versions.sh`, `./update.sh`
-- manual document-tuning and multimodal validation: `docs/runbooks/OPERATIONS.md`
-- legacy CLIProxyAPI OAuth workflows: `docs/runbooks/OPERATIONS.md`
-- archived `vLLM` fallback: `archive/`
+- direct retrieval tuning and multimodal validation: `docs/runbooks/OPERATIONS.md`
 
 If you see an empty model list, a pending activation screen, or repeated `401`/`502` issues:
 - take a DB snapshot with `./scripts/admin/backup-openwebui-db.sh`

@@ -34,19 +34,13 @@ resolve_openai_base_root() {
         candidate="$(printf "%s" "$candidate" | sed 's#://host.docker.internal#://localhost#')"
     fi
 
-    # OpenWebUI can use Docker DNS internally; tests run on host and must use loopback.
-    if [[ $candidate == *"://cliproxyapi"* ]]; then
-        candidate="$(printf "%s" "$candidate" | sed 's#://cliproxyapi#://127.0.0.1#')"
-    fi
-
     printf "%s" "$candidate"
 }
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
 OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
-CLIPROXYAPI_BASE_URL="${CLIPROXYAPI_BASE_URL:-http://127.0.0.1:8317}"
-UPSTREAM_URL="${UPSTREAM_URL:-${VLLM_URL:-${OPENAI_BASE_ROOT:-$CLIPROXYAPI_BASE_URL}}}"
+UPSTREAM_URL="${UPSTREAM_URL:-${OPENAI_BASE_ROOT:-http://localhost:4000}}"
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
@@ -55,12 +49,8 @@ OPENWEBUI_AUTO_AUTH="${OPENWEBUI_AUTO_AUTH:-true}"
 OPENWEBUI_SMOKE_MODEL_CANDIDATES="${OPENWEBUI_SMOKE_MODEL_CANDIDATES:-$(default_openwebui_smoke_model_candidates)}"
 VERBOSE="${VERBOSE:-false}"
 CHAT_MODEL="${RAG_CHAT_MODEL:-}"
-CLIPROXY_BIN="${CLIPROXY_BIN:-./scripts/cliproxyapi/cli-proxy-api.sh}"
-CLIPROXYAPI_CHECK_SCRIPT="${CLIPROXYAPI_CHECK_SCRIPT:-./scripts/cliproxyapi/check-cliproxyapi.sh}"
 NO_MOCK_AUDIT_SCRIPT="${NO_MOCK_AUDIT_SCRIPT:-./scripts/testing/audit-no-mock.sh}"
-CLIPROXYAPI_API_KEY="${CLIPROXYAPI_API_KEY:-}"
-UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-${CLIPROXYAPI_API_KEY:-${OPENAI_API_KEY:-}}}"
-RAG_UPSTREAM_MODE="${RAG_UPSTREAM_MODE:-auto}"
+UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-${OPENAI_API_KEY:-}}"
 TEST_MODE="full"
 RUN_CLEANUP_ON_EXIT=false
 BASELINE_REQUIRE_WEB_SEARCH="${BASELINE_REQUIRE_WEB_SEARCH:-false}"
@@ -160,7 +150,6 @@ Options:
   -h, --help      Show this help message
 
 Environment:
-  RAG_UPSTREAM_MODE=auto|cliproxy|litellm  Upstream integration mode (default: auto)
   UPSTREAM_URL=http://localhost:4000       OpenAI-compatible upstream base URL
   UPSTREAM_API_KEY=<token>                 Optional bearer token for upstream /v1/models
   BASELINE_REQUIRE_WEB_SEARCH=true|false  Fail if host and container SearXNG probes fail (default: false)
@@ -169,32 +158,6 @@ Environment:
   RAG_MULTIMODAL_TEST_PDF=/abs/path.pdf   Optional PDF fixture for full-mode multimodal ingestion test
   RAG_MULTIMODAL_STRICT=true|false        Fail when multimodal prereqs/fixture are missing (default: false; auto-true in CI full mode)
 EOF
-}
-
-is_cliproxy_mode() {
-    case "${RAG_UPSTREAM_MODE}" in
-        cliproxy)
-            return 0
-            ;;
-        litellm)
-            return 1
-            ;;
-    esac
-
-    if echo "${OPENAI_BASE_ROOT:-$UPSTREAM_URL}" | grep -Eq 'cliproxyapi|127\.0\.0\.1:8317|localhost:8317'; then
-        return 0
-    fi
-
-    # If an explicit non-CLIProxy upstream base is configured, prefer that signal.
-    if [ -n "${OPENAI_BASE_ROOT:-}" ]; then
-        return 1
-    fi
-
-    if is_true "${CLIPROXYAPI_ENABLED:-false}"; then
-        return 0
-    fi
-
-    return 1
 }
 
 resolve_chat_model_from_openwebui() {
@@ -237,29 +200,20 @@ test_upstream_responding() {
 
     local code
     local code_raw
-    local root_response
-
     code_raw="$(curl -s -w "%{http_code}" -o /dev/null "$UPSTREAM_URL/health" 2>&1 || true)"
     code="$(normalize_http_code "$code_raw")"
     if [ "$code" = "200" ]; then
         test_pass
         return 0
     fi
-    if ! is_cliproxy_mode && [ "$code" = "401" ]; then
+    if [ "$code" = "401" ]; then
         print_info "Upstream health endpoint requires auth (HTTP 401); treating service as reachable in LiteLLM mode"
         test_pass
         return 0
     fi
 
-    # CLIProxyAPI deployments may expose "/" instead of "/health".
-    root_response=$(curl -s -f "$UPSTREAM_URL/" 2>/dev/null || true)
-    if [ -n "$root_response" ] && { command -v jq >/dev/null 2>&1 && echo "$root_response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1 || echo "$root_response" | grep -q "CLI Proxy API Server"; }; then
-        test_pass
-        return 0
-    else
-        test_fail "OpenAI-compatible upstream health check failed at $UPSTREAM_URL (/health HTTP $code)"
-        return 1
-    fi
+    test_fail "OpenAI-compatible upstream health check failed at $UPSTREAM_URL (/health HTTP $code)"
+    return 1
 }
 
 test_upstream_models() {
@@ -272,7 +226,7 @@ test_upstream_models() {
     fi
     response=$(curl -s "${headers[@]}" "$UPSTREAM_URL/v1/models" 2>/dev/null || true)
 
-    if ! is_cliproxy_mode && echo "$response" | grep -Eiq 'Authentication Error|"code"[[:space:]]*:[[:space:]]*"401"|401'; then
+    if echo "$response" | grep -Eiq 'Authentication Error|"code"[[:space:]]*:[[:space:]]*"401"|401'; then
         print_info "Upstream /v1/models requires auth (HTTP 401); set UPSTREAM_API_KEY for strict model validation"
         if resolve_chat_model_from_openwebui; then
             print_info "Using OpenWebUI model fallback: $CHAT_MODEL"
@@ -473,7 +427,7 @@ test_openwebui_baseline_settings() {
 
     local response
     response=$(curl -s -X GET \
-        "$OPENWEBUI_URL/api/v1/retrieval/" \
+        "$OPENWEBUI_URL/api/v1/retrieval/config" \
         -H "Content-Type: application/json" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} 2>/dev/null || true)
 
@@ -489,30 +443,35 @@ test_openwebui_baseline_settings() {
             return 1
         fi
 
-        local embedding_model
-        embedding_model=$(echo "$response" | jq -r '.RAG_EMBEDDING_MODEL // empty' 2>/dev/null || true)
-        if [ -z "$embedding_model" ]; then
-            test_fail "RAG_EMBEDDING_MODEL missing from retrieval settings"
-            [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-            return 1
-        fi
-
         local rag_top_k
         rag_top_k=$(echo "$response" | jq -r '.RAG_TOP_K // .TOP_K // empty' 2>/dev/null || true)
         if [ -z "$rag_top_k" ]; then
-            print_info "RAG_TOP_K not returned by endpoint; skipping strict value check"
+            test_fail "TOP_K missing from retrieval settings"
+            [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+            return 1
         elif [[ ! $rag_top_k =~ ^[0-9]+$ ]] || [ "$rag_top_k" -le 0 ]; then
             test_fail "Invalid RAG_TOP_K value from endpoint: $rag_top_k"
             return 1
         fi
 
-        print_info "Embedding model: $embedding_model"
-        [ -n "$rag_top_k" ] && print_info "RAG_TOP_K: $rag_top_k"
+        local chunk_size
+        chunk_size=$(echo "$response" | jq -r '.CHUNK_SIZE // empty' 2>/dev/null || true)
+        if [ -z "$chunk_size" ]; then
+            test_fail "CHUNK_SIZE missing from retrieval settings"
+            [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+            return 1
+        elif [[ ! $chunk_size =~ ^[0-9]+$ ]] || [ "$chunk_size" -le 0 ]; then
+            test_fail "Invalid CHUNK_SIZE value from endpoint: $chunk_size"
+            return 1
+        fi
+
+        print_info "RAG_TOP_K: $rag_top_k"
+        print_info "CHUNK_SIZE: $chunk_size"
         test_pass
         return 0
     fi
 
-    if echo "$response" | grep -q "RAG_EMBEDDING_MODEL"; then
+    if echo "$response" | grep -q '"TOP_K"'; then
         test_pass
         return 0
     fi
@@ -1040,11 +999,12 @@ test_vector_store() {
     test_start "Vector Store Functionality"
 
     TEST_VECTOR_COLLECTION="rag-test-collection-$(date +%s)"
+    local expected_text="RAG systems combine retrieval and generation for better responses."
 
     local process_payload
     process_payload='{
         "name": "rag-vector-test",
-        "content": "RAG systems combine retrieval and generation for better responses.",
+        "content": "'"$expected_text"'",
         "collection_name": "'"$TEST_VECTOR_COLLECTION"'"
     }'
 
@@ -1053,7 +1013,7 @@ test_vector_store() {
         "$OPENWEBUI_URL/api/v1/retrieval/process/text" \
         -H "Content-Type: application/json" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
-        -d "$process_payload" 2>&1)
+        -d "$process_payload" 2>/dev/null)
 
     if ! echo "$process_response" | grep -q '"status":true'; then
         test_fail "Vector store ingestion failed"
@@ -1073,10 +1033,20 @@ test_vector_store() {
         "$OPENWEBUI_URL/api/v1/retrieval/query/doc" \
         -H "Content-Type: application/json" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
-        -d "$query_payload" 2>&1)
+        -d "$query_payload" 2>/dev/null)
 
-    if echo "$query_response" | grep -q '"documents"'; then
-        print_success "Vector store retrieval is operational"
+    if json_response_has_retrieval_hits "$query_response"; then
+        local retrieved_text
+        retrieved_text="$(extract_retrieval_text "$query_response")"
+        if ! response_contains_text "$retrieved_text" "$expected_text"; then
+            test_fail "Vector store query returned hits, but not the expected document"
+            [ "$VERBOSE" = "true" ] && print_info "Response: $query_response"
+            return 1
+        fi
+
+        local doc_count
+        doc_count="$(retrieval_hit_count "$query_response")"
+        print_success "Vector store retrieval returned $doc_count matching document(s)"
         test_pass
         return 0
     fi
@@ -1106,7 +1076,7 @@ test_retrieval() {
         "$OPENWEBUI_URL/api/v1/retrieval/query/doc" \
         -H "Content-Type: application/json" \
         ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
-        -d "$data" 2>&1)
+        -d "$data" 2>/dev/null)
 
     if json_response_has_retrieval_hits "$response"; then
         local retrieved_text
@@ -1127,152 +1097,6 @@ test_retrieval() {
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
     fi
-}
-
-test_cli_proxy_api_managed_runtime() {
-    test_start "CliProxyApi Managed Runtime"
-
-    local response
-    local cliproxy_base="${CLIPROXYAPI_BASE_URL%/}"
-    local -a cliproxy_headers=()
-
-    if [ -n "$CLIPROXYAPI_API_KEY" ]; then
-        cliproxy_headers=(-H "Authorization: Bearer $CLIPROXYAPI_API_KEY")
-    fi
-
-    if response=$(CLIPROXYAPI_ENABLED=false "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
-        test_fail "Disabled lifecycle negative check unexpectedly passed (CLIPROXYAPI_ENABLED=false)"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if ! echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
-        test_fail "Disabled lifecycle negative check failed without expected disabled lifecycle message"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if ! response=$(CLIPROXYAPI_ENABLED=true "$CLIPROXYAPI_CHECK_SCRIPT" 2>&1); then
-        test_fail "Managed health check failed (set CLIPROXYAPI_ENABLED=true and start CLIProxyAPI)"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if echo "$response" | grep -Eiq "CLIPROXYAPI_ENABLED=false|lifecycle is disabled"; then
-        test_fail "check-cliproxyapi.sh reported disabled lifecycle; runtime checks did not execute"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if ! response=$(curl -sS -f "${cliproxy_base}/" 2>&1); then
-        test_fail "CLIProxyAPI root endpoint failed: ${cliproxy_base}/"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if command -v jq >/dev/null 2>&1; then
-        if ! echo "$response" | jq -e '.message == "CLI Proxy API Server"' >/dev/null 2>&1; then
-            test_fail "CLIProxyAPI root endpoint missing expected message"
-            [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-            return 1
-        fi
-    elif ! echo "$response" | grep -q "CLI Proxy API Server"; then
-        test_fail "CLIProxyAPI root endpoint missing expected message"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if ! response=$(curl -sS -f "${cliproxy_headers[@]}" "${cliproxy_base}/v1/models" 2>&1); then
-        test_fail "CLIProxyAPI models endpoint failed: ${cliproxy_base}/v1/models"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if ! has_non_empty_models_array "$response"; then
-        test_fail "CLIProxyAPI models response missing expected non-empty models list"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    test_pass
-    return 0
-}
-
-test_cli_proxy_api_health_all() {
-    test_start "CliProxyApi Health (openwebui + upstream)"
-
-    local response
-    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" "$CLIPROXY_BIN" --raw health openwebui 2>&1); then
-        test_fail "Command failed: $CLIPROXY_BIN --raw health openwebui"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if command -v jq >/dev/null 2>&1; then
-        if ! echo "$response" | jq -e '.status == true or .openwebui' >/dev/null 2>&1; then
-            test_fail "OpenWebUI health output missing expected success signal"
-            [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-            return 1
-        fi
-    elif ! echo "$response" | grep -Eq '"status"[[:space:]]*:[[:space:]]*true|"openwebui"'; then
-        test_fail "OpenWebUI health output missing expected success signal"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    # Upstream in CLIProxyAPI mode may not expose /health, so validate root endpoint directly.
-    if curl -sS -f "${CLIPROXYAPI_BASE_URL%/}/" >/dev/null 2>&1; then
-        test_pass
-        return 0
-    fi
-
-    test_fail "CLIProxyAPI upstream root endpoint not reachable"
-    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-    return 1
-}
-
-test_cli_proxy_api_models_vllm() {
-    test_start "CliProxyApi Models (upstream; legacy 'vllm' command)"
-
-    local response
-    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" VLLM_API_KEY="$CLIPROXYAPI_API_KEY" VLLM_URL="$CLIPROXYAPI_BASE_URL" "$CLIPROXY_BIN" --raw --url "$CLIPROXYAPI_BASE_URL" models vllm 2>&1); then
-        test_fail "Command failed: $CLIPROXY_BIN --raw models vllm"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if has_non_empty_models_array "$response"; then
-        if [ -z "$CHAT_MODEL" ] && ! resolve_chat_model_from_openwebui; then
-            CHAT_MODEL="$(first_model_id_from_response "$response")"
-        fi
-        [ -n "$CHAT_MODEL" ] && print_info "Using chat model: $CHAT_MODEL"
-        test_pass
-        return 0
-    fi
-
-    test_fail "CLIProxyAPI models output missing expected non-empty models list"
-    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-    return 1
-}
-
-test_cli_proxy_api_models_openwebui() {
-    test_start "CliProxyApi Models (OpenWebUI)"
-
-    local response
-    if ! response=$(OPENWEBUI_URL="$OPENWEBUI_URL" OPENWEBUI_API_KEY="$API_KEY" VLLM_API_KEY="$CLIPROXYAPI_API_KEY" VLLM_URL="$CLIPROXYAPI_BASE_URL" "$CLIPROXY_BIN" --raw models webui 2>&1); then
-        test_fail "Command failed: $CLIPROXY_BIN --raw models webui"
-        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-        return 1
-    fi
-
-    if has_non_empty_models_array "$response"; then
-        test_pass
-        return 0
-    fi
-
-    test_fail "CLIProxyAPI OpenWebUI models output missing expected non-empty models list"
-    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
-    return 1
 }
 
 cleanup_test_resources() {
@@ -1335,8 +1159,6 @@ main() {
     RUN_CLEANUP_ON_EXIT=true
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
     print_info "Upstream URL: $UPSTREAM_URL"
-    print_info "CliProxyApi: $CLIPROXY_BIN"
-    print_info "Upstream mode: $RAG_UPSTREAM_MODE"
     print_info "Test mode: $TEST_MODE"
     [ -n "$API_KEY" ] && print_info "API Key: ${API_KEY:0:8}..."
     ensure_openwebui_api_key
@@ -1345,16 +1167,8 @@ main() {
     print_section "Integration Guard"
     test_repo_real_integration_guard
 
-    if is_cliproxy_mode; then
-        print_section "CliProxyApi Integration"
-        test_cli_proxy_api_managed_runtime
-        test_cli_proxy_api_health_all
-        test_cli_proxy_api_models_openwebui
-        test_cli_proxy_api_models_vllm
-    else
-        print_section "Upstream Integration"
-        print_info "CLIProxyAPI checks skipped (LiteLLM mode)"
-    fi
+    print_section "Upstream Integration"
+    print_info "Running against the configured OpenAI-compatible upstream"
 
     # Health checks
     print_section "Health Checks"

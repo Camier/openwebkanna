@@ -139,13 +139,13 @@ extract_model_ids() {
 #   $1 - Path to JSON file containing /v1/models response
 #
 # Required globals (set before calling):
-#   Uses resolved_expected_aliases() from cliproxyapi-helpers.sh
+#   EXPECTED_MODEL_ALIASES - optional space-separated alias list
 #
 # Returns:
 #   0 if all expected aliases are present, 1 if any are missing
 #
 # Example:
-#   CLIPROXYAPI_EXPECT_ALIASES="model-a model-b"
+#   EXPECTED_MODEL_ALIASES="model-a model-b"
 #   if assert_expected_aliases /tmp/models.json; then ...
 ###############################################################################
 assert_expected_aliases() {
@@ -154,11 +154,8 @@ assert_expected_aliases() {
     local ids=""
     local expected_aliases=""
 
-    # Get expected aliases (from cliproxyapi-helpers.sh if available)
-    if command -v resolved_expected_aliases >/dev/null 2>&1; then
-        expected_aliases="$(resolved_expected_aliases | sed '/^$/d' || true)"
-    elif [ -n "${CLIPROXYAPI_EXPECT_ALIASES:-}" ]; then
-        expected_aliases="$CLIPROXYAPI_EXPECT_ALIASES"
+    if [ -n "${EXPECTED_MODEL_ALIASES:-}" ]; then
+        expected_aliases="$EXPECTED_MODEL_ALIASES"
     else
         return 0
     fi
