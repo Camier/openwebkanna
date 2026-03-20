@@ -1,4 +1,4 @@
-version: 2026-03-15
+version: 2026-03-20
 run_modes:
   - name: docker-primary
     description: Default supported operator mode using root shell entrypoints backed by canonical config surfaces.
@@ -22,8 +22,8 @@ run_modes:
       - config/env/.env.example
       - config/compose/docker-compose.yml
       - README.md
-  - name: host-native-retrieval-adjunct
-    description: Optional host-native multimodal retrieval API that queries Qdrant `rag_evidence` directly through one-collection text and visual lanes.
+  - name: host-native-canonical-rag
+    description: Canonical future multimodal retrieval API that queries Qdrant `rag_evidence` directly through one-collection text and visual lanes.
     status: supported
     evidence:
       - services/README.md
@@ -136,10 +136,10 @@ services:
       - README.md
   - name: multimodal_retrieval_api
     critical: false
-    role: Optional host-native retrieval API for one-collection multimodal RAG over `rag_evidence`.
-    run_mode: host-native-retrieval-adjunct
+    role: Canonical future retrieval API for one-collection multimodal RAG over `rag_evidence`.
+    run_mode: host-native-canonical-rag
     notes:
-      - Service is not part of the compose baseline and is operated separately when multimodal retrieval workflows need it.
+      - Service is the target RAG runtime for this repo, but it is not yet part of the compose baseline and is still operated separately during migration.
       - Live retrieval is native to this repo and no longer delegates to thesis_graph.
       - "`/ready` includes sampled `rag_evidence` collection-completeness checks for native `figure_records`."
     evidence:
@@ -190,7 +190,7 @@ critical_paths:
       - config/env/.env.example
       - config/compose/docker-compose.yml
   - name: native-multimodal-retrieval-api
-    description: Optional host-native multimodal retrieval path over the `rag_evidence` one-collection index.
+    description: Canonical future host-native multimodal retrieval path over the `rag_evidence` one-collection index.
     path:
       - client
       - multimodal_retrieval_api
@@ -198,7 +198,7 @@ critical_paths:
       - text-lane
       - visual-lane
     notes:
-      - This path is separate from the OpenWebUI pgvector baseline.
+      - This is the target RAG architecture, but the compose-managed OpenWebUI pgvector path remains the current baseline during migration.
       - "`rag_evidence` is the sole runtime evidence source."
       - Missing figure payloads surface as runtime diagnostics instead of falling back to local extraction artifacts.
       - "`/ready` samples page payload completeness and can mark the service degraded when native `figure_records` coverage is incomplete."
@@ -230,7 +230,8 @@ drift_checks:
   - Compose environment fallbacks should match config/env/.env.example, especially for baseline retrieval flags such as VECTOR_DB and ENABLE_RAG_HYBRID_SEARCH.
   - Postgres is always deployed and the committed OpenWebUI default now uses VECTOR_DB=pgvector; if a local runtime switches back to chroma, document that as an intentional override.
   - Optional sidecars should stay disabled in the normal baseline unless a concrete workflow requires them.
-  - multimodal_retrieval_api is a supported host-native adjunct, not a compose-managed baseline service.
+  - multimodal_retrieval_api is the canonical future RAG path; docs should distinguish that target architecture from the current compose-managed OpenWebUI baseline until migration completes.
+  - Operator-facing docs and env templates should expose direct /health, /ready, and POST /api/v1/retrieve probes for the target host-native service without relabeling the current baseline as already migrated.
   - The native multimodal retrieval path targets `rag_evidence` directly and should not be described as delegating to thesis_graph.
   - Legacy project containers outside the current compose config should be removed instead of being carried forward as supported topology.
 observed_runtime:
@@ -238,8 +239,8 @@ observed_runtime:
   evidence:
     - .env
     - status.sh
-    - docker compose config --services
-    - docker compose ps --format json
+    - docker compose --project-directory . -f config/compose/docker-compose.yml config --services
+    - docker compose --project-directory . -f config/compose/docker-compose.yml ps --format json
   live_ui_url: http://localhost:3000
   openwebui_image: ghcr.io/open-webui/open-webui:v0.8.10
   vector_db: pgvector

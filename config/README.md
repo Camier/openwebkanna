@@ -1,6 +1,6 @@
 # Configuration Map
 
-Last updated: 2026-03-13 (UTC)
+Last updated: 2026-03-20 (UTC)
 
 Canonical runtime configuration lives under `config/`.
 
@@ -21,6 +21,11 @@ Common config tasks:
 - change MCPO server exposure: `mcp/config.json`
 - change SearXNG behavior: `searxng/settings.yml`
 
+Current baseline vs target:
+- Current compose-managed baseline RAG path is OpenWebUI retrieval over `VECTOR_DB=pgvector`.
+- Canonical future RAG path is `multimodal_retrieval_api` on `POST /api/v1/retrieve`.
+- Until migration completes, keep both statements true in docs and config comments. Do not relabel the current baseline as already migrated.
+
 Use this tree as the edit target when you need to change runtime behavior:
 
 - `compose/`: Docker Compose topology and service wiring.
@@ -36,7 +41,7 @@ Editing rule:
 After changing config, prefer this validation order:
 
 ```bash
-docker compose config -q
+docker compose --project-directory . -f config/compose/docker-compose.yml config -q
 ./scripts/check-doc-consistency.sh
 ./status.sh
 ./test-rag.sh --baseline
@@ -46,6 +51,7 @@ docker compose config -q
 Minimal safe workflow:
 
 1. Edit the canonical file under `config/`.
-2. Run `docker compose config -q` when compose or env behavior changed.
+2. Run `docker compose --project-directory . -f config/compose/docker-compose.yml config -q` when compose or env behavior changed.
 3. Run `./scripts/check-doc-consistency.sh` if docs or defaults changed.
 4. Run `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline` for runtime-impacting changes.
+5. If you changed canonical future RAG defaults or docs, also verify the host-native retrieval path you documented.

@@ -53,7 +53,7 @@ Avoid:
 ## Command And Snippet Rules
 
 - Prefer the canonical root script surface before raw low-level commands.
-- Use `docker compose ...` instead of hard-coded container names when low-level Docker commands are still needed.
+- Use `docker compose --project-directory . -f config/compose/docker-compose.yml ...` from repo root instead of hard-coded container names when low-level Docker commands are still needed.
 - Mark raw `curl`, `psql`, `docker exec`, or SQL snippets as advanced debugging when they are not the default operator path.
 - Keep snippets copy-paste safe. If a placeholder is required, name it explicitly in the snippet.
 - Keep validation commands close to the task they validate.
@@ -78,7 +78,7 @@ After documentation edits:
 After docs that change or describe runtime behavior materially:
 
 ```bash
-docker compose config -q
+docker compose --project-directory . -f config/compose/docker-compose.yml config -q
 ./status.sh
 ./test-rag.sh --baseline
 ./test-api.sh --baseline

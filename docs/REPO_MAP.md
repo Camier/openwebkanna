@@ -1,6 +1,6 @@
 # Repository Map
 
-Last refreshed: 2026-03-13 (UTC)
+Last refreshed: 2026-03-20 (UTC)
 Scope: `/LAB/@thesis/openwebui`
 
 This file owns repository shape and operator navigation. It is intentionally not a second runtime spec.
@@ -29,7 +29,7 @@ Treat `docs/reference/openwebui/*` as snapshot/reference material, not as local 
 
 Operationally relevant roots:
 
-- root `*.sh`: small daily operator surface for deploy, status, logs, cleanup, update, and baseline validation.
+- root `*.sh`: small daily operator surface for deploy, status, logs, cleanup, update, and baseline validation of the current compose-managed stack.
 - `config/`: canonical runtime configuration.
 - `docs/`: runbooks, SSOT, guides, status notes, plans, reviews, and reference snapshots.
 - `lib/`: shared shell helpers used by root scripts.
@@ -62,7 +62,7 @@ Secondary scripts under `scripts/`:
 - `scripts/admin/`: OpenWebUI admin, repair, config-sync, and backup helpers such as `scripts/admin/openwebui-user-admin.sh`, `scripts/admin/repair-openwebui-tools.sh`, `scripts/admin/sync-openwebui-openai-config.sh`, `scripts/admin/sync-openwebui-web-search-config.sh`, `scripts/admin/sync-openwebui-retrieval-config.sh`, `scripts/admin/backup-openwebui-db.sh`, `scripts/admin/apply-openwebui-tool-patches.sh`
 - `scripts/eval/`: operator-facing evaluation harnesses such as `scripts/eval/run-retrieval-eval.sh`
 - `scripts/rag/`: retrieval helpers such as `scripts/rag/import-pdfs-to-kb.sh`, `scripts/rag/render-multimodal-answer.sh`, `scripts/rag/render-multimodal-answer-v2.sh`, `scripts/rag/migrate_rag_evidence.py` (one-shot text + figure migration driver), and `scripts/rag/build_multimodal_index.py`
-- `services/multimodal_retrieval_api/`: native retrieval API for the `rag_evidence` one-collection runtime; it queries Qdrant directly for text and visual lanes and only uses a compatibility env file for shared defaults when present
+- `services/multimodal_retrieval_api/`: canonical future RAG service; it serves `POST /api/v1/retrieve` against the `rag_evidence` one-collection runtime, queries Qdrant directly for text and visual lanes, and only uses a compatibility env file for shared defaults when present
 
 Optional sidecar/tool flows:
 
@@ -114,6 +114,7 @@ Primary persisted state lives in:
 From the compose definition:
 
 - OpenWebUI: `127.0.0.1:${WEBUI_PORT:-3000} -> 8080`
+- Multimodal retrieval API (host-native target path): `127.0.0.1:${MULTIMODAL_RETRIEVAL_API_PORT:-8510} -> services.multimodal_retrieval_api.app:app`
 - PostgreSQL: `${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432} -> 5432`
 - Jupyter: `127.0.0.1:${JUPYTER_PORT:-8890} -> ${JUPYTER_INTERNAL_PORT:-8889}`
 - SearXNG: `${SEARXNG_BIND_ADDRESS:-127.0.0.1}:${SEARXNG_PORT:-8888} -> 8080`
@@ -129,5 +130,6 @@ For a normal repo pass:
 1. Read `README.md`.
 2. Read `docs/ssot/stack.md`.
 3. Check `config/README.md` before editing config.
-4. Run `./status.sh`.
-5. Run `./test-rag.sh --baseline` and `./test-api.sh --baseline` if runtime behavior changed.
+4. Run `./status.sh` for the current compose-managed baseline.
+5. Run `./test-rag.sh --baseline` and `./test-api.sh --baseline` if baseline runtime behavior changed.
+6. For canonical future RAG work, probe `/health`, `/ready`, and `POST /api/v1/retrieve` on `multimodal_retrieval_api`.

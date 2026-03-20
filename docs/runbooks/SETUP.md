@@ -1,16 +1,21 @@
 # Setup Guide: OpenWebUI + LiteLLM
 
-Last updated: 2026-03-13 (UTC)
+Last updated: 2026-03-20 (UTC)
 
 This is the canonical setup path for this repository.
 Default mode is LiteLLM-first with Docker-managed services.
+
+Current baseline vs target:
+- Current setup path in this runbook builds the compose-managed OpenWebUI baseline and starts the host-native canonical retrieval service.
+- Canonical future RAG path is the host-native `multimodal_retrieval_api` on `/api/v1/retrieve`.
+- Baseline success now requires both the compose-managed baseline and the host-native canonical retrieval service to be healthy.
 
 Use this runbook when:
 - you are setting up a fresh local clone
 - you want to rebuild the baseline from scratch
 
 Exit criteria for this runbook:
-- `docker compose config >/dev/null` passes
+- `docker compose --project-directory . -f config/compose/docker-compose.yml config >/dev/null` passes
 - `./status.sh` shows the core services healthy
 - `./test-rag.sh --baseline` passes
 - `./test-api.sh --baseline` passes
@@ -52,7 +57,7 @@ Optional sidecars stay off for the baseline unless you intentionally enable them
 Sanity-check the rendered compose config first:
 
 ```bash
-docker compose config >/dev/null
+docker compose --project-directory . -f config/compose/docker-compose.yml config >/dev/null
 ```
 
 Then deploy:
@@ -63,6 +68,7 @@ Then deploy:
 
 What this does:
 - starts the core OpenWebUI baseline
+- starts the host-native canonical retrieval service and waits for `/ready`
 - starts optional sidecars only if their env flags are enabled
 - validates core service health
 - keeps OpenWebUI routed to LiteLLM (reference upstream)
@@ -71,7 +77,7 @@ What this does:
 
 ```bash
 ./status.sh
-docker compose ps
+docker compose --project-directory . -f config/compose/docker-compose.yml ps
 ./scripts/testing/audit-no-mock.sh
 ```
 
@@ -98,6 +104,12 @@ Baseline note:
 - Jupyter-backed code execution is part of the baseline and is driven by `.env`.
 - `CODE_EXECUTION_JUPYTER_AUTH_TOKEN` and `CODE_INTERPRETER_JUPYTER_AUTH_TOKEN` must match `JUPYTER_TOKEN`.
 - Use `./test-rag.sh --baseline` after deploy to validate the full default lane.
+
+Canonical future RAG target:
+- `multimodal_retrieval_api` is the target retrieval service for this repo.
+- It remains host-native, but `./deploy.sh`, `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline` now treat it as part of the normal baseline gate.
+- Set either `MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH` directly or `MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE` with `NEMOTRON_MODEL_PATH` before the first deploy.
+- Use the host-native env block in `config/env/.env.example` and the direct probe examples in `README.md` when you need to recover or debug the canonical service directly.
 
 ## 5. After setup
 

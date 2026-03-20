@@ -1,11 +1,12 @@
 # Troubleshooting: OpenWebUI + LiteLLM (Auth, Models, RAG/Vector DB)
 
-Last updated: 2026-03-13 (UTC)
+Last updated: 2026-03-20 (UTC)
 
 This repository runs:
 - OpenWebUI in Docker (`openwebui`)
 - LiteLLM as the primary OpenAI-compatible upstream
-- Docker-managed PostgreSQL/pgvector as the baseline vector store
+- Docker-managed PostgreSQL/pgvector as the current compose-managed baseline vector store
+- `multimodal_retrieval_api` as the canonical future host-native retrieval service during migration
 - Optional Docker SearXNG sidecar
 
 When something looks "gone" in the UI (models, settings), the most common root cause is auth/session drift, not data loss.
@@ -18,6 +19,8 @@ Start here before deeper symptom branches:
 - `./status.sh`
 - `./test-api.sh --baseline`
 - `./test-rag.sh --baseline`
+- `curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/health"`
+- `curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/ready"`
 
 If those baseline checks fail, fix the first failing baseline signal before applying symptom-specific workarounds.
 Before DB or role edits, take a backup with `./scripts/admin/backup-openwebui-db.sh`.
@@ -27,7 +30,7 @@ Before DB or role edits, take a backup with `./scripts/admin/backup-openwebui-db
 1. Service health:
 ```bash
 ./status.sh
-docker compose ps
+docker compose --project-directory . -f config/compose/docker-compose.yml ps
 curl -fsS http://127.0.0.1:${WEBUI_PORT:-3000}/health >/dev/null && echo "openwebui health ok"
 ```
 
@@ -42,6 +45,15 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 ```bash
 ./test-api.sh --baseline
 ./test-rag.sh --baseline
+```
+
+4. Canonical future RAG path checks:
+```bash
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/health" | jq
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/ready" | jq
+curl -fsS -X POST "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/api/v1/retrieve" \
+  -H 'content-type: application/json' \
+  -d '{"query":"mesembrine structure","top_k":3}' | jq
 ```
 
 If those pass, your "models disappeared" problem is almost always browser auth state (cookies/localStorage) or user role state in OpenWebUI DB.
@@ -102,7 +114,7 @@ Then clear site data and sign in again.
 1. Ensure `.env` has `WEBUI_AUTH=true`.
 2. Redeploy:
 ```bash
-docker compose up -d
+docker compose --project-directory . -f config/compose/docker-compose.yml up -d
 ```
 3. Clear browser site data for the OpenWebUI origin and sign in again.
 
@@ -118,8 +130,8 @@ Usually the container is crash-looping or not healthy.
 
 ### Triage
 ```bash
-docker compose ps
-docker compose logs --tail 200 openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml ps
+docker compose --project-directory . -f config/compose/docker-compose.yml logs --tail 200 openwebui
 ```
 
 ### Common causes in this repo context
@@ -133,7 +145,7 @@ docker compose logs --tail 200 openwebui
 ```
 2. Restart:
 ```bash
-docker compose restart openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml restart openwebui
 ```
 3. If it keeps failing, restore from a known-good backup:
 - follow the canonical restore steps in `docs/runbooks/OPERATIONS.md`
@@ -154,6 +166,10 @@ Vector backend is chosen by `.env`:
 ./status.sh
 ```
 
+Migration note:
+- `./status.sh` now includes the host-native canonical retrieval service.
+- Probe `${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}` directly when you need deeper readiness or retrieval diagnostics.
+
 ### When using `pgvector`
 Required env vars:
 - `VECTOR_DB=pgvector`
@@ -162,6 +178,30 @@ Required env vars:
 Common connectivity rule:
 - If PostgreSQL runs on the host, from the container you must use `host.docker.internal`, not `localhost`.
 - This repo config includes `extra_hosts: host.docker.internal:host-gateway` for that reason.
+
+## Symptom: `multimodal_retrieval_api` is unhealthy or `/api/v1/retrieve` fails
+
+### What it means
+- The canonical future RAG path is missing a runtime prerequisite, has incomplete `rag_evidence` data, or the host-native service is not running with the expected env.
+
+### Triage
+```bash
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/health" | jq
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/ready" | jq
+curl -fsS -X POST "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/api/v1/retrieve" \
+  -H 'content-type: application/json' \
+  -d '{"query":"mesembrine structure","top_k":3}' | jq
+```
+
+### Common causes
+- `MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH` is unset or points to the wrong local model path.
+- Qdrant is not reachable at `MULTIMODAL_RETRIEVAL_API_QDRANT_URL`.
+- `rag_evidence` exists but native `page` or `figure` coverage is incomplete, so `/ready` reports degraded.
+
+### Fix
+1. Confirm the host-native env block in `.env` matches the intended runtime.
+2. Restart the service with explicit host and port values.
+3. If `/ready` reports degraded evidence coverage, re-run the relevant `rag_evidence` migration/backfill before blaming the query layer.
 
 ## Symptom: Web search / web_scraper fails with SSL certificate errors
 
@@ -184,7 +224,7 @@ REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
 ```
 3. Restart OpenWebUI:
 ```bash
-docker compose up -d --force-recreate openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml up -d --force-recreate openwebui
 ```
 
 If a specific library requires it, you can also set:
@@ -255,8 +295,8 @@ sudo firewall-cmd --reload
 ### Triage
 1. Check Jupyter container health:
 ```bash
-docker compose ps jupyter
-docker compose logs --tail 50 jupyter
+docker compose --project-directory . -f config/compose/docker-compose.yml ps jupyter
+docker compose --project-directory . -f config/compose/docker-compose.yml logs --tail 50 jupyter
 ```
 
 2. Verify `JUPYTER_TOKEN` is set correctly in `.env`.
@@ -267,7 +307,7 @@ docker compose logs --tail 50 jupyter
 ### Common fixes
 - Restart the Jupyter container:
 ```bash
-docker compose restart jupyter
+docker compose --project-directory . -f config/compose/docker-compose.yml restart jupyter
 ```
 
 - Regenerate and sync tokens if needed:
@@ -276,7 +316,7 @@ docker compose restart jupyter
   3. Set `CODE_EXECUTION_JUPYTER_AUTH_TOKEN` to the same value.
   4. Restart both containers:
 ```bash
-docker compose up -d --force-recreate jupyter openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml up -d --force-recreate jupyter openwebui
 ```
 
 ## Symptom: Post-update validation failures
@@ -295,7 +335,7 @@ docker compose up -d --force-recreate jupyter openwebui
 2. Check container logs for errors:
 ```bash
 ./logs.sh
-docker compose logs --tail 200 openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml logs --tail 200 openwebui
 ```
 
 ### Common post-update issues

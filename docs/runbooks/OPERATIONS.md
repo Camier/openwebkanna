@@ -1,6 +1,6 @@
 # OpenWebUI Operations Quick Reference
 
-Last updated: 2026-03-13 (UTC)
+Last updated: 2026-03-20 (UTC)
 
 Use this runbook when:
 
@@ -30,6 +30,16 @@ Common daily commands:
 ./test-api.sh --baseline
 ```
 
+Canonical future RAG path during migration:
+
+```bash
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/health"
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/ready"
+curl -fsS -X POST "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/api/v1/retrieve" \
+  -H 'content-type: application/json' \
+  -d '{"query":"mesembrine structure","top_k":3}'
+```
+
 ## Daily Operations
 
 First-time environment preparation lives in `SETUP.md`.
@@ -57,24 +67,29 @@ Normal post-change validation loop:
 ```bash
 ./logs.sh                    # All services
 ./logs.sh openwebui          # Single service
-docker compose logs -f       # Follow mode
-docker compose logs --tail=100 openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml logs -f       # Follow mode
+docker compose --project-directory . -f config/compose/docker-compose.yml logs --tail=100 openwebui
 ```
 
 #### Restart Services
 ```bash
-docker compose restart openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml restart openwebui
 ```
 
 #### Stop Stack
 ```bash
-docker compose down
+docker compose --project-directory . -f config/compose/docker-compose.yml down
 ./cleanup.sh
 ```
 
 ---
 
 ## RAG Operations
+
+Current baseline vs target:
+- Current operator baseline still includes the compose-managed OpenWebUI retrieval path over `pgvector` as migration coverage.
+- Canonical future RAG path is the host-native `multimodal_retrieval_api`.
+- Operator scripts now validate the canonical retrieval service first, with legacy OpenWebUI retrieval kept as explicit migration coverage.
 
 ### Import PDFs
 
@@ -131,6 +146,36 @@ curl -s -X POST \
 
 The committed baseline remains `RAG_TOP_K=15`, `CHUNK_SIZE=3000`, `CHUNK_OVERLAP=600`, and `RAG_EMBEDDING_MODEL=pritamdeka/S-PubMedBert-MS-MARCO`.
 
+### Operate The Canonical Future Retrieval API
+
+Start or recover the host-native service with explicit settings from `.env` when you are validating or repairing the canonical RAG path:
+
+```bash
+PYTHONPATH=/LAB/@thesis/openwebui \
+python3 -m uvicorn \
+  services.multimodal_retrieval_api.app:app \
+  --host "${MULTIMODAL_RETRIEVAL_API_HOST:-127.0.0.1}" \
+  --port "${MULTIMODAL_RETRIEVAL_API_PORT:-8510}"
+```
+
+Required host-native settings:
+- `MULTIMODAL_RETRIEVAL_API_QDRANT_URL`
+- `MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH`
+
+Useful direct checks:
+
+```bash
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/health" | jq
+curl -fsS "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/ready" | jq
+curl -fsS -X POST "${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}/api/v1/retrieve" \
+  -H 'content-type: application/json' \
+  -d '{"query":"mesembrine structure","top_k":3}' | jq
+```
+
+Interpretation:
+- Treat this as the canonical retrieval contract for the repo.
+- Do not treat green legacy OpenWebUI retrieval checks as proof that the canonical service is healthy.
+
 **Snapshot current retrieval + embedding config before changing it:**
 ```bash
 OPENWEBUI_API_KEY="<admin-bearer-token>"
@@ -143,7 +188,7 @@ jq -n \
 
 **Check whether indexed chunks match the active embedding model:**
 ```bash
-docker compose exec postgres psql -U openwebui -d openwebui -c \
+docker compose --project-directory . -f config/compose/docker-compose.yml exec postgres psql -U openwebui -d openwebui -c \
   "SELECT DISTINCT collection_name, vmetadata->>'embedding_config' AS embedding_config FROM document_chunk ORDER BY collection_name;"
 ```
 
@@ -168,7 +213,7 @@ docker compose exec postgres psql -U openwebui -d openwebui -c \
 
 **Check pgvector status (advanced debug):**
 ```bash
-docker compose exec postgres psql -U openwebui -d openwebui -c \
+docker compose --project-directory . -f config/compose/docker-compose.yml exec postgres psql -U openwebui -d openwebui -c \
   "SELECT COUNT(*) FROM collection_embeddings"
 ```
 
@@ -219,13 +264,13 @@ BACKUP_FILE="backups/webui.db.YYYYMMDD-HHMMSS.sqlite"
 ./scripts/admin/backup-openwebui-db.sh --output "backups/webui.db.pre-restore.$(date +%Y%m%d-%H%M%S).sqlite"
 
 # 3. Stop OpenWebUI to avoid writes during restore
-docker compose stop openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml stop openwebui
 
 # 4. Restore SQLite DB file inside the OpenWebUI container
-docker cp "${BACKUP_FILE}" "$(docker compose ps -q openwebui)":/app/backend/data/webui.db
+docker cp "${BACKUP_FILE}" "$(docker compose --project-directory . -f config/compose/docker-compose.yml ps -q openwebui)":/app/backend/data/webui.db
 
 # 5. Start OpenWebUI and verify health
-docker compose start openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml start openwebui
 curl -fsS "http://127.0.0.1:${WEBUI_PORT:-3000}/health" >/dev/null && echo "openwebui healthy"
 ```
 
@@ -253,7 +298,7 @@ curl "http://127.0.0.1:${WEBUI_PORT:-3000}/health"
 curl http://localhost:8000/docs
 
 # PostgreSQL
-docker compose exec postgres pg_isready -U openwebui
+docker compose --project-directory . -f config/compose/docker-compose.yml exec postgres pg_isready -U openwebui
 ```
 
 ### Model Availability
@@ -280,7 +325,7 @@ curl -s -H "Authorization: Bearer ${OPENWEBUI_API_KEY}" \
 ### Docker Resources
 ```bash
 # Container status
-docker compose ps
+docker compose --project-directory . -f config/compose/docker-compose.yml ps
 
 # Resource usage
 docker stats --no-stream openwebui mcpo
@@ -319,7 +364,7 @@ Use that runbook for auth drift, empty model lists, `502` recovery, SSL issues, 
 Advanced debug only. Prefer `./scripts/admin/openwebui-user-admin.sh --email ...` for normal account management.
 
 ```bash
-docker compose exec -T openwebui python3 - <<'PY'
+docker compose --project-directory . -f config/compose/docker-compose.yml exec -T openwebui python3 - <<'PY'
 import sqlite3
 
 con = sqlite3.connect("/app/backend/data/webui.db")
@@ -340,7 +385,8 @@ PY
 ./scripts/check-image-versions.sh
 
 # Pull and restart
-docker compose pull && docker compose up -d
+docker compose --project-directory . -f config/compose/docker-compose.yml pull && \
+docker compose --project-directory . -f config/compose/docker-compose.yml up -d
 
 # Validate
 ./test-rag.sh --baseline

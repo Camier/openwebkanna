@@ -1,6 +1,6 @@
 # OpenWebUI + LiteLLM RAG Deployment
 
-Last updated: 2026-03-13 (UTC)
+Last updated: 2026-03-20 (UTC)
 
 This repository is an orchestration layer for an academic-papers RAG workflow in OpenWebUI with LiteLLM as the reference OpenAI-compatible backend.
 
@@ -55,7 +55,9 @@ When you need to change behavior, use these paths first:
 
 ## Runtime summary
 
-- Default supported mode is Docker Compose with OpenWebUI in containers and LiteLLM as the primary host-assisted upstream at `http://host.docker.internal:4000/v1`.
+- Current supported baseline is Docker Compose with OpenWebUI in containers and LiteLLM as the primary host-assisted upstream at `http://host.docker.internal:4000/v1`.
+- Canonical future RAG path is the host-native `multimodal_retrieval_api` over `POST /api/v1/retrieve` backed by Qdrant `rag_evidence`.
+- Migration is not complete yet: the compose-managed OpenWebUI `pgvector` path remains the legacy compatibility lane, while the baseline operator surface now validates the host-native canonical retrieval service first.
 - `searxng`, `open-terminal`, and `indigo-service` remain optional sidecars gated by profiles or env flags.
 - The committed `config/env/.env.example` now pins the shipped `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` by digest so fresh deploys do not drift when upstream tags move.
 - For the full runtime model, service registry, and drift notes, use `docs/ssot/stack.md`.
@@ -66,6 +68,10 @@ OpenWebUI (container) --> LiteLLM (host/container) --> providers
                       \--> optional sidecars:
                            - Open Terminal (terminal/file integration)
                            - Indigo Service (chemistry REST APIs)
+
+Target RAG migration path:
+
+client --> multimodal_retrieval_api --> qdrant(rag_evidence) --> text lane + visual lane
 ```
 
 ## Operational constraints
@@ -110,7 +116,7 @@ INDIGO_SERVICE_ENABLED=false
 
 3. Sanity-check the config:
 ```bash
-docker compose config >/dev/null
+docker compose --project-directory . -f config/compose/docker-compose.yml config >/dev/null
 ```
 
 4. Start stack:
@@ -121,7 +127,7 @@ docker compose config >/dev/null
 5. Check health:
 ```bash
 ./status.sh
-docker compose ps
+docker compose --project-directory . -f config/compose/docker-compose.yml ps
 ./test-rag.sh --baseline
 ./test-api.sh --baseline
 ```
@@ -144,6 +150,16 @@ High-signal local checks:
 ```bash
 curl -fsS "http://127.0.0.1:${MCPO_PORT:-8000}/docs" >/dev/null && echo "mcpo up"
 OPENWEBUI_TEST_MODEL="openrouter/openai/gpt-5-mini" ./test-api.sh --baseline
+```
+
+Canonical future RAG checks are part of the baseline gate and can also be probed directly:
+
+```bash
+curl -fsS http://127.0.0.1:8510/health
+curl -fsS http://127.0.0.1:8510/ready
+curl -fsS -X POST http://127.0.0.1:8510/api/v1/retrieve \
+  -H 'content-type: application/json' \
+  -d '{"query":"mesembrine structure","top_k":3}'
 ```
 
 ## Local workflow guides
@@ -179,14 +195,14 @@ Multimodal retrieval artifact from an existing OpenWebUI knowledge base:
   --query "What is the structure of mesembrine?"
 ```
 
-Direct multimodal retrieval API against the native `rag_evidence` Qdrant backend:
+Direct multimodal retrieval API against the canonical future `rag_evidence` backend:
 
 ```bash
 PYTHONPATH=/LAB/@thesis/openwebui \
-MULTIMODAL_RETRIEVAL_API_QDRANT_URL=http://localhost:6333 \
+MULTIMODAL_RETRIEVAL_API_QDRANT_URL=http://127.0.0.1:6335 \
 MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH=/path/to/nemotron-model \
 MULTIMODAL_RETRIEVAL_API_TEXT_SPARSE_MODEL_NAME=Qdrant/bm25 \
-/LAB/@thesis/wow/.venv/bin/python -m uvicorn \
+python3 -m uvicorn \
   services.multimodal_retrieval_api.app:app \
   --host 127.0.0.1 \
   --port 8510
@@ -197,6 +213,9 @@ curl -fsS -X POST http://127.0.0.1:8510/api/v1/retrieve \
   -H 'content-type: application/json' \
   -d '{"query":"mesembrine structure","top_k":3}'
 ```
+
+Use this host-native path for RAG migration work, retrieval architecture review, direct service debugging, and deploy recovery.
+Use `./status.sh`, `./test-rag.sh --baseline`, and `./test-api.sh --baseline` to validate the canonical retrieval service first; OpenWebUI retrieval checks now remain as explicit migration coverage inside those scripts.
 
 One-shot migration/backfill into `rag_evidence`:
 
@@ -210,7 +229,7 @@ python scripts/rag/migrate_rag_evidence.py \
 Optional compatibility env file:
 
 ```bash
-export MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE=/LAB/@thesis/wow/.env
+export MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE=/absolute/path/to/shared-defaults.env
 ```
 
 Build and use the CLIP-backed multimodal figure index (V2):

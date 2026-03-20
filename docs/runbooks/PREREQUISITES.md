@@ -86,7 +86,7 @@ Advanced optional prerequisites are not required for the baseline runtime.
 ## Pre-deploy verification
 
 ```bash
-docker compose config >/dev/null
+docker compose --project-directory . -f config/compose/docker-compose.yml config >/dev/null
 bash -n deploy.sh status.sh test-rag.sh test-api.sh
 ```
 
@@ -94,7 +94,7 @@ Expected outcome:
 - no missing required env keys
 - Jupyter auth tokens match
 - placeholder secrets have been replaced with real values
-- `docker compose config` renders successfully
+- `docker compose --project-directory . -f config/compose/docker-compose.yml config` renders successfully
 - the operator scripts parse cleanly
 
 ## Handoff to setup

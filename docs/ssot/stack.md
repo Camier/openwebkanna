@@ -1,17 +1,18 @@
 # Stack SSOT
 
-Last updated: 2026-03-15 (UTC)
+Last updated: 2026-03-20 (UTC)
 Scope: `/LAB/@thesis/openwebui`
 
 ## North Star + DoD
 
-This repository should remain an operator-facing deployment layer for OpenWebUI-based RAG workflows, with Docker Compose as the supported baseline, LiteLLM as the primary OpenAI-compatible upstream, and optional sidecars clearly separated from the core stack.
+This repository should remain an operator-facing deployment layer for OpenWebUI-based RAG workflows, with Docker Compose as the supported current baseline, LiteLLM as the primary OpenAI-compatible upstream, the host-native `multimodal_retrieval_api` as the canonical future RAG path, and optional sidecars clearly separated from the core stack.
 
 Definition of done for topology changes in this repo:
 
 - deployment truth is recoverable from `docs/ssot/stack.md`, `docs/ssot/stack.yaml`, `README.md`, `config/env/.env.example`, and `config/compose/docker-compose.yml`
 - `README.md` stays a front door, `docs/REPO_MAP.md` stays a layout map, and this document owns runtime topology
 - docs distinguish the canonical edit surface (`config/*`) from the daily operator entrypoints
+- docs keep the current compose-managed baseline distinct from the target host-native RAG path
 - every critical service is named, justified, and backed by evidence
 - optional profiles remain explicitly labeled optional
 - drift between docs, env defaults, and scripts is recorded instead of hand-waved away
@@ -49,12 +50,12 @@ Evidence:
 - `config/compose/docker-compose.yml`
 - `README.md`
 
-### Host-native retrieval adjunct
+### Canonical Future RAG Path
 
-Supported local adjunct mode for the native multimodal retrieval API. This
-service is not part of the compose baseline; operators can run it separately on
-the host to query the `rag_evidence` Qdrant collection through one-collection
-text and visual lanes.
+The native `multimodal_retrieval_api` is the repo's canonical future RAG path.
+Today it is still run separately on the host rather than as part of the compose
+baseline, but RAG architecture and migration work should treat it as the target
+runtime over the `rag_evidence` one-collection text and visual lanes.
 
 Evidence:
 
@@ -144,10 +145,11 @@ Evidence:
 - Evidence: `config/compose/docker-compose.yml`, `config/env/.env.example`, `README.md`
 
 10. `multimodal_retrieval_api`
-- Role: optional host-native retrieval API for one-collection multimodal RAG over `rag_evidence`.
-- Non-critical because it is not part of the compose baseline and is operated separately when multimodal/native retrieval workflows need it.
+- Role: canonical future retrieval API for one-collection multimodal RAG over `rag_evidence`.
+- Non-critical in the current local baseline because it is not yet compose-managed and is still operated separately during the migration window.
+- Operator note: docs and config should expose its URL, port, and required host-native env so migration work does not depend on ad hoc local knowledge.
 - Important nuance: it now uses native `qdrant-client`, native Transformers/FastEmbed query encoding, lane-based readiness reporting, and a sampled `rag_evidence` completeness probe; it no longer delegates live retrieval through `thesis_graph`.
-- Run mode: `host-native-retrieval-adjunct`
+- Run mode: `host-native-canonical-rag`
 - Evidence: `services/README.md`, `README.md`, `services/multimodal_retrieval_api/service.py`
 
 ## Critical Paths
@@ -179,15 +181,17 @@ Evidence:
 
 `client -> multimodal_retrieval_api -> qdrant(rag_evidence) -> text lane + visual lane`
 
-This path is a supported host-native adjunct for multimodal retrieval.
-It is separate from the OpenWebUI pgvector baseline and uses `rag_evidence` as
-its sole runtime evidence source. Missing figure payloads are surfaced as
-runtime diagnostics instead of triggering local extraction fallbacks.
+This path is the canonical future RAG architecture for the repo. It is still
+operated separately from the compose-managed OpenWebUI pgvector baseline during
+the migration window and uses `rag_evidence` as its sole runtime evidence
+source. Missing figure payloads are surfaced as runtime diagnostics instead of
+triggering local extraction fallbacks.
 
 Operational nuance:
 
 - `/ready` now samples `page` points in `rag_evidence` and reports collection completeness for native `figure_records`.
 - A `degraded` readiness state can therefore mean runtime prerequisites are missing, or that sampled native evidence coverage is incomplete.
+- `config/env/.env.example` should therefore carry the host-native URL, port, Qdrant URL, and text-model path knobs needed to run and probe this service consistently.
 
 Evidence:
 
@@ -244,13 +248,14 @@ Evidence:
 - Critical and shipped sidecar images should be pinned to immutable digests in `config/env/.env.example` when upstream defaults are floating tags such as `main` or `latest`.
 - postgres is always deployed and the committed default now uses `VECTOR_DB=pgvector`; if you switch a local runtime to `chroma`, document that as an intentional override because it changes where vectors persist.
 - Optional sidecars remain supported, but the normal baseline should keep them disabled unless a concrete workflow needs them.
-- `multimodal_retrieval_api` is a supported host-native adjunct, not a compose-managed baseline service; keep docs explicit about that boundary.
+- `multimodal_retrieval_api` is the canonical future RAG path; docs must distinguish that target architecture from the current compose-managed OpenWebUI baseline until migration completes.
+- Root docs and runbooks should expose direct `/health`, `/ready`, and `POST /api/v1/retrieve` probes for the target service even while baseline validation still centers on OpenWebUI retrieval.
 - The native multimodal retrieval path now targets `rag_evidence` directly; do not describe it as delegating to `thesis_graph`.
 - Legacy project containers outside the current compose config should be removed instead of being treated as part of the supported topology.
 
 ## Observed Local Runtime
 
-Observed from `./status.sh`, `.env`, `docker compose config --services`, and `docker compose ps --format json` on 2026-03-13 after baseline normalization.
+Observed from `./status.sh`, `.env`, `docker compose --project-directory . -f config/compose/docker-compose.yml config --services`, and `docker compose --project-directory . -f config/compose/docker-compose.yml ps --format json` on 2026-03-13 after baseline normalization.
 
 - Live UI endpoint: `http://localhost:3000`
 - Live OpenWebUI image: `ghcr.io/open-webui/open-webui:v0.8.10`
@@ -282,6 +287,8 @@ Minimum refresh checklist:
 
 ## Changelog
 
+- `2026-03-20`: reclassified `multimodal_retrieval_api` as the canonical future RAG path, removed adjunct wording from the SSOT, and clarified that the current compose-managed baseline still remains the OpenWebUI `pgvector` path during migration.
+- `2026-03-20`: promoted the canonical future RAG path across the operator front door, repo map, env template, and runbooks without claiming that the compose-managed baseline migration is already complete.
 - `2026-03-15`: added the host-native multimodal retrieval API as a supported adjunct run mode and service, documented the `rag_evidence` one-collection query path, and removed stale references to live `thesis_graph` delegation from the runtime topology.
 - `2026-03-13`: aligned `config/compose/docker-compose.yml` environment fallbacks with the committed Docker baseline by restoring `pgvector` and hybrid retrieval as the default fallback values, refreshed the observed-runtime date, and tightened drift guidance so compose defaults, `config/env/.env.example`, and the SSOT stay synchronized.
 - `2026-03-13`: pinned `MCPO_IMAGE` and `INDIGO_SERVICE_IMAGE` to verified digests in the committed env template so fresh deploys do not drift with upstream `main` or `latest` tags.
