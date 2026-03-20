@@ -6,20 +6,20 @@ not another operator wrapper.
 Current service roots:
 
 - `multimodal_retrieval_api/`: Starlette retrieval service for the
-  one-collection multimodal RAG path. It queries `rag_evidence` directly in
-  Qdrant for text, visual, and exact-chemistry evidence. Text query encoding
-  is native to this repo through Transformers + FastEmbed; a generic
-  compatibility env file can still be used for shared model/Qdrant defaults
-  when present, with `wow/.env` as the local default fallback.
+  one-collection multimodal RAG path. This is the repo's canonical future RAG
+  service and it queries `rag_evidence` directly in Qdrant for text and visual
+  evidence. Text query encoding is native to this repo through Transformers +
+  FastEmbed. A compatibility env file may still be used for shared model or
+  Qdrant defaults, but only when explicitly configured.
 
 Direct launch example:
 
 ```bash
 PYTHONPATH=/LAB/@thesis/openwebui \
-MULTIMODAL_RETRIEVAL_API_QDRANT_URL=http://localhost:6333 \
+MULTIMODAL_RETRIEVAL_API_QDRANT_URL=http://127.0.0.1:6335 \
 MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH=/path/to/nemotron-model \
 MULTIMODAL_RETRIEVAL_API_TEXT_SPARSE_MODEL_NAME=Qdrant/bm25 \
-/LAB/@thesis/wow/.venv/bin/python -m uvicorn \
+python3 -m uvicorn \
   services.multimodal_retrieval_api.app:app \
   --host 127.0.0.1 \
   --port 8510
@@ -28,7 +28,7 @@ MULTIMODAL_RETRIEVAL_API_TEXT_SPARSE_MODEL_NAME=Qdrant/bm25 \
 Optional shared-defaults file:
 
 ```bash
-MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE=/LAB/@thesis/wow/.env
+MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE=/absolute/path/to/shared-defaults.env
 ```
 
 Use this only as a fallback source for `QDRANT_URL`, `QDRANT_API_KEY`,
@@ -41,7 +41,6 @@ Readiness:
 - `/ready` reports service-level status plus lane-specific runtime readiness for:
   - `text`
   - `visual`
-  - `exact_chemistry`
 - `/ready.qdrant.collection_completeness` also samples `page` points in
   `rag_evidence` and reports whether native `figure_records` are present.
 - Each lane also reports its configured metadata, including vector names and

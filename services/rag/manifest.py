@@ -73,7 +73,6 @@ def build_manifest(
     artifacts: dict[str, str],
     page_records: list[MaterializedRecord],
     figure_records: list[MaterializedRecord],
-    molecule_records: list[MaterializedRecord] | None = None,
     points_total: int | None = None,
     errors: list[str] | None = None,
     notes: list[str] | None = None,
@@ -83,8 +82,6 @@ def build_manifest(
 ) -> IngestionManifest:
     """Assemble a manifest from materialized record sets."""
 
-    if molecule_records is None:
-        molecule_records = []
     if points_total is None:
         points_total = len(page_records) + len(figure_records)
 

@@ -24,11 +24,6 @@ class VisionEmbedder(Protocol):
         """Return one multivector per input image."""
 
 
-class ChemistryEmbedder(Protocol):
-    def embed_smiles(self, smiles_list: list[str]) -> list[list[float]]:
-        """Return one dense chemistry vector per canonical SMILES."""
-
-
 @dataclass(frozen=True)
 class EmbedAndUpsertConfig:
     """Execution-time flags for embedding / upsert."""
@@ -36,7 +31,6 @@ class EmbedAndUpsertConfig:
     collection_name: str = "rag_evidence"
     batch_size: int = 64
     require_vision_for_figures: bool = True
-    enable_chem_dense: bool = False
 
 
 @dataclass
@@ -48,7 +42,6 @@ class EmbedAndUpsertResult:
     points_skipped: int = 0
     page_points: int = 0
     figure_points: int = 0
-    molecule_points: int = 0
 
 
 class EmbedAndUpsertPipeline:
@@ -63,7 +56,6 @@ class EmbedAndUpsertPipeline:
         text_dense_embedder: DenseTextEmbedder | None = None,
         text_sparse_embedder: SparseTextEmbedder | None = None,
         vision_embedder: VisionEmbedder | None = None,
-        chemistry_embedder: ChemistryEmbedder | None = None,
     ) -> None:
         self.qdrant_client = qdrant_client
         self.collection_cfg = collection_cfg
@@ -71,7 +63,6 @@ class EmbedAndUpsertPipeline:
         self.text_dense_embedder = text_dense_embedder
         self.text_sparse_embedder = text_sparse_embedder
         self.vision_embedder = vision_embedder
-        self.chemistry_embedder = chemistry_embedder
 
     def run(self, records: list[MaterializedRecord]) -> EmbedAndUpsertResult:
         """Embed all records and upsert them in batches."""
@@ -97,7 +88,6 @@ class EmbedAndUpsertPipeline:
         text_dense_map = self._embed_text_dense(records)
         text_sparse_map = self._embed_text_sparse(records)
         vision_map = self._embed_vision(records)
-        chem_map = self._embed_chem(records)
 
         points: list[dict[str, Any]] = []
         for record in records:
@@ -107,7 +97,6 @@ class EmbedAndUpsertPipeline:
             dense_vec = text_dense_map.get(record.point_id)
             sparse_vec = text_sparse_map.get(record.point_id)
             vision_vec = vision_map.get(record.point_id)
-            chem_vec = chem_map.get(record.point_id)
 
             if dense_vec is not None:
                 vector_payload["text_dense"] = dense_vec
@@ -115,8 +104,6 @@ class EmbedAndUpsertPipeline:
                 vector_payload["text_sparse"] = sparse_vec
             if vision_vec is not None:
                 vector_payload["vision_li"] = vision_vec
-            if chem_vec is not None:
-                vector_payload["chem_dense"] = chem_vec
 
             if not self._record_is_eligible(record, vector_payload):
                 continue
@@ -135,8 +122,6 @@ class EmbedAndUpsertPipeline:
                 result.page_points += 1
             elif object_type == "figure":
                 result.figure_points += 1
-            elif object_type == "molecule":
-                result.molecule_points += 1
 
         return points
 
@@ -175,19 +160,6 @@ class EmbedAndUpsertPipeline:
         vectors = self.vision_embedder.embed_images([image_uri for _, image_uri in eligible])
         return {point_id: vector for (point_id, _), vector in zip(eligible, vectors)}
 
-    def _embed_chem(self, records: list[MaterializedRecord]) -> dict[str, list[float]]:
-        if not self.runtime_cfg.enable_chem_dense or self.chemistry_embedder is None:
-            return {}
-        eligible = [
-            (record.point_id, record.smiles_for_embedding)
-            for record in records
-            if record.payload["object_type"] == "molecule" and record.smiles_for_embedding
-        ]
-        if not eligible:
-            return {}
-        vectors = self.chemistry_embedder.embed_smiles([smiles for _, smiles in eligible])
-        return {point_id: vector for (point_id, _), vector in zip(eligible, vectors)}
-
     def _record_is_eligible(self, record: MaterializedRecord, vector_payload: dict[str, Any]) -> bool:
         object_type = str(record.payload["object_type"])
         if object_type == "page":
@@ -197,14 +169,6 @@ class EmbedAndUpsertPipeline:
                 return False
             if self.runtime_cfg.require_vision_for_figures and "vision_li" not in vector_payload:
                 return False
-            return True
-        if object_type == "molecule":
-            if record.payload.get("review_status") != "parsed":
-                return False
-            if "text_dense" not in vector_payload:
-                return False
-            if self.runtime_cfg.enable_chem_dense:
-                return "chem_dense" in vector_payload
             return True
         return False
 

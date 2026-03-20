@@ -5,14 +5,6 @@ import os
 from pathlib import Path
 
 
-def _resolve_first_existing(candidates: list[Path]) -> Path | None:
-    for candidate in candidates:
-        expanded = candidate.expanduser()
-        if expanded.exists():
-            return expanded.resolve()
-    return None
-
-
 def _env_path(name: str, default: Path | None = None) -> Path | None:
     raw = os.getenv(name)
     if raw:
@@ -43,14 +35,6 @@ def _env_value_from_file(path: Path | None, name: str) -> str | None:
     return None
 
 
-def _default_compat_env_file(repo_root: Path) -> Path | None:
-    candidates = [
-        repo_root.parent / "wow" / ".env",
-        Path("/LAB/@thesis/wow/.env"),
-    ]
-    return _resolve_first_existing(candidates)
-
-
 @dataclass(frozen=True)
 class ServiceSettings:
     app_name: str
@@ -78,13 +62,8 @@ class ServiceSettings:
         if repo_root is None:
             raise RuntimeError("MULTIMODAL_RETRIEVAL_API_REPO_ROOT is required.")
 
-        compat_env_file = _env_path(
-            "MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE",
-            _default_compat_env_file(repo_root),
-        )
+        compat_env_file = _env_path("MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE")
         qdrant_url = os.getenv("MULTIMODAL_RETRIEVAL_API_QDRANT_URL")
-        if not qdrant_url:
-            qdrant_url = os.getenv("QDRANT_URL") or _env_value_from_file(compat_env_file, "QDRANT_URL")
         qdrant_api_key = os.getenv("MULTIMODAL_RETRIEVAL_API_QDRANT_API_KEY")
         if not qdrant_api_key:
             qdrant_api_key = os.getenv("QDRANT_API_KEY") or _env_value_from_file(compat_env_file, "QDRANT_API_KEY")
@@ -124,7 +103,7 @@ class ServiceSettings:
             app_name=os.getenv("MULTIMODAL_RETRIEVAL_API_NAME", "multimodal-retrieval-api"),
             repo_root=repo_root,
             extractions_root=extractions_root,
-            qdrant_url=qdrant_url or "http://localhost:6333",
+            qdrant_url=qdrant_url or "http://127.0.0.1:6335",
             qdrant_api_key=qdrant_api_key,
             compat_env_file=compat_env_file,
             text_query_model_path=text_query_model_path,

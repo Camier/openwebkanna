@@ -15,9 +15,6 @@ class MaterializedRecord:
     payload: dict[str, Any]
     text_for_embedding: str | None = None
     image_uri: str | None = None
-    smiles_for_embedding: str | None = (
-        None  # Kept for embed_and_upsert.py, stripped in Wave 2
-    )
 
     def as_json(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
@@ -26,7 +23,6 @@ class MaterializedRecord:
             "payload": self.payload,
             "text_for_embedding": self.text_for_embedding,
             "image_uri": self.image_uri,
-            "smiles_for_embedding": self.smiles_for_embedding,
         }
 
 
@@ -76,16 +72,6 @@ class FigureInput:
     image_uri: str
     page_id: str | None = None
     document_id: str | None = None
-
-
-@dataclass
-class MoleculeInput:
-    """Molecule input for materialization (chemistry stripped - returns empty list)."""
-
-    molecule_id: str
-    smiles: str | None = None
-    document_id: str | None = None
-    page_id: str | None = None
 
 
 # Materialization functions
@@ -159,18 +145,3 @@ def materialize_figures(
             )
         )
     return records
-
-
-def materialize_molecules(
-    document: SourceDocument,
-    molecules: list[MoleculeInput],
-    *,
-    pipeline_version: str,
-) -> list[MaterializedRecord]:
-    """Materialize molecule records.
-
-    Note: Chemistry is being stripped. Returns empty list for script compatibility.
-    The function signature is preserved for caller compatibility but performs no work.
-    """
-    # Chemistry stripped - return empty list
-    return []

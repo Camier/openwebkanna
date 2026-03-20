@@ -7,12 +7,10 @@ from pydantic import BaseModel, Field
 
 RetrievalMode = Literal[
     "hybrid",
-    "dense_only",
-    "lexical_fallback",
-    "hybrid_no_late",
-    "hybrid_with_late",
+    "text_only",
+    "visual_only",
 ]
-EvidenceType = Literal["page", "figure", "chemical_block"]
+EvidenceType = Literal["page", "figure"]
 EvidenceSource = Literal["qdrant", "local_extraction"]
 
 
@@ -21,15 +19,18 @@ class RetrieveRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100, description="Maximum number of reranked hits to return.")
     mode: RetrievalMode | None = Field(
         default=None,
-        description="Override thesis_graph retrieval mode. Defaults to runtime settings.",
+        description="Override multimodal retrieval mode. Defaults to runtime settings.",
     )
 
 
 class RetrievalEvidenceHit(BaseModel):
     point_id: str
+    evidence_type: EvidenceType
     score: float
     rank: int | None = None
     stage: str
+    matched_lanes: list[str] = Field(default_factory=list)
+    rrf_score: float | None = None
     doc_id: str | None = None
     page_number: int | None = None
     title: str | None = None

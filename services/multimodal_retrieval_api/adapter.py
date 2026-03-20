@@ -12,7 +12,7 @@ def build_one_collection_backend_info(
     service_settings: ServiceSettings,
 ) -> RetrievalBackendInfo:
     return RetrievalBackendInfo(
-        service="qdrant.text_hybrid",
+        service="qdrant.multimodal_rrf",
         qdrant_url=service_settings.qdrant_url,
         qdrant_collection=service_settings.rag_collection_name,
         dense_vector_name=service_settings.text_dense_vector_name,
@@ -89,19 +89,38 @@ def load_colmodernvbert_visual_lane() -> Any:
 
 
 @lru_cache(maxsize=1)
+def load_retrieval_lane_state() -> dict[str, Any]:
+    """Return lanes plus load-time errors for readiness and diagnostics."""
+
+    lane_errors: dict[str, str] = {}
+    text_lane = None
+    visual_lane = None
+
+    try:
+        text_lane = load_text_lane()
+    except Exception as exc:
+        lane_errors["text"] = str(exc)
+
+    try:
+        visual_lane = load_colmodernvbert_visual_lane()
+    except Exception as exc:
+        lane_errors["visual"] = str(exc)
+
+    return {
+        "text": text_lane,
+        "visual": visual_lane,
+        "lane_errors": lane_errors,
+    }
+
+
+@lru_cache(maxsize=1)
 def load_retrieval_lanes() -> dict[str, Any]:
     """Return a dict of available retrieval lanes.
 
     Returns text and visual lanes when configured; exact-chemistry lane removed.
     """
-    service_settings = ServiceSettings.load()
-    text_lane = load_text_lane()
-    visual_lane = None
-    try:
-        visual_lane = load_colmodernvbert_visual_lane()
-    except Exception:
-        pass
+    lane_state = load_retrieval_lane_state()
     return {
-        "text": text_lane,
-        "visual": visual_lane,
+        "text": lane_state["text"],
+        "visual": lane_state["visual"],
     }

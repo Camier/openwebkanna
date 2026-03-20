@@ -13,8 +13,6 @@ class RagCollectionConfig:
     collection_name: str = "rag_evidence"
     text_dense_dim: int = 1024
     vision_li_dim: int = 128
-    chem_dense_dim: int = 0
-    enable_chem_dense: bool = False
 
 
 def ensure_rag_collection(client: Any, cfg: RagCollectionConfig) -> None:
