@@ -119,7 +119,9 @@ def resolve_alias_ids(
 
 def request_json(url: str, *, token: str, method: str = "GET", payload: Any | None = None) -> Any:
     body = None
-    headers = {"Authorization": f"Bearer {token}"}
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -227,7 +229,8 @@ class EvalContext:
     dataset_path: Path
     out_dir: Path
     url: str
-    token: str
+    backend: str
+    token: str | None
     k_values: list[int]
     baseline_path: Path | None
     max_recall_drop: float
@@ -238,7 +241,10 @@ class EvalContext:
     paper_id_aliases: dict[str, set[str]]
 
 
-def resolve_collection_name(ctx: EvalContext, dataset: dict[str, Any]) -> tuple[str, str | None]:
+def resolve_collection_name(ctx: EvalContext, dataset: dict[str, Any]) -> tuple[str | None, str | None]:
+    if ctx.backend == "canonical":
+        return None, dataset.get("knowledge_name")
+
     if ctx.collection_name_override:
         return ctx.collection_name_override, dataset.get("knowledge_name")
 
@@ -257,24 +263,71 @@ def resolve_collection_name(ctx: EvalContext, dataset: dict[str, Any]) -> tuple[
     raise SystemExit(f"Knowledge base not found: {knowledge_name}")
 
 
+def canonical_hit_to_legacy_shape(hit: dict[str, Any]) -> dict[str, Any]:
+    payload = hit.get("payload") or {}
+    title = hit.get("title") or payload.get("document_title") or payload.get("title")
+    document = (
+        payload.get("chunk_text")
+        or payload.get("text")
+        or payload.get("content")
+        or payload.get("caption_text")
+        or ""
+    )
+    metadata = {
+        "title": title,
+        "name": title,
+        "source": payload.get("source") or payload.get("document_title") or title,
+        "paper_id": hit.get("doc_id") or payload.get("document_id") or payload.get("doc_id"),
+        "doi": payload.get("doi"),
+        "citekey": hit.get("citation_key") or payload.get("citation_key"),
+        "doc_id": hit.get("doc_id") or payload.get("document_id") or payload.get("doc_id"),
+        "page": hit.get("page_number") or payload.get("page_number"),
+    }
+    return {
+        "id": hit.get("point_id"),
+        "document": str(document or ""),
+        "metadata": metadata,
+        "distance": None,
+        "rank": int(hit.get("rank") or 0) or None,
+    }
+
+
+def canonical_extract_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    hits = payload.get("reranked_hits")
+    if not isinstance(hits, list):
+        return []
+    return [canonical_hit_to_legacy_shape(hit) for hit in hits if isinstance(hit, dict)]
+
+
 def evaluate_query(
     ctx: EvalContext,
-    collection_name: str,
+    collection_name: str | None,
     query_spec: dict[str, Any],
 ) -> dict[str, Any]:
     query = str(query_spec["query"])
     modality = str(query_spec.get("modality") or "text")
     max_k = max(ctx.k_values)
-    payload = {"collection_name": collection_name, "query": query, "k": max_k}
+    if ctx.backend == "canonical":
+        payload = {"query": query, "top_k": max_k}
+    else:
+        payload = {"collection_name": collection_name, "query": query, "k": max_k}
 
     started = time.perf_counter()
     try:
-        response = request_json(
-            f"{ctx.url.rstrip('/')}/api/v1/retrieval/query/doc",
-            token=ctx.token,
-            method="POST",
-            payload=payload,
-        )
+        if ctx.backend == "canonical":
+            response = request_json(
+                f"{ctx.url.rstrip('/')}/api/v1/retrieve",
+                token="",
+                method="POST",
+                payload=payload,
+            )
+        else:
+            response = request_json(
+                f"{ctx.url.rstrip('/')}/api/v1/retrieval/query/doc",
+                token=ctx.token or "",
+                method="POST",
+                payload=payload,
+            )
         error = None
     except urllib.error.HTTPError as exc:
         response = {"error": f"HTTP {exc.code}"}
@@ -284,7 +337,10 @@ def evaluate_query(
         error = str(exc)
     latency_ms = (time.perf_counter() - started) * 1000.0
 
-    hits = extract_hits(response) if error is None else []
+    if error is None:
+        hits = canonical_extract_hits(response) if ctx.backend == "canonical" else extract_hits(response)
+    else:
+        hits = []
     relevant_rank = None
     matched_title = None
     matched_paper_ids: list[str] = []
@@ -451,7 +507,7 @@ def render_report(
     run_payload: dict[str, Any],
     out_path: Path,
     knowledge_name: str | None,
-    collection_name: str,
+    collection_name: str | None,
 ) -> None:
     query_count = len(run_payload["per_query"])
     k_values = ", ".join(str(k) for k in run_payload["k_values"])
@@ -463,8 +519,9 @@ def render_report(
         f"- Run at: `{run_payload['run_at_utc']}`",
         f"- K values: `{k_values}`",
         f"- Query count: `{query_count}`",
+        f"- Backend: `{run_payload['backend']}`",
         f"- Knowledge base: `{knowledge_name or 'n/a'}`",
-        f"- Collection name: `{collection_name}`",
+        f"- Collection name: `{collection_name or 'n/a'}`",
         "",
         "## Summary",
         "",
@@ -552,7 +609,9 @@ def write_results_csv(run_payload: dict[str, Any], out_path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a retrieval evaluation against OpenWebUI.")
+    parser = argparse.ArgumentParser(
+        description="Run a retrieval evaluation against the canonical multimodal service or legacy OpenWebUI retrieval."
+    )
     parser.add_argument(
         "--dataset",
         default="data/eval/retrieval/sceletium-retrieval-sample-v1.json",
@@ -575,14 +634,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--collection-name", default=None, help="Optional OpenWebUI collection/knowledge UUID override.")
     parser.add_argument("--knowledge-name", default=None, help="Optional knowledge base name override.")
     parser.add_argument("--openwebui-url", default=os.environ.get("OPENWEBUI_URL", "http://localhost:3000"))
+    parser.add_argument(
+        "--multimodal-retrieval-api-url",
+        default=os.environ.get("MULTIMODAL_RETRIEVAL_API_URL", "http://127.0.0.1:8510"),
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("canonical", "legacy-openwebui"),
+        default=os.environ.get("RETRIEVAL_EVAL_BACKEND", "canonical"),
+        help="Retrieval backend to evaluate.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     token = os.environ.get("OPENWEBUI_EVAL_TOKEN") or os.environ.get("OPENWEBUI_API_KEY")
-    if not token:
-        print("OPENWEBUI_EVAL_TOKEN or OPENWEBUI_API_KEY is required", file=sys.stderr)
+    if args.backend == "legacy-openwebui" and not token:
+        print("OPENWEBUI_EVAL_TOKEN or OPENWEBUI_API_KEY is required for legacy-openwebui backend", file=sys.stderr)
         return 1
 
     dataset_path = Path(args.dataset)
@@ -592,7 +661,8 @@ def main() -> int:
     ctx = EvalContext(
         dataset_path=dataset_path,
         out_dir=out_dir,
-        url=args.openwebui_url,
+        url=args.multimodal_retrieval_api_url if args.backend == "canonical" else args.openwebui_url,
+        backend=args.backend,
         token=token,
         k_values=parse_k_values(args.k_values),
         baseline_path=Path(args.baseline) if args.baseline else None,
@@ -622,6 +692,8 @@ def main() -> int:
     regression_failed = bool(baseline_comparison and baseline_comparison.get("regressions"))
     run_payload: dict[str, Any] = {
         "schema_version": "retrieval-eval-run/v1",
+        "backend": args.backend,
+        "service_url": ctx.url,
         "dataset_version": dataset["dataset_version"],
         "dataset_path": str(dataset_path),
         "run_at_utc": utc_now_iso(),

@@ -2,7 +2,7 @@
 """Offline materialization entrypoint for the one-collection RAG.
 
 This script reads a small structured JSON spec, materializes atomic
-`page`, `figure`, and `molecule` evidence records, writes them as JSONL,
+`page` and `figure` evidence records, writes them as JSONL,
 and emits an ingestion manifest. It does not embed or upsert anything.
 
 Input spec shape:
@@ -14,7 +14,6 @@ Input spec shape:
   "embedding_models": {
     "text_dense": {"name": "your-text-model", "dim": 1024, "enabled": true},
     "vision_li": {"name": "vidore/colpali-...", "dim": 128, "enabled": true},
-    "chem_dense": {"name": "your-chem-model", "dim": 768, "enabled": false},
     "text_sparse": {"name": "bm25", "enabled": true}
   },
   "document": {
@@ -27,7 +26,6 @@ Input spec shape:
   },
   "pages": [...],
   "figures": [...],
-  "molecules": [...]
 }
 """
 
@@ -36,16 +34,19 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from services.rag import (
     EmbeddingModelSpec,
     FigureInput,
-    MoleculeInput,
     PageInput,
     SourceDocument,
     build_manifest,
     materialize_figures,
-    materialize_molecules,
     materialize_pages,
     write_jsonl,
 )
@@ -80,7 +81,6 @@ def main() -> None:
     document = SourceDocument(**spec["document"])
     pages = [PageInput(**item) for item in spec.get("pages", [])]
     figures = [FigureInput(**item) for item in spec.get("figures", [])]
-    molecules = [MoleculeInput(**item) for item in spec.get("molecules", [])]
 
     page_records = materialize_pages(
         document,
@@ -92,18 +92,12 @@ def main() -> None:
         figures,
         pipeline_version=pipeline_version,
     )
-    molecule_records = materialize_molecules(
-        document,
-        molecules,
-        pipeline_version=pipeline_version,
-    )
 
     materialized_dir = output_dir / "materialized"
     manifests_dir = output_dir / "manifests"
 
     page_path = write_jsonl(page_records, materialized_dir / f"{run_id}.pages.jsonl")
     figure_path = write_jsonl(figure_records, materialized_dir / f"{run_id}.figures.jsonl")
-    molecule_path = write_jsonl(molecule_records, materialized_dir / f"{run_id}.molecules.jsonl")
 
     embedding_models = {
         key: EmbeddingModelSpec(**value)
@@ -119,12 +113,10 @@ def main() -> None:
             "source_spec": str(input_path),
             "page_records": str(page_path),
             "figure_records": str(figure_path),
-            "molecule_records": str(molecule_path),
         },
         page_records=page_records,
         figure_records=figure_records,
-        molecule_records=molecule_records,
-        points_total=len(page_records) + len(figure_records) + len(molecule_records),
+        points_total=len(page_records) + len(figure_records),
     )
     manifest_path = manifest.write_json(manifests_dir / f"{run_id}.json")
 
@@ -134,7 +126,6 @@ def main() -> None:
                 "run_id": run_id,
                 "page_records": len(page_records),
                 "figure_records": len(figure_records),
-                "molecule_records": len(molecule_records),
                 "manifest_path": str(manifest_path),
             },
             indent=2,

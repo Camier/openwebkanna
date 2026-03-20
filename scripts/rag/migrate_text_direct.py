@@ -72,7 +72,7 @@ def main():
     args = parser.parse_args()
 
     # Setup Qdrant client
-    QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
+    QDRANT_URL = os.environ.get("QDRANT_URL", "http://127.0.0.1:6335")
     with open("/home/miko/.config/qdrant/qdrant.env") as f:
         for line in f:
             if line.startswith("QDRANT"):

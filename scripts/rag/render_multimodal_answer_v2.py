@@ -47,13 +47,13 @@ class HitMatch:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Render answers with a CLIP-backed figure index fused with OpenWebUI text retrieval."
+        description="Render answers with a CLIP-backed figure index fused with canonical multimodal retrieval."
     )
     parser.add_argument(
-        "--query", required=True, help="User query to send to multimodal retrieval."
+        "--query", required=True, help="User query to send to retrieval."
     )
-    parser.add_argument("--kb-name", help="OpenWebUI knowledge base name.")
-    parser.add_argument("--collection-id", help="OpenWebUI collection UUID.")
+    parser.add_argument("--kb-name", help="Legacy OpenWebUI knowledge base name.")
+    parser.add_argument("--collection-id", help="Legacy OpenWebUI collection UUID.")
     parser.add_argument(
         "--k",
         type=int,
@@ -78,6 +78,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--openwebui-url",
         default=os.environ.get("OPENWEBUI_URL", "http://localhost:3000"),
+    )
+    parser.add_argument(
+        "--multimodal-retrieval-api-url",
+        default=os.environ.get("MULTIMODAL_RETRIEVAL_API_URL", "http://127.0.0.1:8510"),
+    )
+    parser.add_argument(
+        "--retrieval-backend",
+        choices=("canonical", "legacy-openwebui"),
+        default=os.environ.get("RETRIEVAL_BACKEND", "canonical"),
+        help="Retrieval backend to query.",
     )
     parser.add_argument(
         "--chat-model",
@@ -156,7 +166,7 @@ def main(argv: list[str]) -> int:
         or os.environ.get("OPENWEBUI_API_KEY")
         or os.environ.get("API_KEY")
     )
-    if not token:
+    if (args.retrieval_backend == "legacy-openwebui" or not args.no_answer) and not token:
         raise SystemExit("OPENWEBUI_MULTIMODAL_TOKEN or OPENWEBUI_API_KEY is required")
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -183,16 +193,18 @@ def main(argv: list[str]) -> int:
 
     collection_id, resolved_kb_name = resolve_collection_id(
         args.openwebui_url,
-        token,
+        token or "",
         kb_name=args.kb_name,
         collection_id=args.collection_id,
-    )
+    ) if args.retrieval_backend == "legacy-openwebui" else (None, args.kb_name)
     hits = retrieve_hits(
         args.openwebui_url,
-        token,
+        token or "",
         collection_id=collection_id,
         query=args.query,
         k=args.k,
+        retrieval_backend=args.retrieval_backend,
+        multimodal_retrieval_api_url=args.multimodal_retrieval_api_url,
     )
     corpus_docs = build_corpus_docs(repo_root)
     corpus_doc_map = {doc.paper_id: doc for doc in corpus_docs}
@@ -310,12 +322,12 @@ def main(argv: list[str]) -> int:
     answer_model = ""
     if not args.no_answer:
         answer_model = args.chat_model or first_model_id(
-            request_json(f"{args.openwebui_url.rstrip('/')}/api/models", token=token)
+            request_json(f"{args.openwebui_url.rstrip('/')}/api/models", token=token or "")
         )
         if answer_model:
             answer = generate_answer(
                 args.openwebui_url,
-                token,
+                token or "",
                 model=answer_model,
                 query=args.query,
                 hits=hits,
@@ -324,6 +336,8 @@ def main(argv: list[str]) -> int:
 
     json_payload = {
         "generated_at": utc_now_iso(),
+        "retrieval_backend": args.retrieval_backend,
+        "multimodal_retrieval_api_url": args.multimodal_retrieval_api_url,
         "query": args.query,
         "knowledge_base": resolved_kb_name,
         "collection_id": collection_id,

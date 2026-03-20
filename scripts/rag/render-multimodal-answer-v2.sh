@@ -10,6 +10,7 @@ cd "$SCRIPT_DIR"
 
 OPENWEBUI_URL_DEFAULT="http://localhost:${WEBUI_PORT:-3000}"
 OPENWEBUI_URL="${OPENWEBUI_URL:-$OPENWEBUI_URL_DEFAULT}"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
@@ -34,12 +35,8 @@ if [ -z "$API_TOKEN" ] && [ "$OPENWEBUI_AUTO_AUTH" != "false" ]; then
     )"
 fi
 
-if [ -z "$API_TOKEN" ]; then
-    print_error "Unable to acquire OpenWebUI token for multimodal retrieval rendering"
-    exit 1
-fi
-
 export OPENWEBUI_URL
-export OPENWEBUI_MULTIMODAL_TOKEN="$API_TOKEN"
+export MULTIMODAL_RETRIEVAL_API_URL
+[ -n "$API_TOKEN" ] && export OPENWEBUI_MULTIMODAL_TOKEN="$API_TOKEN"
 
 exec python3 "${SELF_DIR}/render_multimodal_answer_v2.py" "$@"

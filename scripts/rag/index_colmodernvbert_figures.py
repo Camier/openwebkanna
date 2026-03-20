@@ -18,11 +18,16 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any, Iterable
 
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import PointStruct
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from services.rag.colmodernvbert_profile import get_default_colmodernvbert_profile
 from services.rag.materialize_evidence import make_point_id, make_qdrant_point_id
@@ -36,12 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, help="Path to a materialization manifest JSON.")
     parser.add_argument("--figures-jsonl", type=Path, help="Path to materialized figure JSONL.")
-    parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333"))
+    parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://127.0.0.1:6335"))
     parser.add_argument("--qdrant-api-key", default=os.environ.get("QDRANT_API_KEY"))
     parser.add_argument("--collection-name", default="rag_evidence")
     parser.add_argument("--vision-vector-name", default="vision_li")
     parser.add_argument("--text-dense-dim", type=int, required=True)
-    parser.add_argument("--chem-dense-dim", type=int, default=0)
     parser.add_argument("--model-name", default=profile.model_name)
     parser.add_argument("--batch-size", type=int, default=profile.embed_batch_size)
     parser.add_argument("--upsert-batch-size", type=int, default=8)
@@ -79,8 +83,6 @@ def main() -> int:
             collection_name=args.collection_name,
             text_dense_dim=args.text_dense_dim,
             vision_li_dim=len(probe_vector[0]),
-            chem_dense_dim=max(args.chem_dense_dim, 1),
-            enable_chem_dense=args.chem_dense_dim > 0,
         ),
     )
     ensure_payload_indexes(client, args.collection_name)

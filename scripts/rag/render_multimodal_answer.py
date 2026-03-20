@@ -94,7 +94,9 @@ def tokenize(value: str) -> set[str]:
 
 def request_json(url: str, *, token: str, method: str = "GET", payload: Any | None = None) -> Any:
     body = None
-    headers = {"Authorization": f"Bearer {token}"}
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -464,9 +466,80 @@ def resolve_collection_id(url: str, token: str, *, kb_name: str | None, collecti
     raise SystemExit(f"Knowledge base not found: {kb_name}")
 
 
-def retrieve_hits(url: str, token: str, *, collection_id: str, query: str, k: int) -> list[dict[str, Any]]:
+def resolve_retrieval_target(
+    *,
+    retrieval_backend: str,
+    openwebui_url: str,
+    token: str,
+    kb_name: str | None,
+    collection_id: str | None,
+) -> tuple[str | None, str | None]:
+    if retrieval_backend == "canonical":
+        return None, kb_name
+    return resolve_collection_id(
+        openwebui_url,
+        token,
+        kb_name=kb_name,
+        collection_id=collection_id,
+    )
+
+
+def canonical_hit_to_retrieval_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    payload = hit.get("payload") or {}
+    title = hit.get("title") or payload.get("document_title") or payload.get("title")
+    return {
+        "id": hit.get("point_id"),
+        "document": payload.get("chunk_text")
+        or payload.get("text")
+        or payload.get("content")
+        or payload.get("caption_text")
+        or "",
+        "metadata": {
+            "title": title,
+            "name": title,
+            "source": payload.get("source") or payload.get("document_title") or title,
+            "doc_id": hit.get("doc_id") or payload.get("document_id") or payload.get("doc_id"),
+            "paper_id": hit.get("doc_id") or payload.get("document_id") or payload.get("doc_id"),
+            "doi": payload.get("doi"),
+            "citekey": hit.get("citation_key") or payload.get("citation_key"),
+            "page": hit.get("page_number") or payload.get("page_number"),
+        },
+        "distance": None,
+        "rank": int(hit.get("rank") or 0) or None,
+    }
+
+
+def extract_canonical_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    hits = payload.get("reranked_hits")
+    if not isinstance(hits, list):
+        return []
+    return [canonical_hit_to_retrieval_hit(hit) for hit in hits if isinstance(hit, dict)]
+
+
+def retrieve_hits(
+    openwebui_url: str,
+    token: str,
+    *,
+    collection_id: str | None,
+    query: str,
+    k: int,
+    retrieval_backend: str,
+    multimodal_retrieval_api_url: str,
+) -> list[dict[str, Any]]:
+    if retrieval_backend == "canonical":
+        payload = request_json(
+            f"{multimodal_retrieval_api_url.rstrip('/')}/api/v1/retrieve",
+            token="",
+            method="POST",
+            payload={"query": query, "top_k": k},
+        )
+        return extract_canonical_hits(payload)
+
+    if not collection_id:
+        raise SystemExit("collection_id is required for legacy-openwebui retrieval")
+
     payload = request_json(
-        f"{url.rstrip('/')}/api/v1/retrieval/query/doc",
+        f"{openwebui_url.rstrip('/')}/api/v1/retrieval/query/doc",
         token=token,
         method="POST",
         payload={"collection_name": collection_id, "query": query, "k": k},
@@ -533,7 +606,7 @@ def write_markdown(
     *,
     query: str,
     kb_name: str | None,
-    collection_id: str,
+    collection_id: str | None,
     answer: str,
     hits: list[dict[str, Any]],
     figures: list[tuple[FigureMatch, Path]],
@@ -544,7 +617,7 @@ def write_markdown(
         f"- Generated: {utc_now_iso()}",
         f"- Query: {query}",
         f"- Knowledge base: {kb_name or '(collection id only)'}",
-        f"- Collection id: {collection_id}",
+        f"- Collection id: {collection_id or 'n/a'}",
         "",
         "## Answer",
         "",
@@ -590,10 +663,12 @@ def write_markdown(
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render OpenWebUI retrieval hits with migration-artifact figure attachments.")
-    parser.add_argument("--query", required=True, help="User query to send to OpenWebUI retrieval.")
-    parser.add_argument("--kb-name", help="OpenWebUI knowledge base name.")
-    parser.add_argument("--collection-id", help="OpenWebUI collection UUID.")
+    parser = argparse.ArgumentParser(
+        description="Render canonical multimodal retrieval hits with migration-artifact figure attachments."
+    )
+    parser.add_argument("--query", required=True, help="User query to send to retrieval.")
+    parser.add_argument("--kb-name", help="Legacy OpenWebUI knowledge base name.")
+    parser.add_argument("--collection-id", help="Legacy OpenWebUI collection UUID.")
     parser.add_argument("--k", type=int, default=8, help="Top-k retrieval hits to request (default: 8).")
     parser.add_argument("--max-docs", type=int, default=3, help="Maximum matched corpus docs to mine for figures.")
     parser.add_argument("--max-figures", type=int, default=4, help="Maximum figures to export.")
@@ -604,6 +679,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Output directory. Default: artifacts/multimodal-answer/<timestamp>-<slug>",
     )
     parser.add_argument("--openwebui-url", default=os.environ.get("OPENWEBUI_URL", "http://localhost:3000"))
+    parser.add_argument(
+        "--multimodal-retrieval-api-url",
+        default=os.environ.get("MULTIMODAL_RETRIEVAL_API_URL", "http://127.0.0.1:8510"),
+    )
+    parser.add_argument(
+        "--retrieval-backend",
+        choices=("canonical", "legacy-openwebui"),
+        default=os.environ.get("RETRIEVAL_BACKEND", "canonical"),
+        help="Retrieval backend to query.",
+    )
     parser.add_argument("--chat-model", default=None, help="Model for answer synthesis. Default: first available model.")
     parser.add_argument("--no-answer", action="store_true", help="Skip answer synthesis and export retrieval evidence only.")
     return parser.parse_args(argv)
@@ -612,7 +697,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     token = os.environ.get("OPENWEBUI_MULTIMODAL_TOKEN") or os.environ.get("OPENWEBUI_API_KEY") or os.environ.get("API_KEY")
-    if not token:
+    if (args.retrieval_backend == "legacy-openwebui" or not args.no_answer) and not token:
         raise SystemExit("OPENWEBUI_MULTIMODAL_TOKEN or OPENWEBUI_API_KEY is required")
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -625,13 +710,22 @@ def main(argv: list[str]) -> int:
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    collection_id, resolved_kb_name = resolve_collection_id(
-        args.openwebui_url,
-        token,
+    collection_id, resolved_kb_name = resolve_retrieval_target(
+        retrieval_backend=args.retrieval_backend,
+        openwebui_url=args.openwebui_url,
+        token=token or "",
         kb_name=args.kb_name,
         collection_id=args.collection_id,
     )
-    hits = retrieve_hits(args.openwebui_url, token, collection_id=collection_id, query=args.query, k=args.k)
+    hits = retrieve_hits(
+        args.openwebui_url,
+        token or "",
+        collection_id=collection_id,
+        query=args.query,
+        k=args.k,
+        retrieval_backend=args.retrieval_backend,
+        multimodal_retrieval_api_url=args.multimodal_retrieval_api_url,
+    )
     corpus_docs = build_corpus_docs(repo_root)
     figures = select_figures(
         hits=hits,
@@ -670,11 +764,13 @@ def main(argv: list[str]) -> int:
     answer = ""
     answer_model = ""
     if not args.no_answer:
-        answer_model = args.chat_model or first_model_id(request_json(f"{args.openwebui_url.rstrip('/')}/api/models", token=token))
+        answer_model = args.chat_model or first_model_id(
+            request_json(f"{args.openwebui_url.rstrip('/')}/api/models", token=token or "")
+        )
         if answer_model:
             answer = generate_answer(
                 args.openwebui_url,
-                token,
+                token or "",
                 model=answer_model,
                 query=args.query,
                 hits=hits,
@@ -683,6 +779,8 @@ def main(argv: list[str]) -> int:
 
     json_payload = {
         "generated_at": utc_now_iso(),
+        "retrieval_backend": args.retrieval_backend,
+        "multimodal_retrieval_api_url": args.multimodal_retrieval_api_url,
         "query": args.query,
         "knowledge_base": resolved_kb_name,
         "collection_id": collection_id,

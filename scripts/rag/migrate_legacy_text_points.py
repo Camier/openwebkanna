@@ -17,10 +17,15 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from services.rag.materialize_evidence import make_point_id, make_qdrant_point_id
 from services.rag.qdrant_schema import RagCollectionConfig, ensure_payload_indexes, ensure_rag_collection
@@ -28,7 +33,7 @@ from services.rag.qdrant_schema import RagCollectionConfig, ensure_payload_index
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333"))
+    parser.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://127.0.0.1:6335"))
     parser.add_argument("--qdrant-api-key", default=os.environ.get("QDRANT_API_KEY"))
     parser.add_argument("--source-collection", default=os.environ.get("QDRANT_COLLECTION", "pdf_nemotron_hybrid"))
     parser.add_argument("--target-collection", default="rag_evidence")
@@ -37,7 +42,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-dense-vector", default="text_dense")
     parser.add_argument("--target-sparse-vector", default="text_sparse")
     parser.add_argument("--vision-li-dim", type=int, default=128)
-    parser.add_argument("--chem-dense-dim", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--limit", type=int, default=0, help="Optional max number of source points to migrate.")
     parser.add_argument("--output-report", type=Path, default=None)
@@ -55,8 +59,6 @@ def main() -> int:
             collection_name=args.target_collection,
             text_dense_dim=dense_dim,
             vision_li_dim=args.vision_li_dim,
-            chem_dense_dim=max(1, args.chem_dense_dim),
-            enable_chem_dense=args.chem_dense_dim > 0,
         ),
     )
     ensure_payload_indexes(client, args.target_collection)

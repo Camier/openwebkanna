@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
         help="Extraction root containing */normalized.json. Defaults to datalab_extraction when present.",
     )
     parser.add_argument(
-        "--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333")
+        "--qdrant-url", default=os.environ.get("QDRANT_URL", "http://127.0.0.1:6335")
     )
     parser.add_argument("--qdrant-api-key", default=os.environ.get("QDRANT_API_KEY"))
     parser.add_argument(
@@ -75,7 +75,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-sparse-vector", default="text_sparse")
     parser.add_argument("--vision-vector-name", default="vision_li")
     parser.add_argument("--vision-li-dim", type=int, default=128)
-    parser.add_argument("--chem-dense-dim", type=int, default=0)
     parser.add_argument("--text-batch-size", type=int, default=128)
     parser.add_argument("--text-limit", type=int, default=0)
     parser.add_argument("--figure-batch-size", type=int, default=4)
@@ -121,8 +120,6 @@ def main() -> int:
                 args.target_sparse_vector,
                 "--vision-li-dim",
                 str(args.vision_li_dim),
-                "--chem-dense-dim",
-                str(args.chem_dense_dim),
                 "--batch-size",
                 str(args.text_batch_size),
                 "--limit",
@@ -155,8 +152,6 @@ def main() -> int:
             args.vision_vector_name,
             "--text-dense-dim",
             str(text_dense_dim),
-            "--chem-dense-dim",
-            str(args.chem_dense_dim),
             "--model-name",
             args.model_name,
             "--batch-size",
@@ -204,6 +199,11 @@ def run_stage(
     env_overrides: dict[str, str] | None = None,
 ) -> Any:
     env = os.environ.copy()
+    repo_root = script_path.parents[2]
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{repo_root}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(repo_root)
+    )
     if qdrant_api_key:
         env["QDRANT_API_KEY"] = qdrant_api_key
     if qdrant_url:
@@ -471,7 +471,6 @@ def build_collection_summary(
         "points_total": count_points(client, collection_name),
         "pages": count_points(client, collection_name, object_type="page"),
         "figures": count_points(client, collection_name, object_type="figure"),
-        "molecules": count_points(client, collection_name, object_type="molecule"),
         "pages_with_figure_records": count_points(
             client,
             collection_name,

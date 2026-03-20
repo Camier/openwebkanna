@@ -10,6 +10,8 @@ cd "$SCRIPT_DIR"
 
 OPENWEBUI_URL_DEFAULT="http://localhost:${WEBUI_PORT:-3000}"
 OPENWEBUI_URL="${OPENWEBUI_URL:-$OPENWEBUI_URL_DEFAULT}"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
+RETRIEVAL_EVAL_BACKEND="${RETRIEVAL_EVAL_BACKEND:-canonical}"
 OPENWEBUI_SIGNIN_PATH="${OPENWEBUI_SIGNIN_PATH:-/api/v1/auths/signin}"
 OPENWEBUI_SIGNIN_EMAIL="${OPENWEBUI_SIGNIN_EMAIL:-admin@localhost}"
 OPENWEBUI_SIGNIN_PASSWORD="${OPENWEBUI_SIGNIN_PASSWORD:-admin}"
@@ -20,7 +22,7 @@ OPENWEBUI_CONTAINER_NAME="${OPENWEBUI_CONTAINER_NAME:-${OPENWEBUI_DOCKER_CONTAIN
 API_TOKEN_INPUT="${OPENWEBUI_TOKEN:-${OPENWEBUI_API_KEY:-}}"
 API_TOKEN="$API_TOKEN_INPUT"
 
-if [ -z "$API_TOKEN" ] && [ "$OPENWEBUI_AUTO_AUTH" != "false" ]; then
+if [ "$RETRIEVAL_EVAL_BACKEND" = "legacy-openwebui" ] && [ -z "$API_TOKEN" ] && [ "$OPENWEBUI_AUTO_AUTH" != "false" ]; then
     API_TOKEN="$(
         resolve_openwebui_api_token \
             "$API_TOKEN_INPUT" \
@@ -34,12 +36,14 @@ if [ -z "$API_TOKEN" ] && [ "$OPENWEBUI_AUTO_AUTH" != "false" ]; then
     )"
 fi
 
-if [ -z "$API_TOKEN" ]; then
+if [ "$RETRIEVAL_EVAL_BACKEND" = "legacy-openwebui" ] && [ -z "$API_TOKEN" ]; then
     print_error "Unable to acquire OpenWebUI token for retrieval evaluation"
     exit 1
 fi
 
 export OPENWEBUI_URL
-export OPENWEBUI_EVAL_TOKEN="$API_TOKEN"
+export MULTIMODAL_RETRIEVAL_API_URL
+export RETRIEVAL_EVAL_BACKEND
+[ -n "$API_TOKEN" ] && export OPENWEBUI_EVAL_TOKEN="$API_TOKEN"
 
 exec python3 "${SELF_DIR}/run_retrieval_eval.py" "$@"
