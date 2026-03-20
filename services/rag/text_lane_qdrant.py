@@ -60,7 +60,6 @@ class QdrantTextHybridLane:
                     "page_id": payload.get("page_id"),
                     "page_number": payload.get("page_number"),
                     "figure_id": payload.get("figure_id"),
-                    "molecule_id": payload.get("molecule_id"),
                     "rank": hit.get("rank"),
                 }
             )

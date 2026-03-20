@@ -1,7 +1,7 @@
 services:
   # PostgreSQL with pgvector extension for vector storage
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
     container_name: openwebui_postgres
     restart: unless-stopped
     environment:

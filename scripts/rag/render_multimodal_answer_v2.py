@@ -49,11 +49,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Render answers with a CLIP-backed figure index fused with OpenWebUI text retrieval."
     )
-    parser.add_argument("--query", required=True, help="User query to send to multimodal retrieval.")
+    parser.add_argument(
+        "--query", required=True, help="User query to send to multimodal retrieval."
+    )
     parser.add_argument("--kb-name", help="OpenWebUI knowledge base name.")
     parser.add_argument("--collection-id", help="OpenWebUI collection UUID.")
-    parser.add_argument("--k", type=int, default=8, help="Top-k text retrieval hits to request (default: 8).")
-    parser.add_argument("--max-figures", type=int, default=4, help="Maximum figures to export.")
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=8,
+        help="Top-k text retrieval hits to request (default: 8).",
+    )
+    parser.add_argument(
+        "--max-figures", type=int, default=4, help="Maximum figures to export."
+    )
     parser.add_argument(
         "--figure-index-dir",
         type=Path,
@@ -66,9 +75,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Output directory. Default: artifacts/multimodal-answer-v2/<timestamp>-<slug>",
     )
-    parser.add_argument("--openwebui-url", default=os.environ.get("OPENWEBUI_URL", "http://localhost:3000"))
-    parser.add_argument("--chat-model", default=None, help="Model for answer synthesis. Default: first available model.")
-    parser.add_argument("--no-answer", action="store_true", help="Skip answer synthesis and export retrieval evidence only.")
+    parser.add_argument(
+        "--openwebui-url",
+        default=os.environ.get("OPENWEBUI_URL", "http://localhost:3000"),
+    )
+    parser.add_argument(
+        "--chat-model",
+        default=None,
+        help="Model for answer synthesis. Default: first available model.",
+    )
+    parser.add_argument(
+        "--no-answer",
+        action="store_true",
+        help="Skip answer synthesis and export retrieval evidence only.",
+    )
     return parser.parse_args(argv)
 
 
@@ -81,7 +101,9 @@ def normalize_hit_page(value: Any) -> int | None:
         return None
 
 
-def build_hit_map(hits: list[dict[str, Any]], corpus_docs: list[Any]) -> dict[str, HitMatch]:
+def build_hit_map(
+    hits: list[dict[str, Any]], corpus_docs: list[Any]
+) -> dict[str, HitMatch]:
     matched: dict[str, HitMatch] = {}
     for hit in hits:
         doc, match_score = match_hit_to_doc(hit, corpus_docs)
@@ -95,7 +117,11 @@ def build_hit_map(hits: list[dict[str, Any]], corpus_docs: list[Any]) -> dict[st
             hit_title=str(metadata.get("title") or metadata.get("name") or ""),
         )
         previous = matched.get(doc.paper_id)
-        if previous is None or candidate.hit_rank < previous.hit_rank or candidate.match_score > previous.match_score:
+        if (
+            previous is None
+            or candidate.hit_rank < previous.hit_rank
+            or candidate.match_score > previous.match_score
+        ):
             matched[doc.paper_id] = candidate
     return matched
 
@@ -122,6 +148,7 @@ def page_boost(figure_page: int | None, hit_page: int | None) -> float:
         return 2.5
     return 0.0
 
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     token = (
@@ -133,11 +160,16 @@ def main(argv: list[str]) -> int:
         raise SystemExit("OPENWEBUI_MULTIMODAL_TOKEN or OPENWEBUI_API_KEY is required")
 
     repo_root = Path(__file__).resolve().parents[2]
-    default_index_dir = repo_root / "artifacts" / "multimodal-index" / model_slug("openai/clip-vit-base-patch32")
+    default_index_dir = (
+        repo_root
+        / "artifacts"
+        / "multimodal-index"
+        / model_slug("openai/clip-vit-base-patch32")
+    )
     figure_index_dir = args.figure_index_dir or default_index_dir
     if not figure_index_dir.exists():
         raise SystemExit(
-            f"Figure index not found: {figure_index_dir}. Run ./scripts/rag/build-multimodal-index.sh first."
+            f"Figure index not found: {figure_index_dir}. Run 'python3 scripts/rag/build_multimodal_index.py' first."
         )
 
     output_dir = args.out_dir or (
@@ -155,14 +187,24 @@ def main(argv: list[str]) -> int:
         kb_name=args.kb_name,
         collection_id=args.collection_id,
     )
-    hits = retrieve_hits(args.openwebui_url, token, collection_id=collection_id, query=args.query, k=args.k)
+    hits = retrieve_hits(
+        args.openwebui_url,
+        token,
+        collection_id=collection_id,
+        query=args.query,
+        k=args.k,
+    )
     corpus_docs = build_corpus_docs(repo_root)
     corpus_doc_map = {doc.paper_id: doc for doc in corpus_docs}
     hit_map = build_hit_map(hits, corpus_docs)
 
     manifest, records, text_embeddings, image_embeddings = load_index(figure_index_dir)
-    processor, model, device = load_clip_bundle(str(manifest.get("model_id") or "openai/clip-vit-base-patch32"))
-    query_embedding = embed_texts([args.query], processor=processor, model=model, device=device)[0]
+    processor, model, device = load_clip_bundle(
+        str(manifest.get("model_id") or "openai/clip-vit-base-patch32")
+    )
+    query_embedding = embed_texts(
+        [args.query], processor=processor, model=model, device=device
+    )[0]
 
     selected = []
     text_scores = cosine_scores(query_embedding, text_embeddings)
@@ -173,7 +215,9 @@ def main(argv: list[str]) -> int:
             continue
         multimodal_score = float(image_scores[index] * 60.0 + text_scores[index] * 40.0)
         hit_match = hit_map.get(record.paper_id)
-        fused_score = multimodal_score + overlap_score(args.query, record.retrieval_text)
+        fused_score = multimodal_score + overlap_score(
+            args.query, record.retrieval_text
+        )
         if hit_match is not None:
             fused_score += 8.0
             fused_score += hit_rank_boost(hit_match.hit_rank)
@@ -231,7 +275,7 @@ def main(argv: list[str]) -> int:
             molecule_smiles=molecule_smiles,
             molecule_records=molecule_records,
         )
-        image_filename = f"{len(exported_figures)+1:02d}-{slugify(record.paper_id)[:80]}{Path(record.image_name).suffix or '.jpg'}"
+        image_filename = f"{len(exported_figures) + 1:02d}-{slugify(record.paper_id)[:80]}{Path(record.image_name).suffix or '.jpg'}"
         image_path = images_dir / image_filename
         image_path.write_bytes(image_bytes)
         relative_path = image_path.relative_to(output_dir)
@@ -265,7 +309,9 @@ def main(argv: list[str]) -> int:
     answer = ""
     answer_model = ""
     if not args.no_answer:
-        answer_model = args.chat_model or first_model_id(request_json(f"{args.openwebui_url.rstrip('/')}/api/models", token=token))
+        answer_model = args.chat_model or first_model_id(
+            request_json(f"{args.openwebui_url.rstrip('/')}/api/models", token=token)
+        )
         if answer_model:
             answer = generate_answer(
                 args.openwebui_url,
@@ -281,7 +327,11 @@ def main(argv: list[str]) -> int:
         "query": args.query,
         "knowledge_base": resolved_kb_name,
         "collection_id": collection_id,
-        "figure_index_dir": str(figure_index_dir.relative_to(repo_root) if figure_index_dir.is_relative_to(repo_root) else figure_index_dir),
+        "figure_index_dir": str(
+            figure_index_dir.relative_to(repo_root)
+            if figure_index_dir.is_relative_to(repo_root)
+            else figure_index_dir
+        ),
         "figure_index_model": manifest.get("model_id"),
         "chat_model": answer_model or None,
         "answer": answer,

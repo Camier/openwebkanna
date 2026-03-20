@@ -29,7 +29,9 @@ class ColModernVBERTTuningProfile:
     index_object_types: tuple[str, ...] = ("figure",)
     enable_page_visual_indexing: bool = False
     require_vision_for_figures: bool = True
-    image_policy: ColModernVBERTImagePolicy = field(default_factory=ColModernVBERTImagePolicy)
+    image_policy: ColModernVBERTImagePolicy = field(
+        default_factory=ColModernVBERTImagePolicy
+    )
     embed_batch_size: int = 4
     qdrant_candidate_pool_per_lane: int = 24
     final_top_k: int = 10
@@ -40,9 +42,6 @@ class ColModernVBERTTuningProfile:
             rrf_k=60,
             text_lane_weight=1.0,
             visual_lane_weight_text=1.1,
-            visual_lane_weight_mixed=1.2,
-            visual_lane_weight_smiles=1.3,
-            chem_lane_weight=1.05,
         )
     )
 

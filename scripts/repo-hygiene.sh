@@ -126,7 +126,7 @@ done
 
 while IFS= read -r broken_link; do
     [[ -n ${broken_link} ]] && quarantine_candidates+=("${broken_link#./}")
-done < <(find . -xtype l -print 2>/dev/null)
+done < <(find . -xtype l ! -path "./${QUARANTINE_DIR}/*" -print 2>/dev/null)
 
 if [[ ${#quarantine_candidates[@]} -gt 0 ]]; then
     mapfile -t quarantine_candidates < <(printf '%s\n' "${quarantine_candidates[@]}" | sed '/^$/d' | sort -u)

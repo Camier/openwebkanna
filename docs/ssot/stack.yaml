@@ -23,7 +23,7 @@ run_modes:
       - config/compose/docker-compose.yml
       - README.md
   - name: host-native-retrieval-adjunct
-    description: Optional host-native multimodal retrieval API that queries Qdrant `rag_evidence` directly through one-collection text, visual, and exact-chemistry lanes.
+    description: Optional host-native multimodal retrieval API that queries Qdrant `rag_evidence` directly through one-collection text and visual lanes.
     status: supported
     evidence:
       - services/README.md
@@ -197,7 +197,6 @@ critical_paths:
       - qdrant-rag_evidence
       - text-lane
       - visual-lane
-      - exact-chemistry-lane
     notes:
       - This path is separate from the OpenWebUI pgvector baseline.
       - "`rag_evidence` is the sole runtime evidence source."

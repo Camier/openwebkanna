@@ -38,6 +38,22 @@
         "mcp-server-time",
         "--local-timezone=Europe/Paris"
       ]
+    },
+    "gis": {
+      "command": "uvx",
+      "args": [
+        "gis-mcp"
+      ]
+    },
+    "qgis": {
+      "command": "/LAB/@creative/QGIS/vendor/qgis_mcp/.venv/bin/python",
+      "args": [
+        "src/qgis_mcp/qgis_mcp_server.py"
+      ],
+      "env": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin"
+      },
+      "workingDirectory": "/LAB/@creative/QGIS/vendor/qgis_mcp"
     }
   }
 }

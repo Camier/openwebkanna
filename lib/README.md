@@ -10,7 +10,6 @@ The `lib/` directory contains reusable shell script components that enforce cons
 - **Docker Compose abstraction** for version compatibility
 - **Environment file parsing** with security validation
 - **Common validation utilities** for paths and booleans
-- **Python plugin auditing** for OpenWebUI
 
 ---
 
@@ -370,75 +369,6 @@ API_BASE="$(normalize_base_url "$API_BASE")"
 
 ---
 
-### 6. audit_plugins.py - Python Plugin Auditor
-
-**File:** `lib/audit_plugins.py`
-**Purpose:** Audit OpenWebUI tool/function Python code stored in webui.db
-
-#### Overview
-Verifies that Python code stored in the OpenWebUI database:
-1. Compiles without syntax errors
-2. Can import required dependencies (optional)
-
-#### Functions
-
-##### `find_missing_imports(source, import_check=True)`
-Finds modules that are imported but not available in the Python environment.
-
-**Arguments:**
-- `source` (str): Python source code
-- `import_check` (bool): Whether to perform import checking
-
-**Returns:** List of tuples `(module_name, line_number)` for missing imports
-
-##### `audit_plugins(focus, import_check, db_path)`
-Audits plugin code from webui.db.
-
-**Arguments:**
-- `focus` (str): Scope - `"all"`, `"tool"`, or `"function"`
-- `import_check` (bool): Whether to check import dependencies
-- `db_path` (str): Path to webui.db file
-
-**Returns:** Tuple `(checked_count, issues_list)`
-
-#### CLI Usage
-
-```bash
-# Audit all plugins (tools and functions)
-python3 lib/audit_plugins.py all
-
-# Audit only tools
-python3 lib/audit_plugins.py tool
-
-# Audit without import checking
-python3 lib/audit_plugins.py all false
-
-# Use custom database path
-python3 lib/audit_plugins.py all --db-path /path/to/webui.db
-```
-
-#### Output Format
-
-```
-AUDIT_CHECKED=5
-AUDIT_ISSUES=1
-ISSUE|tool|123|My Tool|15|0|invalid syntax|def foo(
-```
-
-**Issue fields (pipe-separated):**
-1. `ISSUE` - Fixed prefix
-2. Table name (`tool` or `function`)
-3. Row ID
-4. Plugin name
-5. Line number
-6. Column offset
-7. Error message
-8. Code snippet
-
-**Exit codes:**
-- `0` - No issues found
-- `1` - One or more issues found
-
 ---
 
 ## Library Dependencies
@@ -453,8 +383,6 @@ docker-helpers.sh (standalone)
 env-loader.sh (standalone)
 
 validation.sh (standalone)
-
-audit_plugins.py (standalone, Python)
 ```
 
 **Important:** `print-utils.sh` automatically sources `colors.sh`. When using `print-utils.sh`, you don't need to source `colors.sh` separately.
@@ -846,11 +774,14 @@ command_exists "bash" && echo "bash exists"
 
 | Library | Use When | Key Functions |
 |---------|----------|---------------|
+| `init.sh` | Master aggregator — source this to get all libraries at once | `source lib/init.sh` |
+| `http-helpers.sh` | HTTP requests with retry and error handling | `http_get()`, `http_post()`, `http_put()` |
+| `openwebui-auth-helpers.sh` | OpenWebUI auth token resolution | `resolve_openwebui_api_token()` |
+| `test-openwebui-helpers.sh` | RAG/API integration test helpers | `wait_for_openwebui()`, `create_test_kb()` |
 | `colors.sh` | Direct color control | Color variables |
 | `print-utils.sh` | Formatted output | `print_*` functions |
 | `docker-helpers.sh` | Docker Compose ops | `docker_compose()` |
 | `env-loader.sh` | .env file loading | `load_env_defaults()` |
 | `validation.sh` | Input validation | `is_true()`, `command_exists()` |
-| `audit_plugins.py` | Plugin auditing | CLI tool for webui.db |
 
 For questions or issues, refer to existing scripts that use these libraries for working examples.

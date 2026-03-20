@@ -13,8 +13,8 @@ class RagCollectionConfig:
     collection_name: str = "rag_evidence"
     text_dense_dim: int = 1024
     vision_li_dim: int = 128
-    chem_dense_dim: int = 768
-    enable_chem_dense: bool = True
+    chem_dense_dim: int = 0
+    enable_chem_dense: bool = False
 
 
 def ensure_rag_collection(client: Any, cfg: RagCollectionConfig) -> None:
@@ -23,7 +23,6 @@ def ensure_rag_collection(client: Any, cfg: RagCollectionConfig) -> None:
     The collection hosts heterogeneous evidence points:
     - page
     - figure
-    - molecule
     """
 
     models = _models()
@@ -51,12 +50,7 @@ def ensure_payload_indexes(client: Any, collection_name: str) -> None:
         ("page_id", models.PayloadSchemaType.KEYWORD),
         ("page_number", models.PayloadSchemaType.INTEGER),
         ("figure_id", models.PayloadSchemaType.KEYWORD),
-        ("molecule_id", models.PayloadSchemaType.KEYWORD),
-        ("canonical_smiles", models.PayloadSchemaType.KEYWORD),
-        ("inchikey", models.PayloadSchemaType.KEYWORD),
-        ("review_status", models.PayloadSchemaType.KEYWORD),
         ("figure_kind", models.PayloadSchemaType.KEYWORD),
-        ("has_smiles", models.PayloadSchemaType.BOOL),
     ]
 
     for field_name, field_schema in index_fields:
@@ -107,11 +101,6 @@ def _expected_vectors(cfg: RagCollectionConfig, models: Any) -> dict[str, Any]:
             ),
         ),
     }
-    if cfg.enable_chem_dense:
-        vectors["chem_dense"] = models.VectorParams(
-            size=cfg.chem_dense_dim,
-            distance=models.Distance.COSINE,
-        )
     return vectors
 
 

@@ -73,8 +73,8 @@ def build_manifest(
     artifacts: dict[str, str],
     page_records: list[MaterializedRecord],
     figure_records: list[MaterializedRecord],
-    molecule_records: list[MaterializedRecord],
-    points_total: int,
+    molecule_records: list[MaterializedRecord] | None = None,
+    points_total: int | None = None,
     errors: list[str] | None = None,
     notes: list[str] | None = None,
     upsert_completed: bool = False,
@@ -83,11 +83,10 @@ def build_manifest(
 ) -> IngestionManifest:
     """Assemble a manifest from materialized record sets."""
 
-    molecules_total = len(molecule_records)
-    molecules_parsed = sum(
-        1 for record in molecule_records if record.payload.get("review_status") == "parsed"
-    )
-    molecules_invalid = molecules_total - molecules_parsed
+    if molecule_records is None:
+        molecule_records = []
+    if points_total is None:
+        points_total = len(page_records) + len(figure_records)
 
     return IngestionManifest(
         run_id=run_id,
@@ -96,19 +95,16 @@ def build_manifest(
         source_corpus_version=source_corpus_version,
         embedding_models=embedding_models,
         counts={
-            "documents": len({record.payload["document_id"] for record in page_records + figure_records + molecule_records}),
+            "documents": len({record.payload["document_id"] for record in page_records + figure_records}),
             "pages": len(page_records),
             "figures": len(figure_records),
-            "molecules_total": molecules_total,
-            "molecules_parsed": molecules_parsed,
-            "molecules_invalid": molecules_invalid,
             "points_total": points_total,
         },
         artifacts=artifacts,
         collection_schema={
             "name": collection_name,
-            "point_types": ["page", "figure", "molecule"],
-            "vectors": ["text_dense", "text_sparse", "vision_li", "chem_dense"],
+            "point_types": ["page", "figure"],
+            "vectors": ["text_dense", "text_sparse", "vision_li"],
         },
         status={
             "upsert_completed": upsert_completed,

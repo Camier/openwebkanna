@@ -51,6 +51,7 @@ __pycache__/
 .mypy_cache/
 .cache/
 .venvs/
+.venv-*/
 .tmpdocs_*/
 
 # Local-only helper surface
@@ -60,8 +61,13 @@ local/*
 local/entities/*
 !local/entities/README.md
 
+# Runtime state flags
+.qdrant-initialized
+
 # Large/local research data (keep repo lightweight)
 data/
+datalab_extraction/
+pdfs/
 prod_max/
 prod_max_multimodal/
 research/

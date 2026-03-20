@@ -75,7 +75,7 @@ get_timeout_cmd() {
 }
 
 run_python_audit() {
-    local audit_script="${SCRIPT_DIR}/lib/audit_plugins.py"
+    local audit_script="${SCRIPT_DIR}/scripts/admin/audit-openwebui-plugins.py"
     if [ ! -f "$audit_script" ]; then
         print_error "Audit script not found: $audit_script"
         return 1

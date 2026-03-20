@@ -54,7 +54,7 @@ Evidence:
 Supported local adjunct mode for the native multimodal retrieval API. This
 service is not part of the compose baseline; operators can run it separately on
 the host to query the `rag_evidence` Qdrant collection through one-collection
-text, visual, and exact-chemistry lanes.
+text and visual lanes.
 
 Evidence:
 
@@ -177,9 +177,9 @@ Evidence:
 
 ### Native multimodal retrieval API
 
-`client -> multimodal_retrieval_api -> qdrant(rag_evidence) -> text lane + visual lane + exact chemistry lane`
+`client -> multimodal_retrieval_api -> qdrant(rag_evidence) -> text lane + visual lane`
 
-This path is a supported host-native adjunct for multimodal/SMILES retrieval.
+This path is a supported host-native adjunct for multimodal retrieval.
 It is separate from the OpenWebUI pgvector baseline and uses `rag_evidence` as
 its sole runtime evidence source. Missing figure payloads are surfaced as
 runtime diagnostics instead of triggering local extraction fallbacks.

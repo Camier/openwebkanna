@@ -348,8 +348,11 @@ docker compose pull && docker compose up -d
 
 ### Security Scanning
 ```bash
-# Scan all images
-./scripts/audit-dependencies.sh
+# Scan all images with trivy
+trivy image --severity CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN \
+  pgvector/pgvector:pg16 \
+  ghcr.io/open-webui/open-webui:v0.8.10 \
+  quay.io/jupyter/scipy-notebook:2026-02-19
 
 # Scan single image
 trivy image ghcr.io/open-webui/open-webui:v0.8.10

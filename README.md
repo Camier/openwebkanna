@@ -153,7 +153,7 @@ Use these local documents instead of treating this file as a dump of every proce
 - [docs/runbooks/PREREQUISITES.md](docs/runbooks/PREREQUISITES.md): first-time setup and local prerequisites.
 - [docs/runbooks/OPERATIONS.md](docs/runbooks/OPERATIONS.md): day-to-day operations, retrieval, MCP setup, and maintenance flows.
 - [docs/runbooks/TROUBLESHOOTING.md](docs/runbooks/TROUBLESHOOTING.md): account, model, RAG, proxy, and web-search triage.
-- [scripts/README.md](scripts/README.md): utility/audit helpers such as `check-image-versions.sh` and `audit-dependencies.sh`.
+- [scripts/README.md](scripts/README.md): utility/audit helpers such as `check-image-versions.sh`.
 
 Advanced optional flows:
 
@@ -216,64 +216,10 @@ export MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE=/LAB/@thesis/wow/.env
 Build and use the CLIP-backed multimodal figure index (V2):
 
 ```bash
-./scripts/rag/build-multimodal-index.sh
+python3 scripts/rag/build_multimodal_index.py
 ./scripts/rag/render-multimodal-answer-v2.sh \
   --kb-name "Sceletium Research" \
   --query "What is the structure of mesembrine?"
-```
-
-Extract SMILES from `ChemicalBlock` images and persist `smiles_extracted.json` beside each extraction. The default path is now framework-first: `MolDetv2` detects molecule crops, then the selected OCSR backend parses each crop.
-
-```bash
-MOLGRAPHER_PYTHON_BIN=/path/to/molgrapher-env/bin/python \
-./scripts/rag/extract-chemical-smiles.sh \
-  --backend molgrapher \
-  --detector moldetv2-general \
-  --paper "Capps" \
-  --min-confidence 0.5 \
-  --overwrite
-```
-
-Use the local `smiles-extraction` Conda env to run the MolScribe replacement backend with the same detector stage:
-
-```bash
-MOLSCRIBE_PYTHON_BIN=/home/miko/.conda/envs/smiles-extraction/bin/python \
-./scripts/rag/extract-chemical-smiles.sh \
-  --backend molscribe \
-  --detector moldetv2-general \
-  --paper "Capps" \
-  --min-confidence 0.5 \
-  --overwrite
-```
-
-Compare both OCSR backends on the same `MolDetv2` crops and write `run.json`, `disagreements.json`, and `report.md` under `artifacts/chemical-ocsr-eval/`:
-
-```bash
-MOLGRAPHER_PYTHON_BIN=/LAB/@thesis/SMILES/tools/vendor/MolGrapher/.venv/bin/python \
-MOLSCRIBE_PYTHON_BIN=/home/miko/.conda/envs/smiles-extraction/bin/python \
-./scripts/eval/run-chemical-ocsr-eval.sh
-```
-
-Classify backend disagreements with RDKit-backed categories such as `substituent_drift`, `same_scaffold_variant`, and `placeholder_or_attachment`:
-
-```bash
-./scripts/eval/run-chemical-ocsr-disagreement-analysis.sh \
-  --out-dir artifacts/chemical-ocsr-eval/latest
-```
-
-Build a conservative fusion view over the same benchmark, splitting candidates into `consensus`, `complementary`, `review_required`, and `risky`, plus a per-paper `review_queue/` export and flat adjudication files (`review_queue.csv`, `review_queue.jsonl`):
-
-```bash
-./scripts/eval/run-chemical-ocsr-fusion-analysis.sh \
-  --out-dir artifacts/chemical-ocsr-eval/latest
-```
-
-Materialize `accepted` / `rejected` / `pending` exports from the adjudication queue. The script writes `adjudication_manual_*` outputs by default; pass `--apply-default-actions` to also materialize `adjudication_defaulted_*` outputs from the conservative defaults. Each run also emits an `accepted_catalog` export with compact ingestion-safe provenance (`effective_smiles`, backend match, page/block/crop, source image):
-
-```bash
-./scripts/eval/run-chemical-ocsr-adjudication-analysis.sh \
-  --out-dir artifacts/chemical-ocsr-eval/latest \
-  --apply-default-actions
 ```
 
 Direct retrieval config inspection:
@@ -292,8 +238,6 @@ Use the local maintenance surface, not this README, for detailed policy and edge
 
 ```bash
 ./scripts/check-image-versions.sh
-./scripts/audit-dependencies.sh
-./scripts/admin/backup-openwebui-db.sh
 ./update.sh
 ```
 

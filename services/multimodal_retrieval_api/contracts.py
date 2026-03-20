@@ -12,7 +12,7 @@ RetrievalMode = Literal[
     "hybrid_no_late",
     "hybrid_with_late",
 ]
-EvidenceType = Literal["page", "figure", "chemical_block", "molecule"]
+EvidenceType = Literal["page", "figure", "chemical_block"]
 EvidenceSource = Literal["qdrant", "local_extraction"]
 
 
@@ -67,7 +67,6 @@ class RetrievalEvidenceObject(BaseModel):
     source_pdf_sha256: str | None = None
     citation_key: str | None = None
     figure_id: str | None = None
-    molecule_id: str | None = None
     block_id: str | None = None
     block_type: str | None = None
     caption_text: str | None = None
@@ -75,11 +74,6 @@ class RetrievalEvidenceObject(BaseModel):
     image_asset_id: str | None = None
     image_path: str | None = None
     bbox: list[float] = Field(default_factory=list)
-    smiles: list[str] = Field(default_factory=list)
-    canonical_smiles: list[str] = Field(default_factory=list)
-    smiles_review_status: list[str] = Field(default_factory=list)
-    smiles_backends: list[str] = Field(default_factory=list)
-    smiles_confidences: list[float] = Field(default_factory=list)
     figure_kind: str | None = None
 
 
