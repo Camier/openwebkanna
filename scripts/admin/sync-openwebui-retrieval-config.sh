@@ -170,11 +170,11 @@ main() {
         | if $enable_hybrid_search != null then .ENABLE_RAG_HYBRID_SEARCH = $enable_hybrid_search else . end
         | if $enable_hybrid_search_enriched_texts != null then .ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = $enable_hybrid_search_enriched_texts else . end
         | if $bm25_weight != null then .RAG_HYBRID_BM25_WEIGHT = $bm25_weight else . end
-        | if $fusion_strategy != \"\" then .RETRIEVAL_FUSION_STRATEGY = $fusion_strategy else . end
+        | if $fusion_strategy != "" then .RETRIEVAL_FUSION_STRATEGY = $fusion_strategy else . end
         | if $fusion_k != null then .RETRIEVAL_FUSION_RRF_K = $fusion_k else . end
         | if $fusion_top_k != null then .RETRIEVAL_FUSION_TOP_K = $fusion_top_k else . end
-        | if $channel_weights != \"\" then .RETRIEVAL_CHANNEL_WEIGHTS = $channel_weights else . end
-        | if $extraction_engine != \"\" then .CONTENT_EXTRACTION_ENGINE = $extraction_engine else . end
+        | if $channel_weights != "" then .RETRIEVAL_CHANNEL_WEIGHTS = $channel_weights else . end
+        | if $extraction_engine != "" then .CONTENT_EXTRACTION_ENGINE = $extraction_engine else . end
         | if $pdf_extract_images != null then .PDF_EXTRACT_IMAGES = $pdf_extract_images else . end
         ' "$cfg_file")"
 

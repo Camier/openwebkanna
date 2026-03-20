@@ -86,6 +86,7 @@ run_python_audit() {
 
     local -a compose_exec_cmd=(
         "${COMPOSE_CMD[@]}"
+        --project-directory "$COMPOSE_PROJECT_DIR"
         -f "$COMPOSE_FILE"
         exec
         -T

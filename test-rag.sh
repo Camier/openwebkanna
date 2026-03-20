@@ -39,6 +39,7 @@ resolve_openai_base_root() {
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
 OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
 UPSTREAM_URL="${UPSTREAM_URL:-${OPENAI_BASE_ROOT:-http://localhost:4000}}"
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
@@ -155,6 +156,7 @@ Environment:
   BASELINE_REQUIRE_WEB_SEARCH=true|false  Fail if host and container SearXNG probes fail (default: false)
   BASELINE_EXPECT_SEARX_PORT=<port|empty> Optional SearXNG port hint (default: empty; empty disables port hint)
   BASELINE_STRICT_SEARXNG_PAYLOAD=true|false  Fail on HTTP 200 responses without a SearXNG-style results array (default: false)
+  MULTIMODAL_RETRIEVAL_API_URL=http://127.0.0.1:8510  Canonical multimodal retrieval service base URL
   RAG_MULTIMODAL_TEST_PDF=/abs/path.pdf   Optional PDF fixture for full-mode multimodal ingestion test
   RAG_MULTIMODAL_STRICT=true|false        Fail when multimodal prereqs/fixture are missing (default: false; auto-true in CI full mode)
 EOF
@@ -177,6 +179,31 @@ resolve_chat_model_from_openwebui() {
     fi
 
     [ -n "$CHAT_MODEL" ]
+}
+
+make_canonical_request_with_status() {
+    local method="$1"
+    local endpoint="$2"
+    local data="$3"
+    local response_var="$4"
+    local status_var="$5"
+    local url="${MULTIMODAL_RETRIEVAL_API_URL%/}${endpoint}"
+    local response_file=""
+    local response_body=""
+    local status_code=""
+    local -a curl_args=("-sS" "-m" "45" "-X" "$method" "$url" "-H" "Content-Type: application/json")
+
+    if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+        curl_args+=("-d" "$data")
+    fi
+
+    response_file="$(mktemp)"
+    status_code="$(curl "${curl_args[@]}" -o "$response_file" -w "%{http_code}" 2>/dev/null || true)"
+    response_body="$(cat "$response_file" 2>/dev/null || true)"
+    rm -f "$response_file"
+
+    printf -v "$response_var" "%s" "$response_body"
+    printf -v "$status_var" "%s" "$status_code"
 }
 
 ###############################################################################
@@ -268,6 +295,68 @@ test_openwebui_health() {
         test_fail "Health endpoint not responding"
         return 1
     fi
+}
+
+test_multimodal_retrieval_service_health() {
+    test_start "Canonical Retrieval Service Health"
+
+    local response http_code
+    make_canonical_request_with_status "GET" "/health" "" response http_code
+
+    if [ "$http_code" = "200" ] && echo "$response" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+        test_pass
+        return 0
+    fi
+
+    test_fail "Canonical service /health returned HTTP ${http_code:-000}"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
+test_multimodal_retrieval_service_ready() {
+    test_start "Canonical Retrieval Service Ready"
+
+    local response http_code
+    make_canonical_request_with_status "GET" "/ready" "" response http_code
+
+    if [ "$http_code" = "200" ] && echo "$response" | jq -e '.status == "ready"' >/dev/null 2>&1; then
+        test_pass
+        return 0
+    fi
+
+    test_fail "Canonical service /ready returned HTTP ${http_code:-000}"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
+test_multimodal_retrieval_query_smoke() {
+    test_start "Canonical Retrieval Query Smoke"
+
+    local data response http_code
+    data='{
+        "query": "sceletium alkaloids multimodal evidence",
+        "top_k": 3
+    }'
+    make_canonical_request_with_status "POST" "/api/v1/retrieve" "$data" response http_code
+
+    if [ "$http_code" = "200" ]; then
+        if echo "$response" | jq -e '
+            (.query | type == "string") and
+            (.top_k == 3) and
+            (.backend.service | type == "string") and
+            (.candidate_hits | type == "array") and
+            (.reranked_hits | type == "array") and
+            (.evidence_objects | type == "array") and
+            (.diagnostics | type == "object")
+        ' >/dev/null 2>&1; then
+            test_pass
+            return 0
+        fi
+    fi
+
+    test_fail "Canonical retrieval query returned HTTP ${http_code:-000} or invalid payload"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
 }
 
 test_indigo_service_health() {
@@ -395,7 +484,7 @@ test_indigo_tool_connectivity_from_openwebui() {
 }
 
 test_embedding_endpoint() {
-    test_start "Embedding Generation"
+    test_start "Legacy OpenWebUI Retrieval Embedding Configuration"
 
     local response
     response=$(curl -s -X GET \
@@ -423,7 +512,7 @@ test_embedding_endpoint() {
 }
 
 test_openwebui_baseline_settings() {
-    test_start "OpenWebUI Baseline RAG Settings"
+    test_start "Legacy OpenWebUI Retrieval Settings"
 
     local response
     response=$(curl -s -X GET \
@@ -996,7 +1085,7 @@ test_rag_query() {
 }
 
 test_vector_store() {
-    test_start "Vector Store Functionality"
+    test_start "Legacy OpenWebUI Retrieval Vector Store"
 
     TEST_VECTOR_COLLECTION="rag-test-collection-$(date +%s)"
     local expected_text="RAG systems combine retrieval and generation for better responses."
@@ -1057,7 +1146,7 @@ test_vector_store() {
 }
 
 test_retrieval() {
-    test_start "Document Retrieval"
+    test_start "Legacy OpenWebUI Retrieval Query"
 
     if [ -z "$TEST_KB_ID" ]; then
         test_fail "No knowledge base ID available for retrieval"
@@ -1158,6 +1247,7 @@ main() {
     print_header "RAG Deployment Testing Suite"
     RUN_CLEANUP_ON_EXIT=true
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
+    print_info "Canonical Retrieval URL: $MULTIMODAL_RETRIEVAL_API_URL"
     print_info "Upstream URL: $UPSTREAM_URL"
     print_info "Test mode: $TEST_MODE"
     [ -n "$API_KEY" ] && print_info "API Key: ${API_KEY:0:8}..."
@@ -1175,6 +1265,8 @@ main() {
     test_openwebui_accessible
     test_upstream_responding
     test_openwebui_health
+    test_multimodal_retrieval_service_health
+    test_multimodal_retrieval_service_ready
     test_indigo_service_health
     test_indigo_tool_registration
     test_indigo_tool_connectivity_from_openwebui
@@ -1184,7 +1276,10 @@ main() {
     test_upstream_models
 
     # Core functionality tests
-    print_section "Core RAG Functionality"
+    print_section "Canonical RAG Functionality"
+    test_multimodal_retrieval_query_smoke
+
+    print_section "Legacy OpenWebUI Retrieval Coverage"
     test_embedding_endpoint
     test_vector_store
     test_openwebui_baseline_settings
@@ -1197,12 +1292,12 @@ main() {
         test_multimodal_pdf_ingestion
 
         # Integration tests
-        print_section "Integration Tests"
+        print_section "Legacy / Migration Integration Tests"
         test_multimodal_rag_query
         test_rag_query
         test_retrieval
     else
-        print_section "Integration Tests"
+        print_section "Legacy / Migration Integration Tests"
         print_info "Skipping deep integration tests in baseline mode"
     fi
 

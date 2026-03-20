@@ -13,6 +13,30 @@ load_env_defaults
 cd "$SCRIPT_DIR"
 
 COMPOSE_FILE="config/compose/docker-compose.yml"
+MULTIMODAL_RETRIEVAL_API_STATE_DIR="${MULTIMODAL_RETRIEVAL_API_STATE_DIR:-${SCRIPT_DIR}/.codex-state/multimodal_retrieval_api}"
+MULTIMODAL_RETRIEVAL_API_PID_FILE="${MULTIMODAL_RETRIEVAL_API_PID_FILE:-${MULTIMODAL_RETRIEVAL_API_STATE_DIR}/multimodal_retrieval_api.pid}"
+MULTIMODAL_RETRIEVAL_API_LOG_FILE="${MULTIMODAL_RETRIEVAL_API_LOG_FILE:-${SCRIPT_DIR}/logs/multimodal_retrieval_api.log}"
+
+show_multimodal_retrieval_logs() {
+    local lines=${1:-50}
+    print_section "Canonical Retrieval Logs (last $lines lines)"
+    if [ -f "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" ]; then
+        tail -n "$lines" "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
+        return 0
+    fi
+    print_info "No canonical retrieval log file found at ${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
+}
+
+follow_multimodal_retrieval_logs() {
+    print_section "Canonical Retrieval Logs (live tail)"
+    print_info "Press Ctrl+C to stop following"
+    echo
+    if [ -f "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" ]; then
+        tail -n 50 -f "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
+        return 0
+    fi
+    print_info "No canonical retrieval log file found at ${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
+}
 
 show_docker_logs() {
     local service=${1:-}
@@ -72,6 +96,19 @@ show_log_summary() {
     else
         echo -e "${YELLOW}Docker Compose:${NC} Not running or compose file not found"
     fi
+
+    if [ -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" ]; then
+        local pid
+        pid="$(cat "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" 2>/dev/null || true)"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo -e "${GREEN}Canonical Retrieval:${NC} Running (pid=${pid})"
+            echo "  log: ${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
+        else
+            echo -e "${YELLOW}Canonical Retrieval:${NC} PID file present but process not running"
+        fi
+    else
+        echo -e "${YELLOW}Canonical Retrieval:${NC} No managed PID file"
+    fi
 }
 
 search_logs() {
@@ -86,6 +123,15 @@ search_logs() {
             docker_compose logs 2>/dev/null | grep -i "$pattern" || echo "No matches found in Docker logs"
         else
             echo "Docker is not running"
+        fi
+    fi
+
+    if [ "$service" = "multimodal_retrieval_api" ] || [ "$service" = "canonical" ] || [ "$service" = "all" ]; then
+        echo -e "\n${MAGENTA}--- Canonical Retrieval Logs ---${NC}"
+        if [ -f "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" ]; then
+            grep -i "$pattern" "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" || echo "No matches found in canonical retrieval logs"
+        else
+            echo "Canonical retrieval log file not found"
         fi
     fi
 
@@ -113,8 +159,10 @@ Options:
 Examples:
   ./logs.sh
   ./logs.sh openwebui
+  ./logs.sh multimodal_retrieval_api
   ./logs.sh --follow
   ./logs.sh --follow openwebui
+  ./logs.sh --follow multimodal_retrieval_api
   ./logs.sh --search error
 EOF
 }
@@ -171,6 +219,10 @@ main() {
     fi
 
     if [ "$follow" = true ]; then
+        if [ "$service" = "multimodal_retrieval_api" ] || [ "$service" = "canonical" ]; then
+            follow_multimodal_retrieval_logs
+            exit 0
+        fi
         if [ -n "$service" ]; then
             follow_docker_logs "$service"
         else
@@ -180,6 +232,10 @@ main() {
     fi
 
     if [ -n "$service" ]; then
+        if [ "$service" = "multimodal_retrieval_api" ] || [ "$service" = "canonical" ]; then
+            show_multimodal_retrieval_logs "$lines"
+            exit 0
+        fi
         show_docker_logs "$service" "$lines"
     else
         show_all_logs "$lines"

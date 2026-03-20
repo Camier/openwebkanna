@@ -16,6 +16,13 @@ cd "$SCRIPT_DIR"
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 COMPOSE_FILE="config/compose/docker-compose.yml"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
+MULTIMODAL_RETRIEVAL_API_HOST="${MULTIMODAL_RETRIEVAL_API_HOST:-127.0.0.1}"
+MULTIMODAL_RETRIEVAL_API_PORT="${MULTIMODAL_RETRIEVAL_API_PORT:-8510}"
+MULTIMODAL_RETRIEVAL_API_STARTUP_TIMEOUT_SECONDS="${MULTIMODAL_RETRIEVAL_API_STARTUP_TIMEOUT_SECONDS:-240}"
+MULTIMODAL_RETRIEVAL_API_STATE_DIR="${MULTIMODAL_RETRIEVAL_API_STATE_DIR:-${SCRIPT_DIR}/.codex-state/multimodal_retrieval_api}"
+MULTIMODAL_RETRIEVAL_API_PID_FILE="${MULTIMODAL_RETRIEVAL_API_PID_FILE:-${MULTIMODAL_RETRIEVAL_API_STATE_DIR}/multimodal_retrieval_api.pid}"
+MULTIMODAL_RETRIEVAL_API_LOG_FILE="${MULTIMODAL_RETRIEVAL_API_LOG_FILE:-${SCRIPT_DIR}/logs/multimodal_retrieval_api.log}"
 PLUGIN_AUDIT_ENABLED="${PLUGIN_AUDIT_ENABLED:-true}"
 PLUGIN_AUDIT_SCRIPT="${PLUGIN_AUDIT_SCRIPT:-./scripts/testing/audit-openwebui-plugins.sh}"
 PLUGIN_AUDIT_FOCUS="${PLUGIN_AUDIT_FOCUS:-all}"
@@ -91,6 +98,199 @@ validate_install_env() {
     fi
 
     print_success "Environment validation passed"
+}
+
+read_env_value_from_file() {
+    local path="$1"
+    local key="$2"
+    if [ -z "$path" ] || [ ! -f "$path" ]; then
+        return 1
+    fi
+
+    python3 - "$path" "$key" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+for raw_line in path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    if line.startswith("export "):
+        line = line[len("export ") :].strip()
+    current_key, separator, value = line.partition("=")
+    if not separator or current_key.strip() != key:
+        continue
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    print(value)
+    break
+PY
+}
+
+resolve_multimodal_retrieval_text_query_model_path() {
+    local text_query_model_path="${MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH:-}"
+    if [ -n "$text_query_model_path" ]; then
+        printf '%s\n' "$text_query_model_path"
+        return 0
+    fi
+
+    local compat_env_file="${MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE:-}"
+    if [ -n "$compat_env_file" ]; then
+        read_env_value_from_file "$compat_env_file" "NEMOTRON_MODEL_PATH"
+        return 0
+    fi
+
+    return 0
+}
+
+ensure_multimodal_retrieval_runtime_config() {
+    local text_query_model_path
+    text_query_model_path="$(resolve_multimodal_retrieval_text_query_model_path)"
+
+    if [ -z "$text_query_model_path" ]; then
+        print_error "Canonical retrieval startup requires MULTIMODAL_RETRIEVAL_API_TEXT_QUERY_MODEL_PATH or MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE with NEMOTRON_MODEL_PATH."
+        exit 1
+    fi
+
+    if [ ! -e "$text_query_model_path" ]; then
+        print_error "Canonical retrieval text query model path does not exist: $text_query_model_path"
+        exit 1
+    fi
+
+    if [ -n "${MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE:-}" ] && [ ! -f "${MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE}" ]; then
+        print_error "MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE does not exist: ${MULTIMODAL_RETRIEVAL_API_COMPAT_ENV_FILE}"
+        exit 1
+    fi
+
+    mkdir -p "${MULTIMODAL_RETRIEVAL_API_STATE_DIR}" "$(dirname "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}")"
+}
+
+multimodal_retrieval_health_ok() {
+    local base_url="${MULTIMODAL_RETRIEVAL_API_URL%/}"
+    local health_response
+    health_response="$(curl -sS -m 5 "${base_url}/health" 2>/dev/null || true)"
+    echo "$health_response" | jq -e '.status == "ok"' >/dev/null 2>&1
+}
+
+multimodal_retrieval_ready_ok() {
+    local base_url="${MULTIMODAL_RETRIEVAL_API_URL%/}"
+    local ready_payload
+    ready_payload="$(mktemp)"
+    local ready_http
+    ready_http="$(curl -sS -m 8 -o "$ready_payload" -w "%{http_code}" "${base_url}/ready" 2>/dev/null || true)"
+    if [ "$ready_http" = "200" ] && jq -e '.status == "ready"' "$ready_payload" >/dev/null 2>&1; then
+        rm -f "$ready_payload"
+        return 0
+    fi
+    rm -f "$ready_payload"
+    return 1
+}
+
+stop_managed_multimodal_retrieval_process() {
+    if [ ! -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" ]; then
+        return 0
+    fi
+
+    local pid
+    pid="$(cat "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" 2>/dev/null || true)"
+    if [ -z "$pid" ]; then
+        rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+        return 0
+    fi
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+        return 0
+    fi
+
+    print_info "Stopping managed canonical retrieval process (pid=${pid})"
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+            return 0
+        fi
+        sleep 1
+    done
+
+    print_warning "Canonical retrieval process did not exit cleanly; sending SIGKILL"
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+}
+
+fail_if_unmanaged_multimodal_retrieval_listener() {
+    if multimodal_retrieval_ready_ok; then
+        print_error "Canonical retrieval endpoint ${MULTIMODAL_RETRIEVAL_API_URL} is already serving /ready from an unmanaged process. Stop that process or set MULTIMODAL_RETRIEVAL_API_URL to the intended endpoint before deploy."
+        exit 1
+    fi
+
+    if multimodal_retrieval_health_ok; then
+        print_error "Canonical retrieval endpoint ${MULTIMODAL_RETRIEVAL_API_URL} is already serving /health from an unmanaged process. Stop that process or set MULTIMODAL_RETRIEVAL_API_URL to the intended endpoint before deploy."
+        exit 1
+    fi
+}
+
+launch_multimodal_retrieval_api() {
+    ensure_multimodal_retrieval_runtime_config
+
+    stop_managed_multimodal_retrieval_process
+    fail_if_unmanaged_multimodal_retrieval_listener
+
+    print_step "Starting canonical retrieval service"
+    setsid env \
+        PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 -m uvicorn \
+        --app-dir "$SCRIPT_DIR" \
+        services.multimodal_retrieval_api.app:app \
+        --host "${MULTIMODAL_RETRIEVAL_API_HOST}" \
+        --port "${MULTIMODAL_RETRIEVAL_API_PORT}" \
+        </dev/null >>"${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" 2>&1 &
+    local pid=$!
+    printf '%s\n' "$pid" >"${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+    disown "$pid" 2>/dev/null || true
+    print_info "Canonical retrieval log: ${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
+}
+
+wait_for_multimodal_retrieval_api() {
+    local base_url="${MULTIMODAL_RETRIEVAL_API_URL%/}"
+    local attempts
+    attempts=$((MULTIMODAL_RETRIEVAL_API_STARTUP_TIMEOUT_SECONDS / 2))
+    if [ "$attempts" -lt 1 ]; then
+        attempts=1
+    fi
+
+    print_step "Waiting for canonical retrieval service to be ready"
+    for _ in $(seq 1 "$attempts"); do
+        if multimodal_retrieval_ready_ok; then
+            print_success "Canonical retrieval service is ready"
+            return 0
+        fi
+
+        if [ -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" ]; then
+            local pid
+            pid="$(cat "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" 2>/dev/null || true)"
+            if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+                print_error "Canonical retrieval service exited during startup. Recent log output:"
+                tail -n 40 "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" 2>/dev/null || true
+                rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+                return 1
+            fi
+        fi
+
+        echo -n "."
+        sleep 2
+    done
+
+    echo
+    print_error "Canonical retrieval service did not become ready at ${base_url}/ready within ${MULTIMODAL_RETRIEVAL_API_STARTUP_TIMEOUT_SECONDS}s"
+    if [ -f "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" ]; then
+        print_info "Recent canonical retrieval log output:"
+        tail -n 40 "${MULTIMODAL_RETRIEVAL_API_LOG_FILE}" 2>/dev/null || true
+    fi
+    return 1
 }
 
 check_docker_runtime() {
@@ -285,6 +485,7 @@ show_access_info() {
     echo
     echo -e "  ${CYAN}OpenWebUI:${NC}  http://localhost:${OPENWEBUI_PORT}"
     echo -e "  ${CYAN}MCPO:${NC}       ${MCPO_BASE_URL}"
+    echo -e "  ${CYAN}Canonical RAG:${NC} ${MULTIMODAL_RETRIEVAL_API_URL}"
     if is_true "${INDIGO_SERVICE_ENABLED:-false}"; then
         echo -e "  ${CYAN}Indigo:${NC}     ${indigo_url}"
         if is_true "${INDIGO_TOOL_AUTOCONFIGURE:-true}"; then
@@ -295,6 +496,7 @@ show_access_info() {
     echo -e "  ${YELLOW}Logs:${NC}    ./logs.sh"
     echo -e "  ${YELLOW}Status:${NC}  ./status.sh"
     echo -e "  ${YELLOW}Stop:${NC}    ./cleanup.sh"
+    echo -e "  ${YELLOW}Canonical log:${NC} ${MULTIMODAL_RETRIEVAL_API_LOG_FILE}"
     echo
 }
 
@@ -344,6 +546,8 @@ main() {
     init_compose_cmd || exit 1
     check_docker_runtime
     check_command "curl"
+    check_command "jq"
+    check_command "python3"
     validate_install_env
     print_success "Prerequisites met"
 
@@ -352,6 +556,8 @@ main() {
     else
         print_info "Skipping docker compose (--skip-docker)"
     fi
+
+    launch_multimodal_retrieval_api
 
     local openwebui_ready=false
     if wait_for_openwebui; then
@@ -366,6 +572,7 @@ main() {
 
     run_plugin_audit_gate || exit 1
     configure_indigo_tool || exit 1
+    wait_for_multimodal_retrieval_api || exit 1
 
     if [ "$SHOW_LOGS" = true ]; then
         print_step "Recent logs"

@@ -14,6 +14,69 @@ load_env_defaults
 
 COMPOSE_FILE="config/compose/docker-compose.yml"
 OPENWEBUI_IMAGE="${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:v0.8.10}"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
+MULTIMODAL_RETRIEVAL_API_STATE_DIR="${MULTIMODAL_RETRIEVAL_API_STATE_DIR:-${SCRIPT_DIR}/.codex-state/multimodal_retrieval_api}"
+MULTIMODAL_RETRIEVAL_API_PID_FILE="${MULTIMODAL_RETRIEVAL_API_PID_FILE:-${MULTIMODAL_RETRIEVAL_API_STATE_DIR}/multimodal_retrieval_api.pid}"
+
+multimodal_retrieval_health_ok() {
+    local base_url="${MULTIMODAL_RETRIEVAL_API_URL%/}"
+    local health_response
+    health_response="$(curl -sS -m 5 "${base_url}/health" 2>/dev/null || true)"
+    echo "$health_response" | jq -e '.status == "ok"' >/dev/null 2>&1
+}
+
+warn_if_unmanaged_multimodal_retrieval_listener() {
+    if multimodal_retrieval_health_ok; then
+        print_warning "Canonical retrieval endpoint ${MULTIMODAL_RETRIEVAL_API_URL} is still responding after cleanup. An unmanaged process is using that endpoint and must be stopped separately."
+    fi
+}
+
+stop_multimodal_retrieval_api() {
+    print_step "Stopping canonical retrieval service..."
+
+    if [ ! -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" ]; then
+        print_info "No managed canonical retrieval PID file found"
+        warn_if_unmanaged_multimodal_retrieval_listener
+        return 0
+    fi
+
+    local pid
+    pid="$(cat "${MULTIMODAL_RETRIEVAL_API_PID_FILE}" 2>/dev/null || true)"
+    if [ -z "$pid" ]; then
+        rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+        print_info "Canonical retrieval PID file was empty"
+        warn_if_unmanaged_multimodal_retrieval_listener
+        return 0
+    fi
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+        print_info "Canonical retrieval process is already stopped"
+        warn_if_unmanaged_multimodal_retrieval_listener
+        return 0
+    fi
+
+    if kill "$pid" 2>/dev/null; then
+        for _ in $(seq 1 20); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+                print_success "Canonical retrieval service stopped"
+                warn_if_unmanaged_multimodal_retrieval_listener
+                return 0
+            fi
+            sleep 1
+        done
+        kill -9 "$pid" 2>/dev/null || true
+        rm -f "${MULTIMODAL_RETRIEVAL_API_PID_FILE}"
+        print_warning "Canonical retrieval service required SIGKILL"
+        warn_if_unmanaged_multimodal_retrieval_listener
+        return 0
+    fi
+
+    print_warning "Unable to stop canonical retrieval process pid=${pid}"
+    warn_if_unmanaged_multimodal_retrieval_listener
+    return 0
+}
 
 confirm_action() {
     local message=$1
@@ -136,6 +199,7 @@ show_cleanup_summary() {
     echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════${NC}\n"
     echo -e "${BOLD}Services Stopped:${NC}"
     echo -e "  ${CYAN}Docker Compose:${NC} Stopped"
+    echo -e "  ${CYAN}Canonical RAG:${NC} Stopped (managed pid, if present)"
     echo -e "\n${BOLD}To restart services:${NC}"
     echo -e "  ${YELLOW}./deploy.sh${NC}"
     echo -e "\n${GREEN}${BOLD}═══════════════════════════════════════════════════════════${NC}\n"
@@ -207,6 +271,7 @@ main() {
         exit 0
     fi
 
+    stop_multimodal_retrieval_api
     stop_docker_compose
     [ "$CLEAN_DOCKER" = true ] && cleanup_docker
     [ "$CLEAN_LOGS" = true ] && cleanup_logs

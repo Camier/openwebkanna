@@ -14,6 +14,7 @@ cd "$SCRIPT_DIR"
 OPENWEBUI_PORT="${WEBUI_PORT:-3000}"
 # shellcheck disable=SC2034
 COMPOSE_FILE="config/compose/docker-compose.yml"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
 MCPO_BASE_URL="${MCPO_BASE_URL:-http://127.0.0.1:${MCPO_PORT:-8000}}"
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 OPEN_TERMINAL_ENABLED="${OPEN_TERMINAL_ENABLED:-false}"
@@ -258,6 +259,34 @@ check_mcpo() {
     return 1
 }
 
+check_multimodal_retrieval_api() {
+    print_section "Canonical Retrieval Service"
+
+    local base_url="${MULTIMODAL_RETRIEVAL_API_URL%/}"
+    local health_response ready_response ready_http
+
+    health_response="$(curl -sS -m 5 "${base_url}/health" 2>/dev/null || true)"
+    if ! echo "$health_response" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+        print_svc "multimodal_retrieval_api" "stopped" "(health probe failed at ${base_url}/health)"
+        return 1
+    fi
+
+    ready_response="$(mktemp)"
+    ready_http="$(curl -sS -m 8 -o "$ready_response" -w "%{http_code}" "${base_url}/ready" 2>/dev/null || true)"
+    if [ "$ready_http" = "200" ] && jq -e '.status == "ready"' "$ready_response" >/dev/null 2>&1; then
+        print_svc "multimodal_retrieval_api" "running" "(${base_url})"
+        rm -f "$ready_response"
+        return 0
+    fi
+
+    print_svc "multimodal_retrieval_api" "warning" "(${base_url} | /ready HTTP ${ready_http:-000})"
+    if [ -s "$ready_response" ]; then
+        print_info "Ready payload: $(tr '\n' ' ' <"$ready_response" | head -c 220)"
+    fi
+    rm -f "$ready_response"
+    return 1
+}
+
 check_open_terminal() {
     print_section "Open Terminal (optional sidecar)"
 
@@ -368,6 +397,7 @@ PY
 
 check_rag_profile() {
     print_section "RAG Profile"
+    print_info "MULTIMODAL_RETRIEVAL_API_URL=${MULTIMODAL_RETRIEVAL_API_URL}"
     print_info "RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-<unset>}"
     print_info "RAG_TOP_K=${RAG_TOP_K:-<unset>} | CHUNK_SIZE=${CHUNK_SIZE:-<unset>}"
     print_info "VECTOR_DB=${VECTOR_DB:-<unset>}"
@@ -445,6 +475,25 @@ print_summary() {
     else
         echo -e "  ${YELLOW}◐${NC} MCPO:       ${YELLOW}Not reachable${NC}"
     fi
+
+    # Canonical retrieval service
+    local canonical_url="${MULTIMODAL_RETRIEVAL_API_URL%/}"
+    local canonical_health canonical_ready_http canonical_ready_file
+    canonical_health="$(curl -sS -m 5 "${canonical_url}/health" 2>/dev/null || true)"
+    canonical_ready_file="$(mktemp)"
+    canonical_ready_http="$(curl -sS -m 8 -o "$canonical_ready_file" -w "%{http_code}" "${canonical_url}/ready" 2>/dev/null || true)"
+    if echo "$canonical_health" | jq -e '.status == "ok"' >/dev/null 2>&1 &&
+        [ "$canonical_ready_http" = "200" ] &&
+        jq -e '.status == "ready"' "$canonical_ready_file" >/dev/null 2>&1; then
+        echo -e "  ${GREEN}●${NC} CanonicalRAG:${GREEN} OK${NC}"
+    elif echo "$canonical_health" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}◐${NC} CanonicalRAG:${YELLOW} Health OK / Ready degraded${NC}"
+        all_good=false
+    else
+        echo -e "  ${RED}○${NC} CanonicalRAG:${RED} Not reachable${NC}"
+        all_good=false
+    fi
+    rm -f "$canonical_ready_file"
 
     # Open Terminal (optional)
     if is_true "$OPEN_TERMINAL_ENABLED"; then
@@ -529,6 +578,7 @@ main() {
             check_openwebui || true
             check_litellm || true
             check_mcpo || true
+            check_multimodal_retrieval_api || true
             check_open_terminal || true
             check_indigo_service || true
             check_indigo_tool_registration || true

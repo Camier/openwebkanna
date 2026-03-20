@@ -34,6 +34,7 @@ resolve_openai_base_root() {
 
 # Configuration
 OPENWEBUI_URL="${OPENWEBUI_URL:-http://localhost:${WEBUI_PORT:-3000}}"
+MULTIMODAL_RETRIEVAL_API_URL="${MULTIMODAL_RETRIEVAL_API_URL:-http://127.0.0.1:8510}"
 OPENAI_BASE_ROOT="$(resolve_openai_base_root)"
 UPSTREAM_URL="${UPSTREAM_URL:-${OPENAI_BASE_ROOT:-http://localhost:4000}}"
 API_KEY="${OPENWEBUI_API_KEY:-${API_KEY:-}}"
@@ -161,6 +162,31 @@ make_request_with_status() {
     printf -v "$status_var" "%s" "$status_code"
 }
 
+make_canonical_request_with_status() {
+    local method="$1"
+    local endpoint="$2"
+    local data="$3"
+    local response_var="$4"
+    local status_var="$5"
+    local url="${MULTIMODAL_RETRIEVAL_API_URL%/}${endpoint}"
+    local response_file=""
+    local response_body=""
+    local status_code=""
+    local -a curl_args=("-sS" "-m" "45" "-X" "$method" "$url" "-H" "Content-Type: application/json")
+
+    if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+        curl_args+=("-d" "$data")
+    fi
+
+    response_file="$(mktemp)"
+    status_code="$(curl "${curl_args[@]}" -o "$response_file" -w "%{http_code}" 2>/dev/null || true)"
+    response_body="$(cat "$response_file" 2>/dev/null || true)"
+    rm -f "$response_file"
+
+    printf -v "$response_var" "%s" "$response_body"
+    printf -v "$status_var" "%s" "$status_code"
+}
+
 show_help() {
     cat <<'EOF'
 Usage: ./test-api.sh [OPTIONS]
@@ -214,28 +240,102 @@ test_root_endpoint() {
     fi
 }
 
+test_canonical_health_check() {
+    test_start "Canonical Retrieval Health Check"
+
+    local response http_code
+    make_canonical_request_with_status "GET" "/health" "" response http_code
+    save_response "canonical_health_check" "$response"
+
+    if [ "$http_code" = "200" ] && echo "$response" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+        test_pass
+        return 0
+    fi
+
+    test_fail "Canonical /health returned HTTP ${http_code:-000}"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
+test_canonical_ready_check() {
+    test_start "Canonical Retrieval Ready Check"
+
+    local response http_code
+    make_canonical_request_with_status "GET" "/ready" "" response http_code
+    save_response "canonical_ready_check" "$response"
+
+    if [ "$http_code" = "200" ] && echo "$response" | jq -e '.status == "ready"' >/dev/null 2>&1; then
+        test_pass
+        return 0
+    fi
+
+    test_fail "Canonical /ready returned HTTP ${http_code:-000}"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
+test_canonical_retrieve() {
+    test_start "Canonical Retrieval Query"
+
+    local data response http_code
+    data='{
+        "query": "sceletium alkaloids multimodal evidence",
+        "top_k": 3
+    }'
+    make_canonical_request_with_status "POST" "/api/v1/retrieve" "$data" response http_code
+    save_response "canonical_retrieve" "$response"
+
+    if [ "$http_code" = "200" ]; then
+        if echo "$response" | jq -e '
+            (.query | type == "string") and
+            (.top_k == 3) and
+            (.backend | type == "object") and
+            (.candidate_hits | type == "array") and
+            (.reranked_hits | type == "array") and
+            (.evidence_objects | type == "array")
+        ' >/dev/null 2>&1; then
+            test_pass
+            return 0
+        fi
+    fi
+
+    test_fail "Canonical retrieve returned HTTP ${http_code:-000} or invalid payload"
+    [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+    return 1
+}
+
 # Authentication Tests
 test_api_key_validation() {
     test_start "API Key Validation"
 
     local response
     local http_code
-    make_request_with_status "GET" "/api/auth/status" "" response http_code
+    make_request_with_status "GET" "/api/v1/auths/" "" response http_code
     save_response "api_key_validation" "$response"
 
     if [ "$http_code" = "200" ]; then
-        test_pass
-        return 0
+        if echo "$response" | jq -e '
+            type == "object" and
+            (.id | type == "string") and
+            (.email | type == "string") and
+            (.token | type == "string")
+        ' >/dev/null 2>&1; then
+            test_pass
+            return 0
+        fi
+        test_fail "Auth profile returned HTTP 200 but not the expected JSON payload"
+        [ "$VERBOSE" = "true" ] && print_info "Response: $response"
+        return 1
     elif [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
         if is_true "${WEBUI_AUTH:-false}"; then
             test_fail "Authentication is enabled but API key is unauthorized (HTTP $http_code)"
             return 1
         fi
-        print_info "API key validation skipped (auth appears disabled; endpoint returned HTTP $http_code)"
+        print_info "API key validation skipped (auth appears disabled; profile endpoint returned HTTP $http_code)"
         test_pass
         return 0
     else
-        test_fail "Auth status endpoint returned HTTP ${http_code:-000}"
+        test_fail "Auth profile endpoint returned HTTP ${http_code:-000}"
         [ "$VERBOSE" = "true" ] && print_info "Response: $response"
         return 1
     fi
@@ -572,7 +672,7 @@ test_chat_completion_streaming() {
 
 # Embedding Tests
 test_embedding_single() {
-    test_start "Embedding Generation (Single)"
+    test_start "Legacy OpenWebUI Retrieval Embedding Configuration"
 
     local response
     response=$(make_request "GET" "/api/v1/retrieval/" "" "" 2>&1)
@@ -591,7 +691,7 @@ test_embedding_single() {
 }
 
 test_embedding_batch() {
-    test_start "Embedding Generation (Batch)"
+    test_start "Legacy OpenWebUI Retrieval Text Processing"
 
     local collection_name
     collection_name="api-test-collection-$(date +%s)"
@@ -617,7 +717,7 @@ test_embedding_batch() {
 
 # Vector Database Tests
 test_vector_store_status() {
-    test_start "Vector Store Status"
+    test_start "Legacy OpenWebUI Retrieval Status"
 
     local response
     response=$(make_request "GET" "/api/v1/retrieval/" "" "" 2>&1)
@@ -633,7 +733,7 @@ test_vector_store_status() {
 }
 
 test_vector_search() {
-    test_start "Vector Search"
+    test_start "Legacy OpenWebUI Retrieval Query"
 
     if [ ${#CREATED_KNOWLEDGE_BASES[@]} -eq 0 ]; then
         print_info "Skipping - no knowledge base available"
@@ -757,6 +857,7 @@ main() {
     RUN_CLEANUP_ON_EXIT=true
     ensure_openwebui_api_key
     print_info "OpenWebUI URL: $OPENWEBUI_URL"
+    print_info "Canonical Retrieval URL: $MULTIMODAL_RETRIEVAL_API_URL"
     print_info "Upstream URL: $UPSTREAM_URL"
     print_info "Test mode: $TEST_MODE"
     if [ -n "$API_KEY" ]; then
@@ -771,6 +872,8 @@ main() {
     test_repo_real_integration_guard
     test_health_check
     test_root_endpoint
+    test_canonical_health_check
+    test_canonical_ready_check
     test_api_key_validation
 
     # Models
@@ -780,6 +883,7 @@ main() {
 
     if [ "$TEST_MODE" = "baseline" ]; then
         print_section "Baseline API Core"
+        test_canonical_retrieve
         test_chat_completion_simple
         test_embedding_single
         test_vector_store_status
@@ -802,12 +906,14 @@ main() {
         test_chat_completion_streaming
 
         # Embeddings
-        print_section "Embeddings API"
+        print_section "Canonical Retrieval API"
+        test_canonical_retrieve
+
+        print_section "Legacy OpenWebUI Retrieval API"
         test_embedding_single
         test_embedding_batch
 
         # Vector Database
-        print_section "Vector Database API"
         test_vector_store_status
         test_vector_search
 

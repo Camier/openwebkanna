@@ -37,6 +37,7 @@ Thumbs.db
 
 # IDE / AI tool state
 .claude-dev-helper/
+.codex-state/
 .opencode/
 .plugin-config/
 .state/
